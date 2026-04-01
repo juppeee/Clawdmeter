@@ -4,8 +4,10 @@
 #include "display_cfg.h"
 #include "data.h"
 #include "ui.h"
+#include "hid.h"
+#include "touch.h"
 
-static LGFX lcd;
+LGFX lcd;  // global - used by touch.cpp
 static UsageData usage = {};
 
 // LVGL draw buffers
@@ -105,6 +107,12 @@ void setup() {
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, my_touch_cb);
 
+    // Init USB HID keyboard
+    hid_init();
+
+    // Init touch gesture detection
+    touch_init();
+
     // Build dashboard
     ui_init();
 
@@ -114,6 +122,7 @@ void setup() {
 void loop() {
     lv_timer_handler();
     ui_tick_anim();
+    touch_tick();
 
     if (read_serial_line()) {
         if (parse_json(serial_buf, &usage)) {
