@@ -91,6 +91,42 @@ lv_font_conv --font assets/DejaVuSansMono.ttf \
 
 Without these patches, fonts compile but render as invisible.
 
+## Converting Lucide icons
+
+The controller screen uses [Lucide](https://lucide.dev) icons (the same icon set Anthropic uses). Icons are SVGs converted to RGB565 C arrays for LVGL.
+
+1. Get Lucide SVGs from [github.com/lucide-icons/lucide](https://github.com/lucide-icons/lucide) (`icons/` directory)
+
+2. Convert SVG to PNG at desired size:
+```bash
+inkscape icons/delete.svg --export-width=32 --export-height=32 \
+  --export-filename=assets/icon_delete.png --export-background-opacity=0
+```
+
+3. Convert PNG to RGB565 C array:
+```python
+from PIL import Image
+
+img = Image.open("assets/icon_delete.png").convert("RGBA")
+bg = (0x1f, 0x1f, 0x1e)  # panel background color
+fg = (0xb0, 0xae, 0xa5)  # icon stroke color
+
+pixels = []
+for y in range(img.height):
+    for x in range(img.width):
+        r, g, b, a = img.getpixel((x, y))
+        alpha = a / 255.0
+        out_r = int(fg[0] * alpha + bg[0] * (1 - alpha))
+        out_g = int(fg[1] * alpha + bg[1] * (1 - alpha))
+        out_b = int(fg[2] * alpha + bg[2] * (1 - alpha))
+        rgb565 = ((out_r >> 3) << 11) | ((out_g >> 2) << 5) | (out_b >> 3)
+        pixels.append(rgb565)
+
+# Write as C array to firmware/src/icons.h
+```
+
+Current icons: `delete`, `arrow-left`, `arrow-right`, `circle-arrow-out-up-left` (escape), `hand` (gestures).
+
 ## Licensing gray area warning
 
 The software in this repository uses and adheres to the Anthropic brand guidelines and uses the same proprietary fonts that Anthropic has a licnese for but this software uses without permission as well as using assets from Anthropic such as the copyrighted Claude Code mascot head logo so even though the code in this repo is non-proprietary I will not license it myself under a copyleft license since this repo includes proprietary fonts and copyrighted assets. Please be aware of this if you fork or copy the code from this repo. **You have been warned!**

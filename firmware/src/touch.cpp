@@ -1,49 +1,65 @@
 #include "touch.h"
+#include "ui.h"
 #include <Arduino.h>
 #include "display_cfg.h"
 
-// Thresholds (easy to tune)
-#define SWIPE_MIN_PX       50   // minimum distance to count as swipe
-#define SWIPE_MAX_CROSS_PX 30   // max perpendicular movement for a clean swipe
-#define HOLD_TIME_MS       500  // time before touch becomes a hold
-#define DOUBLE_TAP_MS      300  // max gap between taps for double-tap
-#define DOUBLE_TAP_PX      20   // max distance between taps
-#define LOGO_X_MAX         60   // logo hit region (upper-left)
+// Thresholds
+#define SWIPE_MIN_PX       50
+#define SWIPE_MAX_CROSS_PX 30
+#define HOLD_TIME_MS       500
+#define LOGO_HOLD_TIME_MS  800  // longer hold to toggle screens
+#define TAP_MAX_MOVE_PX    15
+#define LOGO_X_MAX         60
 #define LOGO_Y_MAX         60
 
-extern LGFX lcd;  // from main.cpp
+extern LGFX lcd;
 
 enum touch_state_t {
     TS_IDLE,
-    TS_DOWN,      // finger just touched, waiting to classify
-    TS_HOLDING,   // classified as hold, space key is pressed
-    TS_SWIPING,   // movement exceeded threshold, will be swipe on release
+    TS_DOWN,
+    TS_HOLDING,
+    TS_SWIPING,
+    TS_LOGO_HOLD,  // holding the logo to toggle screens
 };
 
 static touch_state_t state = TS_IDLE;
 static uint16_t start_x, start_y;
-static uint16_t last_x, last_y;  // track last known position for swipe classification
+static uint16_t last_x, last_y;
 static uint32_t down_time;
-
-// Double-tap tracking
-static uint32_t last_tap_time = 0;
-static uint16_t last_tap_x, last_tap_y;
 
 static gesture_t classify_swipe(int dx, int dy) {
     int ax = abs(dx);
     int ay = abs(dy);
-
-    if (ax > ay && ax >= SWIPE_MIN_PX && ay <= SWIPE_MAX_CROSS_PX) {
+    if (ax > ay && ax >= SWIPE_MIN_PX && ay <= SWIPE_MAX_CROSS_PX)
         return dx > 0 ? GESTURE_SWIPE_RIGHT : GESTURE_SWIPE_LEFT;
-    }
-    if (ay > ax && ay >= SWIPE_MIN_PX && ax <= SWIPE_MAX_CROSS_PX) {
+    if (ay > ax && ay >= SWIPE_MIN_PX && ax <= SWIPE_MAX_CROSS_PX)
         return dy > 0 ? GESTURE_SWIPE_DOWN : GESTURE_SWIPE_UP;
+    return GESTURE_NONE;
+}
+
+static bool in_logo(uint16_t x, uint16_t y) {
+    return x < LOGO_X_MAX && y < LOGO_Y_MAX;
+}
+
+// Detect which controller zone was tapped
+static gesture_t classify_zone_tap(uint16_t x, uint16_t y) {
+    // Logo tap = ESC
+    // Left column: ESC top (y 56-156), < bottom (y 166-266)
+    if (x < 108) {
+        if (y >= 56 && y < 156) return GESTURE_TAP_ESCAPE;
+        if (y >= 166 && y < 266) return GESTURE_TAP_ARROW_LEFT;
+    }
+    // Right column: DEL top, > bottom
+    if (x > 372) {
+        if (y >= 56 && y < 156) return GESTURE_TAP_BACKSPACE;
+        if (y >= 166 && y < 266) return GESTURE_TAP_ARROW_RIGHT;
     }
     return GESTURE_NONE;
 }
 
-static bool in_logo_region(uint16_t x, uint16_t y) {
-    return x < LOGO_X_MAX && y < LOGO_Y_MAX;
+// Check if point is in a tap-only zone (should not trigger hold-for-space)
+static bool is_in_tap_zone(uint16_t x, uint16_t y) {
+    return classify_zone_tap(x, y) != GESTURE_NONE;
 }
 
 void touch_init(void) {
@@ -60,6 +76,8 @@ void touch_tick(void) {
         if (touching) {
             start_x = x;
             start_y = y;
+            last_x = x;
+            last_y = y;
             down_time = now;
             state = TS_DOWN;
         }
@@ -67,17 +85,19 @@ void touch_tick(void) {
 
     case TS_DOWN:
         if (!touching) {
-            // Released quickly - this is a tap (check for double-tap on logo)
-            if (in_logo_region(start_x, start_y) &&
-                (now - last_tap_time) < DOUBLE_TAP_MS &&
-                abs((int)start_x - (int)last_tap_x) < DOUBLE_TAP_PX &&
-                abs((int)start_y - (int)last_tap_y) < DOUBLE_TAP_PX) {
-                hid_on_gesture(GESTURE_DOUBLE_TAP_LOGO);
-                last_tap_time = 0;  // reset so triple-tap doesn't re-trigger
-            } else {
-                last_tap_time = now;
-                last_tap_x = start_x;
-                last_tap_y = start_y;
+            bool is_tap = abs((int)last_x - (int)start_x) < TAP_MAX_MOVE_PX &&
+                          abs((int)last_y - (int)start_y) < TAP_MAX_MOVE_PX;
+
+            if (is_tap && in_logo(start_x, start_y)) {
+                // Logo tap toggles screen (works on both screens)
+                if (ui_is_controller_shown()) ui_show_usage();
+                else ui_show_controller();
+            } else if (is_tap && ui_is_controller_shown()) {
+                // Zone taps only on controller screen
+                gesture_t zone = classify_zone_tap(start_x, start_y);
+                if (zone != GESTURE_NONE) {
+                    hid_on_gesture(zone);
+                }
             }
             state = TS_IDLE;
         } else {
@@ -86,14 +106,19 @@ void touch_tick(void) {
             int dx = (int)x - (int)start_x;
             int dy = (int)y - (int)start_y;
 
-            // Check if movement qualifies as a swipe
-            if (abs(dx) >= SWIPE_MIN_PX || abs(dy) >= SWIPE_MIN_PX) {
-                state = TS_SWIPING;
+            // Logo hold = Ctrl+Space (controller screen only)
+            if (in_logo(start_x, start_y) && ui_is_controller_shown() && (now - down_time) >= LOGO_HOLD_TIME_MS) {
+                hid_on_gesture(GESTURE_TAP_CTRL_SPACE);
+                state = TS_LOGO_HOLD;
             }
-            // Check if held long enough for a hold gesture
-            else if ((now - down_time) >= HOLD_TIME_MS) {
-                hid_on_gesture(GESTURE_HOLD_START);
-                state = TS_HOLDING;
+            // Everything below only on controller screen
+            else if (ui_is_controller_shown()) {
+                if (abs(dx) >= SWIPE_MIN_PX || abs(dy) >= SWIPE_MIN_PX) {
+                    state = TS_SWIPING;
+                } else if (!in_logo(start_x, start_y) && !is_in_tap_zone(start_x, start_y) && (now - down_time) >= HOLD_TIME_MS) {
+                    hid_on_gesture(GESTURE_HOLD_START);
+                    state = TS_HOLDING;
+                }
             }
         }
         break;
@@ -110,13 +135,19 @@ void touch_tick(void) {
             last_x = x;
             last_y = y;
         } else {
-            // Use last known position since getTouch returns garbage on release
             int dx = (int)last_x - (int)start_x;
             int dy = (int)last_y - (int)start_y;
             gesture_t g = classify_swipe(dx, dy);
             if (g != GESTURE_NONE) {
                 hid_on_gesture(g);
             }
+            state = TS_IDLE;
+        }
+        break;
+
+    case TS_LOGO_HOLD:
+        // Wait for finger to lift after screen toggle
+        if (!touching) {
             state = TS_IDLE;
         }
         break;
