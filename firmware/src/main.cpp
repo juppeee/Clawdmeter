@@ -6,6 +6,7 @@
 #include "ui.h"
 #include "hid.h"
 #include "touch.h"
+#include "ble.h"
 
 LGFX lcd;  // global - used by touch.cpp
 static UsageData usage = {};
@@ -14,11 +15,6 @@ static UsageData usage = {};
 #define BUF_LINES 40
 static uint16_t buf1[480 * BUF_LINES];
 static uint16_t buf2[480 * BUF_LINES];
-
-// Serial line buffer
-#define SERIAL_BUF_SIZE 512
-static char serial_buf[SERIAL_BUF_SIZE];
-static int serial_pos = 0;
 
 // LVGL tick callback
 static uint32_t my_tick(void) {
@@ -67,20 +63,56 @@ static bool parse_json(const char* json, UsageData* out) {
     return true;
 }
 
-// Read serial data, returns true when a complete line is ready
-static bool read_serial_line() {
+// Serial command buffer
+#define CMD_BUF_SIZE 64
+static char cmd_buf[CMD_BUF_SIZE];
+static int cmd_pos = 0;
+
+static void send_screenshot() {
+    // Allocate buffer in PSRAM (internal RAM is too small for 307KB)
+    const uint32_t w = 480, h = 320;
+    const uint32_t row_bytes = w * 2;
+    const uint32_t buf_size = row_bytes * h;
+    uint8_t* buf = (uint8_t*)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
+    if (!buf) {
+        Serial.println("SCREENSHOT_ERR");
+        return;
+    }
+
+    // Use LVGL snapshot with caller-provided buffer
+    lv_draw_buf_t draw_buf;
+    lv_draw_buf_init(&draw_buf, w, h, LV_COLOR_FORMAT_RGB565, row_bytes, buf, buf_size);
+
+    lv_result_t res = lv_snapshot_take_to_draw_buf(lv_screen_active(), LV_COLOR_FORMAT_RGB565, &draw_buf);
+    if (res != LV_RESULT_OK) {
+        heap_caps_free(buf);
+        Serial.println("SCREENSHOT_ERR");
+        return;
+    }
+
+    Serial.printf("SCREENSHOT_START %lu %lu %lu\n", (unsigned long)w, (unsigned long)h, (unsigned long)buf_size);
+    Serial.flush();
+    Serial.write(buf, buf_size);
+    Serial.flush();
+    Serial.println();
+    Serial.println("SCREENSHOT_END");
+
+    heap_caps_free(buf);
+}
+
+static void check_serial_cmd() {
     while (Serial.available()) {
         char c = Serial.read();
-        if (c == '\n') {
-            serial_buf[serial_pos] = '\0';
-            serial_pos = 0;
-            return true;
-        }
-        if (serial_pos < SERIAL_BUF_SIZE - 1) {
-            serial_buf[serial_pos++] = c;
+        if (c == '\n' || c == '\r') {
+            cmd_buf[cmd_pos] = '\0';
+            if (strcmp(cmd_buf, "screenshot") == 0) {
+                send_screenshot();
+            }
+            cmd_pos = 0;
+        } else if (cmd_pos < CMD_BUF_SIZE - 1) {
+            cmd_buf[cmd_pos++] = c;
         }
     }
-    return false;
 }
 
 void setup() {
@@ -110,24 +142,46 @@ void setup() {
     // Init USB HID keyboard
     hid_init();
 
+    // Init BLE data channel
+    ble_init();
+
     // Init touch gesture detection
     touch_init();
 
     // Build dashboard
     ui_init();
 
-    Serial.println("Dashboard ready, waiting for data on serial...");
+    // Show initial BLE status on Bluetooth screen
+    ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
+
+    Serial.println("Dashboard ready, waiting for data on BLE...");
 }
+
+static ble_state_t last_ble_state = BLE_STATE_INIT;
 
 void loop() {
     lv_timer_handler();
     ui_tick_anim();
     touch_tick();
+    ble_tick();
 
-    if (read_serial_line()) {
-        if (parse_json(serial_buf, &usage)) {
+    // Update BLE status on screen when state changes
+    ble_state_t bs = ble_get_state();
+    if (bs != last_ble_state) {
+        last_ble_state = bs;
+        ui_update_ble_status(bs, ble_get_device_name(), ble_get_mac_address());
+    }
+
+    // Check for serial commands (screenshot, etc.)
+    check_serial_cmd();
+
+    // Process incoming BLE data
+    if (ble_has_data()) {
+        if (parse_json(ble_get_data(), &usage)) {
             ui_update(&usage);
-            Serial.println("{\"ack\":true}");
+            ble_send_ack();
+        } else {
+            ble_send_nack();
         }
     }
 

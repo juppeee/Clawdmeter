@@ -43,9 +43,15 @@ static lv_obj_t* ctrl_session_bar;
 static lv_obj_t* ctrl_session_lbl;
 static lv_obj_t* ctrl_reset_lbl;
 
+// ---- Bluetooth screen widgets ----
+static lv_obj_t* ble_container;
+static lv_obj_t* lbl_ble_status;
+static lv_obj_t* lbl_ble_device;
+static lv_obj_t* lbl_ble_mac;
+
 // ---- Shared ----
 static lv_image_dsc_t logo_dsc;
-static bool controller_shown = false;
+static screen_t current_screen = SCREEN_USAGE;
 
 // Animation state
 static uint32_t anim_last_ms = 0;
@@ -388,6 +394,85 @@ static void init_controller_screen(lv_obj_t* scr) {
     lv_obj_add_flag(ctrl_container, LV_OBJ_FLAG_HIDDEN);
 }
 
+static void init_bluetooth_screen(lv_obj_t* scr) {
+    ble_container = lv_obj_create(scr);
+    lv_obj_set_size(ble_container, 480, 320);
+    lv_obj_set_pos(ble_container, 0, 0);
+    lv_obj_set_style_bg_opa(ble_container, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(ble_container, 0, 0);
+    lv_obj_set_style_pad_all(ble_container, 0, 0);
+    lv_obj_clear_flag(ble_container, LV_OBJ_FLAG_SCROLLABLE);
+
+    // Title
+    lv_obj_t* lbl_ble_title = lv_label_create(ble_container);
+    lv_label_set_text(lbl_ble_title, "Bluetooth");
+    lv_obj_set_style_text_font(lbl_ble_title, &font_tiempos_34, 0);
+    lv_obj_set_style_text_color(lbl_ble_title, COL_TEXT, 0);
+    lv_obj_set_pos(lbl_ble_title, 66, 12);
+
+    // Info panel
+    lv_obj_t* p_info = make_panel(ble_container, 8, 56, 464, 120);
+
+    // Bluetooth icon + status row
+    static lv_image_dsc_t icon_bt_dsc;
+    init_icon_dsc(&icon_bt_dsc, ICON_BLUETOOTH_W, ICON_BLUETOOTH_H, icon_bluetooth_data);
+
+    lv_obj_t* bt_img = lv_image_create(p_info);
+    lv_image_set_src(bt_img, &icon_bt_dsc);
+    lv_obj_set_pos(bt_img, 0, 0);
+
+    lbl_ble_status = lv_label_create(p_info);
+    lv_label_set_text(lbl_ble_status, "Initializing...");
+    lv_obj_set_style_text_font(lbl_ble_status, &font_styrene_28, 0);
+    lv_obj_set_style_text_color(lbl_ble_status, COL_DIM, 0);
+    lv_obj_set_pos(lbl_ble_status, 40, 2);
+
+    lbl_ble_device = lv_label_create(p_info);
+    lv_label_set_text(lbl_ble_device, "Device: ---");
+    lv_obj_set_style_text_font(lbl_ble_device, &font_styrene_16, 0);
+    lv_obj_set_style_text_color(lbl_ble_device, COL_DIM, 0);
+    lv_obj_set_pos(lbl_ble_device, 0, 50);
+
+    lbl_ble_mac = lv_label_create(p_info);
+    lv_label_set_text(lbl_ble_mac, "Address: ---");
+    lv_obj_set_style_text_font(lbl_ble_mac, &font_styrene_16, 0);
+    lv_obj_set_style_text_color(lbl_ble_mac, COL_DIM, 0);
+    lv_obj_set_pos(lbl_ble_mac, 0, 74);
+
+    // Reset Bluetooth tap zone with trash icon
+    lv_obj_t* reset_zone = lv_obj_create(ble_container);
+    lv_obj_set_pos(reset_zone, 8, 190);
+    lv_obj_set_size(reset_zone, 464, 60);
+    lv_obj_set_style_bg_color(reset_zone, COL_PANEL, 0);
+    lv_obj_set_style_bg_opa(reset_zone, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(reset_zone, 8, 0);
+    lv_obj_set_style_border_width(reset_zone, 0, 0);
+    lv_obj_set_style_pad_column(reset_zone, 10, 0);
+    lv_obj_set_flex_flow(reset_zone, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(reset_zone, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_CENTER);
+    lv_obj_clear_flag(reset_zone, LV_OBJ_FLAG_SCROLLABLE);
+
+    static lv_image_dsc_t icon_trash_dsc;
+    init_icon_dsc(&icon_trash_dsc, ICON_TRASH2_W, ICON_TRASH2_H, icon_trash2_data);
+    lv_obj_t* trash_img = lv_image_create(reset_zone);
+    lv_image_set_src(trash_img, &icon_trash_dsc);
+
+    lv_obj_t* reset_lbl = lv_label_create(reset_zone);
+    lv_label_set_text(reset_lbl, "Reset Bluetooth");
+    lv_obj_set_style_text_font(reset_lbl, &font_styrene_16, 0);
+    lv_obj_set_style_text_color(reset_lbl, COL_DIM, 0);
+
+    // Footer
+    lv_obj_t* lbl_footer = lv_label_create(ble_container);
+    lv_label_set_text(lbl_footer, "Bluetooth Low Energy");
+    lv_obj_set_style_text_font(lbl_footer, &font_styrene_14, 0);
+    lv_obj_set_style_text_color(lbl_footer, COL_DIM, 0);
+    lv_obj_align(lbl_footer, LV_ALIGN_BOTTOM_MID, 0, -16);
+
+    // Start hidden
+    lv_obj_add_flag(ble_container, LV_OBJ_FLAG_HIDDEN);
+}
+
 void ui_init(void) {
     lv_obj_t* scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BG, 0);
@@ -403,8 +488,9 @@ void ui_init(void) {
 
     init_usage_screen(scr);
     init_controller_screen(scr);
+    init_bluetooth_screen(scr);
 
-    // Logo on top of both containers
+    // Logo on top of all containers
     lv_obj_t* img = lv_image_create(scr);
     lv_image_set_src(img, &logo_dsc);
     lv_obj_set_pos(img, 10, 4);
@@ -443,7 +529,7 @@ void ui_update(const UsageData* data) {
 }
 
 void ui_tick_anim(void) {
-    if (controller_shown) return;  // no animation on controller screen
+    if (current_screen != SCREEN_USAGE) return;  // animation only on usage screen
 
     uint32_t now = lv_tick_get();
 
@@ -464,22 +550,56 @@ void ui_tick_anim(void) {
     }
 }
 
-void ui_show_controller(void) {
+void ui_show_screen(screen_t screen) {
     lv_obj_add_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(ctrl_container, LV_OBJ_FLAG_HIDDEN);
-    controller_shown = true;
-}
-
-void ui_show_usage(void) {
     lv_obj_add_flag(ctrl_container, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
-    controller_shown = false;
+    lv_obj_add_flag(ble_container, LV_OBJ_FLAG_HIDDEN);
+
+    switch (screen) {
+    case SCREEN_USAGE:      lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN); break;
+    case SCREEN_CONTROLLER: lv_obj_clear_flag(ctrl_container, LV_OBJ_FLAG_HIDDEN); break;
+    case SCREEN_BLUETOOTH:  lv_obj_clear_flag(ble_container, LV_OBJ_FLAG_HIDDEN); break;
+    default: break;
+    }
+    current_screen = screen;
 }
 
-bool ui_is_controller_shown(void) {
-    return controller_shown;
+void ui_cycle_screen(void) {
+    ui_show_screen((screen_t)((current_screen + 1) % SCREEN_COUNT));
 }
 
-void ui_set_status(const char* text) {
-    (void)text;
+screen_t ui_get_current_screen(void) {
+    return current_screen;
+}
+
+void ui_update_ble_status(ble_state_t state, const char* name, const char* mac) {
+    switch (state) {
+    case BLE_STATE_CONNECTED:
+        lv_label_set_text(lbl_ble_status, "Connected");
+        lv_obj_set_style_text_color(lbl_ble_status, COL_GREEN, 0);
+        break;
+    case BLE_STATE_ADVERTISING:
+        lv_label_set_text(lbl_ble_status, "Advertising...");
+        lv_obj_set_style_text_color(lbl_ble_status, COL_AMBER, 0);
+        break;
+    case BLE_STATE_DISCONNECTED:
+        lv_label_set_text(lbl_ble_status, "Disconnected");
+        lv_obj_set_style_text_color(lbl_ble_status, COL_RED, 0);
+        break;
+    default:
+        lv_label_set_text(lbl_ble_status, "Initializing...");
+        lv_obj_set_style_text_color(lbl_ble_status, COL_DIM, 0);
+        break;
+    }
+
+    if (name) {
+        static char nbuf[48];
+        snprintf(nbuf, sizeof(nbuf), "Device: %s", name);
+        lv_label_set_text(lbl_ble_device, nbuf);
+    }
+    if (mac) {
+        static char mbuf[48];
+        snprintf(mbuf, sizeof(mbuf), "Address: %s", mac);
+        lv_label_set_text(lbl_ble_mac, mbuf);
+    }
 }

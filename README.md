@@ -1,58 +1,121 @@
 # Claude Usage Tracker - Panlee SC01 Plus
 
-Displays your Claude Code usage limits on a Panlee SC01 Plus (ESP32-S3) 3.5" touchscreen.
+Bluetooth-connected Claude Code usage monitor and touch controller on a Panlee SC01 Plus (ESP32-S3) 3.5" touchscreen.
 
 ![Demo](assets/demo.gif)
 
-Shows your 5-hour session and 7-day weekly utilization.
+## Features
+
+- **Usage dashboard** — Live 5-hour session and 7-day weekly utilization bars with color-coded thresholds
+- **Touch controller** — Gesture-based Claude Code navigation (swipe, tap, hold) sent as BLE HID keyboard input
+- **Bluetooth screen** — Connection status, device name, MAC address, bond management
+- **Wireless** — All communication over Bluetooth Low Energy (USB only for charging and flashing)
+- **Auto-reconnect** — Daemon discovers and reconnects automatically with exponential backoff
 
 ## Hardware
 
 - [Panlee SC01 Plus](http://en.smartpanle.com/product-item-15.html) (WT32-SC01 Plus) — ESP32-S3, 3.5" 480x320 IPS, capacitive touch
-- USB-C cable for power and data)
+- USB-C cable for flashing firmware and charging
 
 ## Prerequisites
 
-- Linux (tested on my Ubuntu laptop)
+- Linux (tested on Ubuntu)
 - [PlatformIO CLI](https://docs.platformio.org/en/latest/core/installation/index.html)
-- `curl`, `awk`, `inotify-tools` (pre-installed on most Linux distros, install `inotify-tools` if missing)
-- Claude Code
-- User in `dialout` group: `sudo adduser $USER dialout` (log out/in after)
+- `curl`, `bluetoothctl`, `busctl` (BlueZ Bluetooth stack)
+- Claude Code with an active subscription
 
 ## Flash the firmware
 
 ```bash
 cd firmware
-pio run -t upload
+pio run -t upload --upload-port /dev/ttyACM0
 ```
 
-The SC01 Plus appears at `/dev/ttyACM0`.
+## Bluetooth pairing
 
-## Run the daemon
-
-The daemon polls your Claude usage every 30 seconds and sends it to the display over USB serial.
+After flashing, the device advertises as **"Claude Controller"**. Pair it once:
 
 ```bash
-bash daemon/claude-usage-daemon.sh
+# Scan for the device
+bluetoothctl scan le
+
+# When "Claude Controller" appears, pair and trust it
+bluetoothctl pair F4:12:FA:C0:8F:E5    # use your device's MAC
+bluetoothctl trust F4:12:FA:C0:8F:E5
 ```
 
-## Install the systemd service
+The MAC address is shown on the Bluetooth screen (third screen, tap the logo to cycle).
 
-To auto-start the daemon on login:
+## Install the daemon
+
+The daemon polls your Claude usage every 30 seconds and sends it to the display over BLE.
 
 ```bash
 ./install.sh
+systemctl --user start claude-usage-daemon
 ```
 
 Check status: `systemctl --user status claude-usage-daemon`
+
+View logs: `journalctl --user -u claude-usage-daemon -f`
 
 ## How it works
 
 1. The daemon reads your Claude Code OAuth token from `~/.claude/.credentials.json`
 2. Makes a minimal API call to `api.anthropic.com/v1/messages` (1 token of Haiku, essentially free)
 3. Extracts usage data from the response headers (`anthropic-ratelimit-unified-5h-utilization`, etc.)
-4. Sends a JSON line over USB serial to the ESP32
+4. Connects to the ESP32 over BLE and writes a JSON payload to the GATT RX characteristic
 5. The ESP32 parses it and updates the LVGL dashboard
+6. Touch gestures on the Controller screen are sent as BLE HID keyboard input to the host
+
+## Screens
+
+Tap the Claude logo (top-left) to cycle between screens:
+
+|              Usage              |                Controller                 |                Bluetooth                |
+| :-----------------------------: | :---------------------------------------: | :-------------------------------------: |
+| ![Usage](screenshots/usage.png) | ![Controller](screenshots/controller.png) | ![Bluetooth](screenshots/bluetooth.png) |
+| Session and weekly utilization  |      Touch zones and swipe gestures       |       Connection status and reset       |
+
+## Gesture controls
+
+On the **Controller** screen:
+
+| Gesture       | Action                  |
+| ------------- | ----------------------- |
+| Swipe up      | Arrow Up                |
+| Swipe down    | Arrow Down              |
+| Swipe left    | Shift+Tab (toggle mode) |
+| Swipe right   | Enter                   |
+| Hold (center) | Space (voice dictation) |
+
+Touch zones (tap):
+
+| Zone         | Action      |
+| ------------ | ----------- |
+| Top-left     | Escape      |
+| Bottom-left  | Arrow Left  |
+| Top-right    | Delete      |
+| Bottom-right | Arrow Right |
+
+## BLE protocol
+
+The device advertises a custom GATT service alongside the standard HID keyboard service:
+
+|                            | UUID                                   |
+| -------------------------- | -------------------------------------- |
+| **Data Service**           | `4c41555a-4465-7669-6365-000000000001` |
+| RX Characteristic (write)  | `4c41555a-4465-7669-6365-000000000002` |
+| TX Characteristic (notify) | `4c41555a-4465-7669-6365-000000000003` |
+| **HID Service**            | `00001812-0000-1000-8000-00805f9b34fb` |
+
+JSON payload format (written to RX):
+
+```json
+{ "s": 45, "sr": 120, "w": 28, "wr": 7200, "st": "allowed", "ok": true }
+```
+
+Fields: `s` = session %, `sr` = session reset (minutes), `w` = weekly %, `wr` = weekly reset (minutes), `st` = status, `ok` = success flag.
 
 ## Recompiling fonts
 
@@ -98,12 +161,14 @@ The controller screen uses [Lucide](https://lucide.dev) icons (the same icon set
 1. Get Lucide SVGs from [github.com/lucide-icons/lucide](https://github.com/lucide-icons/lucide) (`icons/` directory)
 
 2. Convert SVG to PNG at desired size:
+
 ```bash
 inkscape icons/delete.svg --export-width=32 --export-height=32 \
   --export-filename=assets/icon_delete.png --export-background-opacity=0
 ```
 
 3. Convert PNG to RGB565 C array:
+
 ```python
 from PIL import Image
 
@@ -125,7 +190,7 @@ for y in range(img.height):
 # Write as C array to firmware/src/icons.h
 ```
 
-Current icons: `delete`, `arrow-left`, `arrow-right`, `circle-arrow-out-up-left` (escape), `hand` (gestures).
+Current icons: `delete`, `arrow-left`, `arrow-right`, `circle-arrow-out-up-left` (escape), `hand` (gestures), `bluetooth`.
 
 ## Licensing gray area warning
 

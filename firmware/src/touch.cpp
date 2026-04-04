@@ -1,5 +1,6 @@
 #include "touch.h"
 #include "ui.h"
+#include "ble.h"
 #include <Arduino.h>
 #include "display_cfg.h"
 
@@ -62,6 +63,11 @@ static bool is_in_tap_zone(uint16_t x, uint16_t y) {
     return classify_zone_tap(x, y) != GESTURE_NONE;
 }
 
+// Check if tap is in the "Clear Bonds" zone on the Bluetooth screen
+static bool in_ble_clear_zone(uint16_t x, uint16_t y) {
+    return x >= 8 && x <= 472 && y >= 190 && y < 250;
+}
+
 void touch_init(void) {
     state = TS_IDLE;
 }
@@ -89,14 +95,18 @@ void touch_tick(void) {
                           abs((int)last_y - (int)start_y) < TAP_MAX_MOVE_PX;
 
             if (is_tap && in_logo(start_x, start_y)) {
-                // Logo tap toggles screen (works on both screens)
-                if (ui_is_controller_shown()) ui_show_usage();
-                else ui_show_controller();
-            } else if (is_tap && ui_is_controller_shown()) {
+                // Logo tap cycles screens: Usage -> Controller -> Bluetooth -> ...
+                ui_cycle_screen();
+            } else if (is_tap && ui_get_current_screen() == SCREEN_CONTROLLER) {
                 // Zone taps only on controller screen
                 gesture_t zone = classify_zone_tap(start_x, start_y);
                 if (zone != GESTURE_NONE) {
                     hid_on_gesture(zone);
+                }
+            } else if (is_tap && ui_get_current_screen() == SCREEN_BLUETOOTH) {
+                // "Clear Bonds" tap zone on Bluetooth screen
+                if (in_ble_clear_zone(start_x, start_y)) {
+                    ble_clear_bonds();
                 }
             }
             state = TS_IDLE;
@@ -107,12 +117,12 @@ void touch_tick(void) {
             int dy = (int)y - (int)start_y;
 
             // Logo hold = Ctrl+Space (controller screen only)
-            if (in_logo(start_x, start_y) && ui_is_controller_shown() && (now - down_time) >= LOGO_HOLD_TIME_MS) {
+            if (in_logo(start_x, start_y) && ui_get_current_screen() == SCREEN_CONTROLLER && (now - down_time) >= LOGO_HOLD_TIME_MS) {
                 hid_on_gesture(GESTURE_TAP_CTRL_SPACE);
                 state = TS_LOGO_HOLD;
             }
             // Everything below only on controller screen
-            else if (ui_is_controller_shown()) {
+            else if (ui_get_current_screen() == SCREEN_CONTROLLER) {
                 if (abs(dx) >= SWIPE_MIN_PX || abs(dy) >= SWIPE_MIN_PX) {
                     state = TS_SWIPING;
                 } else if (!in_logo(start_x, start_y) && !is_in_tap_zone(start_x, start_y) && (now - down_time) >= HOLD_TIME_MS) {

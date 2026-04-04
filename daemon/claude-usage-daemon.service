@@ -1,5 +1,7 @@
 [Unit]
-Description=Claude Usage Tracker Daemon
+Description=Claude Usage Tracker Daemon (BLE)
+Requires=bluetooth.target
+After=bluetooth.target
 
 [Service]
 Type=simple
