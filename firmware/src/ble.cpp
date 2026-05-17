@@ -13,7 +13,10 @@
 
 #define BLE_BUF_SIZE 512
 
-// HID keyboard report descriptor
+// HID keyboard report descriptor (standard 6-KRO boot-protocol-compatible).
+// Includes the LED output report (Num/Caps/Scroll Lock indicators) — without
+// it macOS's Keyboard Setup Assistant flags the device as "unidentifiable"
+// because the descriptor doesn't look like a complete keyboard.
 static const uint8_t HID_REPORT_MAP[] = {
     0x05, 0x01,  // Usage Page (Generic Desktop)
     0x09, 0x06,  // Usage (Keyboard)
@@ -30,6 +33,16 @@ static const uint8_t HID_REPORT_MAP[] = {
     0x95, 0x01,  //   Report Count (1)
     0x75, 0x08,  //   Report Size (8)
     0x81, 0x01,  //   Input (Constant) - Reserved byte
+    // LED output report — required for macOS to treat this as a full keyboard.
+    0x95, 0x05,  //   Report Count (5)
+    0x75, 0x01,  //   Report Size (1)
+    0x05, 0x08,  //   Usage Page (LEDs)
+    0x19, 0x01,  //   Usage Minimum (Num Lock)
+    0x29, 0x05,  //   Usage Maximum (Kana)
+    0x91, 0x02,  //   Output (Data, Variable, Absolute) - LED report
+    0x95, 0x01,  //   Report Count (1)
+    0x75, 0x03,  //   Report Size (3)
+    0x91, 0x01,  //   Output (Constant) - LED report padding
     0x95, 0x06,  //   Report Count (6)
     0x75, 0x08,  //   Report Size (8)
     0x15, 0x00,  //   Logical Minimum (0)
@@ -58,10 +71,21 @@ static char mac_str[18];
 static void start_advertising() {
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     adv->reset();
-    adv->addServiceUUID(SERVICE_UUID);
+    // Primary advertising packet (≤31 bytes):
+    //   flags (3) + appearance (4) + HID service 0x1812 (4) + name "Claude Controller" (19)
+    //   = 30 bytes. macOS Bluetooth Settings only surfaces BLE-only devices
+    //   that explicitly advertise the standard HID service UUID (0x1812) —
+    //   without it the device is recognized internally but hidden from the
+    //   GUI nearby-devices list.
     adv->setAppearance(HID_KEYBOARD);
-    adv->enableScanResponse(true);
+    adv->addServiceUUID(NimBLEUUID((uint16_t)0x1812));  // BLE HID Service
     adv->setName(DEVICE_NAME);
+    // Scan response carries the 128-bit custom data-service UUID for active
+    // scanners (the host daemon scans actively).
+    NimBLEAdvertisementData scanResp;
+    scanResp.setCompleteServices(NimBLEUUID(SERVICE_UUID));
+    adv->setScanResponseData(scanResp);
+    adv->enableScanResponse(true);
     bool ok = adv->start();
     state = BLE_STATE_ADVERTISING;
     Serial.printf("BLE: advertising start=%s\n", ok ? "OK" : "FAILED");
@@ -70,13 +94,23 @@ static void start_advertising() {
 class ServerCallbacks : public NimBLEServerCallbacks {
     void onConnect(NimBLEServer* s, NimBLEConnInfo& info) override {
         state = BLE_STATE_CONNECTED;
-        Serial.printf("BLE: connected from %s\n", info.getAddress().toString().c_str());
+        Serial.printf("BLE: connected from %s (active=%u)\n",
+            info.getAddress().toString().c_str(),
+            (unsigned)s->getConnectedCount());
+        // Keep advertising while a connection slot is still free so a second
+        // central (e.g. the host daemon alongside an OS-held HID link) can
+        // discover and connect. NimBLE auto-stops advertising on each accept.
+        if (s->getConnectedCount() < CONFIG_BT_NIMBLE_MAX_CONNECTIONS) {
+            need_advertise = true;
+        }
     }
 
     void onDisconnect(NimBLEServer* s, NimBLEConnInfo& info, int reason) override {
-        state = BLE_STATE_DISCONNECTED;
+        // Only flip the UI state to DISCONNECTED when the last client leaves.
+        if (s->getConnectedCount() == 0) state = BLE_STATE_DISCONNECTED;
         need_advertise = true;
-        Serial.printf("BLE: disconnected (reason=%d)\n", reason);
+        Serial.printf("BLE: disconnected (reason=%d, remaining=%u)\n",
+            reason, (unsigned)s->getConnectedCount());
     }
 
 };
@@ -124,8 +158,17 @@ void ble_init(void) {
     hid_dev = new NimBLEHIDDevice(server);
     hid_dev->setReportMap((uint8_t*)HID_REPORT_MAP, sizeof(HID_REPORT_MAP));
     hid_dev->setManufacturer("Anthropic");
-    hid_dev->setPnp(0x02, 0x05AC, 0x820A, 0x0210);  // BT SIG, generic keyboard
-    hid_dev->setHidInfo(0x00, 0x02);  // country=0, flags=normally connectable
+    // PnP ID: (vendorIdSource, vendorId, productId, version).
+    // Source 1 = Bluetooth SIG, vendor 0x02E5 = Espressif. Originally claimed
+    // Apple's USB vendor 0x05AC + Magic Keyboard product 0x820A — macOS
+    // validates Apple-claimed HIDs against known device IDs and silently
+    // refuses to surface a Connect button for spoofers.
+    hid_dev->setPnp(0x01, 0x02E5, 0x0001, 0x0100);
+    // country=33 (US ANSI). Setting this to 0 ("not supported") causes macOS
+    // to launch the Keyboard Setup Assistant on first pair asking the user
+    // to identify the layout — we only ever send Space / Shift+Tab so the
+    // physical layout is irrelevant; advertise a known one to skip the wizard.
+    hid_dev->setHidInfo(33, 0x02);
     hid_dev->setBatteryLevel(100);
     input_kbd = hid_dev->getInputReport(1);  // report ID 1
 

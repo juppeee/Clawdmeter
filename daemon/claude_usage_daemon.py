@@ -166,6 +166,9 @@ async def poll_api(token: str) -> dict | None:
     except httpx.HTTPError as e:
         log(f"API call failed: {e}")
         return None
+    if resp.status_code >= 400:
+        log(f"API HTTP {resp.status_code}: {resp.text[:200]}")
+        return None
 
     def hdr(name: str, default: str = "0") -> str:
         return resp.headers.get(name, default)
