@@ -2,13 +2,21 @@
 #include "splash_animations.h"
 #include "theme.h"
 #include "usage_rate.h"
+#include "display_cfg.h"
 #include <Arduino.h>
 #include <string.h>
 #include <esp_heap_caps.h>
 
-// 20x20 grid scaled 24x to fill 480x480
+// 20x20 grid. CELL chosen per board so the canvas fits the screen
+// (must satisfy GRID*CELL <= min(LCD_WIDTH, LCD_HEIGHT)).
+//   AMOLED-2.16 (480x480 square): CELL=24 → 480x480 fills screen
+//   AMOLED-1.8  (368x448 portrait): CELL=18 → 360x360 centered, vertical margin
 #define GRID         20
+#ifdef BOARD_AMOLED_18
+#define CELL         18
+#else
 #define CELL         24
+#endif
 #define CANVAS_W     (GRID * CELL)
 #define CANVAS_H     (GRID * CELL)
 
@@ -99,7 +107,7 @@ void splash_init(lv_obj_t *parent) {
     }
 
     splash_container = lv_obj_create(parent);
-    lv_obj_set_size(splash_container, 480, 480);
+    lv_obj_set_size(splash_container, LCD_WIDTH, LCD_HEIGHT);
     lv_obj_set_pos(splash_container, 0, 0);
     lv_obj_set_style_bg_color(splash_container, THEME_BG, 0);
     lv_obj_set_style_bg_opa(splash_container, LV_OPA_COVER, 0);

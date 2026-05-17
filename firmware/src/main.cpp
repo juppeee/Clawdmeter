@@ -1,4 +1,5 @@
 #include <Arduino.h>
+#include <Wire.h>
 #include <lvgl.h>
 #include <ArduinoJson.h>
 #include "display_cfg.h"
@@ -12,26 +13,44 @@
 #include "idle.h"
 #include "idle_cfg.h"
 
+#ifdef BOARD_AMOLED_18
+#include "io_expander.h"
+#endif
+
 // Physical buttons (global, screen-independent):
-//   BTN_BACK   (GPIO 0)  — left,  send Space (Claude Code voice mode push-to-talk)
-//   BTN_FWD    (GPIO 18) — right, send Shift+Tab (Claude Code mode toggle)
-//   AXP PWR    (PMU)     — middle, cycle screens; on splash, cycle animations
+//   BTN_BACK (GPIO 0, BOOT)  — left, send Space (Claude Code voice-mode PTT)
+//   BTN_FWD  (GPIO 18)       — AMOLED-2.16 only: Shift+Tab (mode toggle)
+//   PWR                       — middle, cycle screens; on splash, cycle animations
+//                                AMOLED-2.16: AXP2101 PKEY IRQ
+//                                AMOLED-1.8 : XCA9554 EXIO4 (polled over I2C)
 #define BTN_BACK 0
+#ifndef BOARD_AMOLED_18
 #define BTN_FWD  18
+#endif
 
 // ---- Hardware objects ----
 Arduino_DataBus *bus = new Arduino_ESP32QSPI(
     LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
-Arduino_CO5300 *gfx = new Arduino_CO5300(
+#ifdef BOARD_AMOLED_18
+// SH8601 constructor: (bus, rst, rotation, w, h)
+PlatformDisplay *gfx = new PlatformDisplay(
+    bus, LCD_RESET /* GFX_NOT_DEFINED — reset via XCA9554 */, 0,
+    LCD_WIDTH, LCD_HEIGHT);
+#else
+// CO5300 constructor: (bus, rst, rotation, w, h, col_offset1..2, row_offset1..2)
+PlatformDisplay *gfx = new PlatformDisplay(
     bus, LCD_RESET, 0 /* rotation */,
     LCD_WIDTH, LCD_HEIGHT, 0, 0, 0, 0);
 TouchDrvCST92xx touch;
+#endif
 XPowersPMU pmu;
 SensorQMI8658 imu;
 
 static UsageData usage = {};
 
 // ---- Touch interrupt + shared state ----
+// Centralized once-per-loop read (CLAUDE.md gotcha #5): calling getPoint() /
+// reading FT3168 from multiple sites consumes each other's data.
 static volatile bool     touch_pressed = false;
 static volatile uint16_t touch_x = 0;
 static volatile uint16_t touch_y = 0;
@@ -41,10 +60,56 @@ static void IRAM_ATTR touch_isr(void) {
     touch_data_ready = true;
 }
 
+#ifdef BOARD_AMOLED_18
+// Minimal FT3168 reader (FocalTech standard register layout).
+// Avoids vendoring Waveshare's GPLv3 Arduino_DriveBus library.
+//   reg 0x02: low nibble = active finger count
+//   reg 0x03/0x04: X1 high (low nibble), X1 low
+//   reg 0x05/0x06: Y1 high (low nibble), Y1 low
+static void ft3168_init(void) {
+    // Power-mode register 0xA5 = 0x00: active scanning.
+    Wire.beginTransmission(FT3168_ADDR);
+    Wire.write(0xA5);
+    Wire.write(0x00);
+    Wire.endTransmission();
+    // Verify device ID register 0xA0 (FT3168 reports 0x03 but Waveshare's
+    // panel sometimes returns 0x86 — log but don't fail).
+    Wire.beginTransmission(FT3168_ADDR);
+    Wire.write(0xA0);
+    if (Wire.endTransmission(false) == 0 && Wire.requestFrom(FT3168_ADDR, (uint8_t)1) == 1) {
+        Serial.printf("FT3168 ID=0x%02X\n", Wire.read());
+    } else {
+        Serial.println("FT3168 ID read failed");
+    }
+}
+
+static void ft3168_read_into_shared_state(void) {
+    Wire.beginTransmission(FT3168_ADDR);
+    Wire.write(0x02);
+    if (Wire.endTransmission(false) != 0) { touch_pressed = false; return; }
+    if (Wire.requestFrom(FT3168_ADDR, (uint8_t)5) != 5) { touch_pressed = false; return; }
+    uint8_t fingers = Wire.read() & 0x0F;
+    uint8_t xH = Wire.read();
+    uint8_t xL = Wire.read();
+    uint8_t yH = Wire.read();
+    uint8_t yL = Wire.read();
+    if (fingers == 0 || fingers > 5) {
+        touch_pressed = false;
+        return;
+    }
+    touch_x = ((uint16_t)(xH & 0x0F) << 8) | xL;
+    touch_y = ((uint16_t)(yH & 0x0F) << 8) | yL;
+    touch_pressed = true;
+}
+#endif
+
 static void touch_read() {
     if (!touch_data_ready) return;
     touch_data_ready = false;
 
+#ifdef BOARD_AMOLED_18
+    ft3168_read_into_shared_state();
+#else
     int16_t tx[5], ty[5];
     uint8_t n = touch.getPoint(tx, ty, touch.getSupportTouchPoint());
     if (n > 0) {
@@ -54,6 +119,7 @@ static void touch_read() {
     } else {
         touch_pressed = false;
     }
+#endif
 
     // Touch policy is driven by IDLE_WAKE_ON_TOUCH:
     //   true  → a press edge while asleep wakes the device and the first
@@ -99,9 +165,11 @@ static uint32_t my_tick(void) {
     return millis();
 }
 
+#ifndef BOARD_AMOLED_18
 // Rotate a w×h strip and compute destination coordinates on the 480×480 display.
 // src pixels are in row-major order for the rectangle (sx, sy, w, h).
 // Output goes to rot_buf in row-major order for the destination rectangle.
+// AMOLED-1.8 port is fixed at 0° so this code is excluded.
 static void rotate_strip(const uint16_t *src, int32_t w, int32_t h,
                          int32_t sx, int32_t sy, uint8_t r,
                          int32_t *dx, int32_t *dy, int32_t *dw, int32_t *dh) {
@@ -148,14 +216,20 @@ static void rotate_strip(const uint16_t *src, int32_t w, int32_t h,
         break;
     }
 }
+#endif  // !BOARD_AMOLED_18
 
-// LVGL flush callback — rotates partial strips and writes to display
+// LVGL flush callback — writes pixels to display.
+// AMOLED-2.16: applies CPU strip rotation based on IMU.
+// AMOLED-1.8 : fixed orientation, direct pass-through.
 static void my_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
     int32_t w = area->x2 - area->x1 + 1;
     int32_t h = area->y2 - area->y1 + 1;
     uint16_t *src = (uint16_t*)px_map;
-    uint8_t r = imu_get_rotation();
 
+#ifdef BOARD_AMOLED_18
+    gfx->draw16bitRGBBitmap(area->x1, area->y1, src, w, h);
+#else
+    uint8_t r = imu_get_rotation();
     if (r == 0) {
         gfx->draw16bitRGBBitmap(area->x1, area->y1, src, w, h);
     } else {
@@ -163,10 +237,12 @@ static void my_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_m
         rotate_strip(src, w, h, area->x1, area->y1, r, &dx, &dy, &dw, &dh);
         gfx->draw16bitRGBBitmap(dx, dy, rot_buf, dw, dh);
     }
+#endif
     lv_display_flush_ready(disp);
 }
 
-// CO5300 requires even-aligned flush regions
+// CO5300 requires even-aligned flush regions. SH8601's driver doesn't
+// enforce this in source, but keeping the rounder is harmless.
 static void rounder_cb(lv_event_t* e) {
     lv_area_t *area = (lv_area_t*)lv_event_get_param(e);
     area->x1 = area->x1 & ~1;
@@ -260,8 +336,14 @@ void setup() {
     delay(300);
     Serial.println("{\"ready\":true}");
 
-    // Init I2C (shared by touch + PMU)
+    // Init I2C (shared by touch + PMU + IMU + IO expander)
     Wire.begin(IIC_SDA, IIC_SCL);
+
+#ifdef BOARD_AMOLED_18
+    // XCA9554 must come up FIRST — display + touch are held in reset until
+    // EXIO0..2 go HIGH (see io_expander_init()).
+    io_expander_init();
+#endif
 
     // Init display
     gfx->begin();
@@ -271,10 +353,17 @@ void setup() {
     // Init PMU
     power_init();
 
-    // Init IMU (accelerometer for auto-rotation)
+    // Init IMU (accelerometer for auto-rotation; on AMOLED-1.8 we keep init
+    // for I2C bus health but ignore rotation — see imu.cpp).
     imu_init();
 
     // Init touch
+#ifdef BOARD_AMOLED_18
+    ft3168_init();
+    pinMode(TP_INT, INPUT_PULLUP);
+    attachInterrupt(TP_INT, touch_isr, FALLING);
+    Serial.println("FT3168 attached on INT pin");
+#else
     touch.setPins(TP_RST, TP_INT);
     if (!touch.begin(Wire, CST9220_ADDR, IIC_SDA, IIC_SCL)) {
         Serial.println("Touch init failed");
@@ -285,6 +374,7 @@ void setup() {
         attachInterrupt(TP_INT, touch_isr, FALLING);
         Serial.println("Touch init OK");
     }
+#endif
 
     // Init LVGL
     lv_init();
@@ -293,9 +383,11 @@ void setup() {
     // Allocate PSRAM-backed partial render buffers
     buf1 = (uint16_t*)heap_caps_malloc(LCD_WIDTH * BUF_LINES * 2, MALLOC_CAP_SPIRAM);
     buf2 = (uint16_t*)heap_caps_malloc(LCD_WIDTH * BUF_LINES * 2, MALLOC_CAP_SPIRAM);
-    // rot_buf needs to hold the largest possible strip after rotation
-    // A 480×40 strip rotated 90° becomes 40×480, same pixel count
+#ifndef BOARD_AMOLED_18
+    // rot_buf only needed for AMOLED-2.16 (CPU strip rotation).
+    // Holds the largest possible strip after rotation (same pixel count as src).
     rot_buf = (uint16_t*)heap_caps_malloc(LCD_WIDTH * BUF_LINES * 2, MALLOC_CAP_SPIRAM);
+#endif
 
     lv_display_t* disp = lv_display_create(LCD_WIDTH, LCD_HEIGHT);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
@@ -313,9 +405,11 @@ void setup() {
     // Init BLE data channel
     ble_init();
 
-    // Physical buttons: back (GPIO 0) and forward (GPIO 18)
+    // Physical buttons
     pinMode(BTN_BACK, INPUT_PULLUP);
+#ifndef BOARD_AMOLED_18
     pinMode(BTN_FWD,  INPUT_PULLUP);
+#endif
 
     // Build dashboard
     ui_init();
@@ -333,7 +427,9 @@ void setup() {
 
 static ble_state_t last_ble_state = BLE_STATE_INIT;
 
-// Brightness ramp state for rotation transition
+#ifndef BOARD_AMOLED_18
+// Brightness ramp state for rotation transition.
+// AMOLED-2.16 only — the 1.8" port is fixed at 0° (no IMU rotation).
 // On rotation change we blank the panel, force a full LVGL redraw at the
 // new orientation, then ramp brightness back up over ~125ms so the
 // transition reads as deliberate instead of as a glitch.
@@ -366,6 +462,7 @@ static void handle_rotation_change(void) {
     if (ramp_step >= 4) ramp_step = 0;
     else                ramp_step++;
 }
+#endif  // !BOARD_AMOLED_18
 
 void loop() {
     touch_read();
@@ -377,20 +474,23 @@ void loop() {
     imu_tick();
     splash_tick();
 
-    // Three-button input (global, screen-independent):
-    //   LEFT  (GPIO 0)  → Space (voice-mode push-to-talk; press & release tracked)
-    //   RIGHT (GPIO 18) → Shift+Tab (Claude Code mode toggle)
-    //   PWR   (AXP)     → cycle screens; on splash, cycle animations
+    // Physical button input (global, screen-independent):
+    //   LEFT (GPIO 0 / BOOT)  → Space (voice-mode push-to-talk)
+    //   RIGHT (GPIO 18)       → Shift+Tab (Claude Code mode toggle). AMOLED-2.16 only.
+    //   PWR                   → cycle screens; on splash, cycle animations.
+    //                           AMOLED-2.16: AXP2101 PKEY IRQ; AMOLED-1.8: XCA9554 EXIO4.
     // First press from sleep is consumed for wake only (idle_consume_wake_press
     // returns true) — the normal action only fires from the second press.
     // Activity bookkeeping happens inside idle_consume_wake_press, so no
     // separate idle_note_activity() call is needed here.
     {
-        static bool back_was = false, fwd_was = false;
-        static bool back_wake_swallowed = false, fwd_wake_swallowed = false;
+        static bool back_was = false;
+        static bool back_wake_swallowed = false;
+#ifndef BOARD_AMOLED_18
+        static bool fwd_was = false;
+        static bool fwd_wake_swallowed = false;
+#endif
         bool back_now = (digitalRead(BTN_BACK) == LOW);
-        bool fwd_now  = (digitalRead(BTN_FWD)  == LOW);
-
         if (back_now != back_was) {
             if (back_now) {
                 if (idle_consume_wake_press()) {
@@ -404,6 +504,9 @@ void loop() {
             }
             back_was = back_now;
         }
+
+#ifndef BOARD_AMOLED_18
+        bool fwd_now = (digitalRead(BTN_FWD) == LOW);
         if (fwd_now != fwd_was) {
             if (fwd_now) {
                 if (idle_consume_wake_press()) {
@@ -417,6 +520,7 @@ void loop() {
             }
             fwd_was = fwd_now;
         }
+#endif
 
         if (power_pwr_pressed()) {
             if (!idle_consume_wake_press()) {
@@ -426,7 +530,9 @@ void loop() {
         }
     }
 
+#ifndef BOARD_AMOLED_18
     handle_rotation_change();
+#endif
 
     // Update BLE status on screen when state changes
     ble_state_t bs = ble_get_state();

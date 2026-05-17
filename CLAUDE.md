@@ -1,49 +1,66 @@
 # Project context
 
-ESP32-S3 firmware for a desk-side Claude Code usage monitor on a **Waveshare ESP32-S3-Touch-AMOLED-2.16** board (480×480 square AMOLED). Connects to a host daemon over BLE; daemon polls Anthropic API for usage data.
+ESP32-S3 firmware for a desk-side Claude Code usage monitor. Two board variants are supported via a build-flag macro:
 
-This file is for future Claude Code sessions to bootstrap quickly. Read this first.
+- **`-DBOARD_AMOLED_216`** → original Waveshare ESP32-S3-Touch-AMOLED-2.16 (CO5300, 480×480 square, CST9220 touch). Build env: `waveshare_amoled_216`.
+- **`-DBOARD_AMOLED_18`** → Waveshare ESP32-S3-Touch-AMOLED-1.8 (SH8601, 368×448 portrait, FT3168 touch). Build env: `waveshare_amoled_18`.
+
+`display_cfg.h` selects pins / typedefs / extern decls based on the macro. Per-board layout deltas (panel heights, fonts) are scoped with `#ifdef` in `ui.cpp` and `splash.cpp`.
+
+Connects to a host daemon over BLE; daemon polls Anthropic API for usage data. This file is for future Claude Code sessions to bootstrap quickly. Read this first.
 
 ## Hardware (critical pins)
 
+### AMOLED-2.16 (original)
 - Display: **CO5300** AMOLED via QSPI (CS=12, SCLK=38, SDIO0..3=4..7, RST=2)
 - Touch: **CST9220** via I2C (SDA=15, SCL=14, INT=11, addr=0x5A)
 - PMU: **AXP2101** on same I2C bus (addr=0x34) — battery, USB VBUS, PWR button IRQ
 - IMU: **QMI8658** on same I2C bus (addr=0x6B) — accelerometer for auto-rotation
 - Buttons: GPIO 0 (left → Space/voice-mode), GPIO 18 (right → Shift+Tab/mode-toggle), AXP PKEY (middle → cycle screens; on splash → cycle animations)
 
+### AMOLED-1.8 (newer port)
+- Display: **SH8601** AMOLED via QSPI (CS=12, **SCLK=11** ← different!, SDIO0..3=4..7, RST routed via XCA9554 EXIO1)
+- Touch: **FT3168** via I2C (SDA=15, SCL=14, INT=21, addr=0x38). Driven by minimal inline reader in `main.cpp` (FocalTech standard register layout — avoids vendoring the GPLv3 `Arduino_DriveBus` library).
+- PMU: AXP2101 @ 0x34 (same chip as 2.16 — `XPowersLib` reused; battery is an optional kit add-on but PMU + charging circuitry are populated)
+- IMU: QMI8658 @ 0x6B (same chip — initialized for I2C bus health, rotation logic disabled)
+- IO expander: **XCA9554 / PCA9554** @ I2C 0x20. Gates LCD_RST, TP_RST, audio amp enable, and reads the PWR button. **`io_expander_init()` MUST run before `gfx->begin()` or `ft3168_init()`** — otherwise display/touch stay in reset and silently fail. PWR button is on EXIO4, active HIGH (verified empirically with the deleted `iox` serial debug command).
+- Orientation: **fixed at 0°**. IMU auto-rotation is disabled; `rotate_strip()` / `handle_rotation_change()` are excluded via `#ifndef BOARD_AMOLED_18`.
+- Buttons: GPIO 0 (BOOT → Space/voice-mode), XCA9554 EXIO4 (PWR → cycle screens; on splash → cycle animations). **No third button** (GPIO 18 button doesn't exist on this board).
+
 ## Architecture
 
 ```text
-main.cpp        — setup(), loop(), button polling (left→Space, right→Shift+Tab, mid→cycle), rotation flash
-display_cfg.h   — pin defines, extern object decls
-ui.{h,cpp}      — 3-screen UI (splash, usage, bluetooth); splash is touch-toggled, usage↔bluetooth via mid button
-splash.{h,cpp}  — 20×20 pixel-art animation engine, 24× upscale to 480×480
-imu.{h,cpp}     — accelerometer-driven rotation tracker (returns 0..3)
-power.{h,cpp}   — AXP2101 wrapper (battery %, charging, VBUS, PWR button)
-touch.{h,cpp}   — minimal tap detector → ui_toggle_splash() (Usage/Splash) or ble_clear_bonds() (BT reset zone)
+main.cpp        — setup(), loop(), button polling, FT3168 minimal reader (AMOLED-1.8), rotation flash (2.16 only)
+display_cfg.h   — board-conditional pin defines, typedefs (PlatformDisplay = CO5300|SH8601), extern object decls
+io_expander.{h,cpp} — XCA9554/PCA9554 wrapper (AMOLED-1.8 only): LCD/TP reset release + PWR button read
+ui.{h,cpp}      — 3-screen UI (splash, usage, bluetooth); splash is touch-toggled, usage↔bluetooth via PWR button
+splash.{h,cpp}  — 20×20 pixel-art animation engine. CELL = 24 (480²) for 2.16, 18 (360² centered) for 1.8
+imu.{h,cpp}     — accelerometer-driven rotation tracker (returns 0..3). Result is ignored on AMOLED-1.8.
+power.{h,cpp}   — AXP2101 wrapper (battery %, charging, VBUS, PWR button). PWR source is conditional: AXP PKEY IRQ on 2.16, XCA9554 EXIO4 polling on 1.8.
 ble.{h,cpp}     — NimBLE peripheral: custom data service + HID keyboard
 data.h          — UsageData struct
 icons.h         — icon arrays. Battery (5×) are RGB565A8 with alpha; rest are raw RGB565.
 logo.h          — 80×80 RGB565 logo
-font_*.c        — pre-compiled LVGL 9 bitmap fonts (Tiempos 56, Styrene 48/28/24/20, Mono 32)
+font_*.c        — pre-compiled LVGL 9 bitmap fonts (Tiempos 56/34, Styrene 48/28/24/20/16/14/12, Mono 32/18)
 splash_animations.h — generated, do not hand-edit
 ```
 
 ## Build / flash
 
 ```bash
-pio run -d firmware                                       # build
-pio run -d firmware -t upload --upload-port /dev/ttyACM0  # flash (binary path uses USB JTAG)
+pio run -d firmware -e waveshare_amoled_216                                     # build 2.16 (default original)
+pio run -d firmware -e waveshare_amoled_18                                      # build 1.8 (new port)
+pio run -d firmware -e waveshare_amoled_18 -t upload --upload-port /dev/cu.usbmodem101   # flash 1.8 on macOS
+pio run -d firmware -e waveshare_amoled_216 -t upload --upload-port /dev/ttyACM0         # flash 2.16 on Linux
 ```
 
-`/home/hermann/.platformio/penv/bin/pio` if `pio` isn't on PATH.
+If `pio` isn't on PATH: try `~/.platformio/penv/bin/pio` (Linux/macOS pio install) or `brew install platformio` on macOS.
 
-Device shows up as `/dev/ttyACM0` (Espressif USB JTAG/serial debug unit). No boot-mode gymnastics needed — direct flash works.
+Device path differs by OS: `/dev/cu.usbmodem*` on macOS, `/dev/ttyACM0` on Linux. Both expose the ESP32-S3 native USB-JTAG (no boot-mode dance needed).
 
 ## QA your own UI changes — don't ask the user
 
-The firmware ships a `screenshot` serial command that dumps the LVGL framebuffer over `/dev/ttyACM0`. `./screenshot.sh out.png /dev/ttyACM0` captures a 480×480 PNG. **Use this on every UI iteration** — Read the PNG with the Read tool, verify the change visually, iterate.
+The firmware ships a `screenshot` serial command that dumps the LVGL framebuffer. `./screenshot.sh out.png [port]` captures a PNG sized to the active display (480×480 or 368×448). **Use this on every UI iteration** — Read the PNG with the Read tool, verify the change visually, iterate. Script auto-picks the macOS/Linux default port and falls back to pio's bundled Python if pyserial isn't on the system Python.
 
 The boot screen is `SCREEN_SPLASH` and only advances on a physical button press, so a fresh flash will sit on the splash. To screenshot the screen you're actually editing without asking the user to press a button, **temporarily change the default boot screen** in `main.cpp` (search for `ui_show_screen(SCREEN_SPLASH);`) to `SCREEN_USAGE` / `SCREEN_CONTROLLER` / `SCREEN_BLUETOOTH`, do your iteration, then revert before committing.
 
