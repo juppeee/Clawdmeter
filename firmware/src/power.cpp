@@ -8,6 +8,7 @@
 
 static int      cached_pct      = -1;
 static bool     cached_charging = false;
+static bool     cached_vbus     = false;
 static bool     pwr_pressed_flag = false;
 static uint32_t last_battery_ms  = 0;
 static uint32_t last_charging_ms = 0;
@@ -30,6 +31,7 @@ void power_init(void) {
     pmu.enableIRQ(XPOWERS_AXP2101_PKEY_SHORT_IRQ);
 
     cached_charging = pmu.isCharging();
+    cached_vbus     = pmu.isVbusIn();
     cached_pct = pmu.getBatteryPercent();
 }
 
@@ -39,6 +41,7 @@ void power_tick(void) {
     if (now - last_charging_ms >= CHARGING_POLL_MS) {
         last_charging_ms = now;
         cached_charging = pmu.isCharging();
+        cached_vbus     = pmu.isVbusIn();
     }
 
     if (now - last_battery_ms >= BATTERY_POLL_MS) {
@@ -63,6 +66,10 @@ int power_battery_pct(void) {
 
 bool power_is_charging(void) {
     return cached_charging;
+}
+
+bool power_is_vbus_in(void) {
+    return cached_vbus;
 }
 
 bool power_pwr_pressed(void) {
