@@ -2,6 +2,7 @@
 #include "idle.h"
 #include "idle_cfg.h"
 #include "display_cfg.h"   // declares `extern Arduino_CO5300 *gfx;`
+#include "power.h"
 
 enum IdleState {
     STATE_AWAKE,
@@ -68,6 +69,16 @@ bool idle_is_asleep(void) {
 
 void idle_tick(void) {
     uint32_t now = millis();
+
+    // While on USB power (if configured), don't sleep — and wake from sleep
+    // when power comes back. Treats USB-in as continuous activity.
+    if (!IDLE_SLEEP_WHEN_CHARGING && power_is_vbus_in()) {
+        last_activity_ms = now;
+        if (state == STATE_ASLEEP || state == STATE_FADING_OUT) {
+            begin_fade(DISPLAY_DEFAULT_BRIGHTNESS, now);
+            state = STATE_FADING_IN;
+        }
+    }
 
     switch (state) {
     case STATE_AWAKE:

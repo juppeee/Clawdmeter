@@ -55,10 +55,35 @@ static void touch_read() {
         touch_pressed = false;
     }
 
-    // Touch never counts as user activity and is fully swallowed while the
-    // panel is dark — avoids accidental wakes and prevents LVGL from secretly
-    // toggling splash<->usage behind a black screen.
-    if (idle_is_asleep()) touch_pressed = false;
+    // Touch policy is driven by IDLE_WAKE_ON_TOUCH:
+    //   true  → a press edge while asleep wakes the device and the first
+    //           touch is swallowed (mirrors the button wake-consumption); a
+    //           press while awake counts as activity.
+    //   false → touch never counts as activity and is fully swallowed while
+    //           the panel is dark, so pets/sleeves can't wake it overnight
+    //           and LVGL can't quietly toggle splash<->usage on a black panel.
+    if (IDLE_WAKE_ON_TOUCH) {
+        static bool touch_was = false;
+        static bool touch_wake_swallowed = false;
+        bool touch_now = touch_pressed;
+        if (touch_now && !touch_was) {
+            if (idle_consume_wake_press()) {
+                touch_wake_swallowed = true;
+                touch_pressed = false;  // hide this press from LVGL
+            }
+        } else if (!touch_now && touch_was) {
+            if (touch_wake_swallowed) {
+                touch_wake_swallowed = false;
+                touch_pressed = false;  // also hide the corresponding release
+            }
+        } else if (touch_now && touch_wake_swallowed) {
+            // Held finger through wake — keep hiding until release.
+            touch_pressed = false;
+        }
+        touch_was = touch_now;
+    } else {
+        if (idle_is_asleep()) touch_pressed = false;
+    }
 }
 
 // ---- LVGL draw buffers (PSRAM-backed, partial render) ----
