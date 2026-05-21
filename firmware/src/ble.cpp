@@ -126,8 +126,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 class RxCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* chr, NimBLEConnInfo& info) override {
         std::string val = chr->getValue();
-        size_t len = val.length();
-        if (len >= BLE_BUF_SIZE) len = BLE_BUF_SIZE - 1;
+        size_t len = std::min(val.length(), (size_t)(BLE_BUF_SIZE - 1));
         memcpy(rx_buf, val.c_str(), len);
         rx_buf[len] = '\0';
         data_ready = true;
