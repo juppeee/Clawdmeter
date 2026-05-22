@@ -118,7 +118,7 @@ View logs: `journalctl --user -u claude-usage-daemon -f`
 
 ## How it works
 
-1. The daemon reads your Claude Code OAuth token from `~/.claude/.credentials.json`.
+1. The daemon reads your Claude Code OAuth token — from the macOS Keychain (service `Claude Code-credentials`) on macOS, or from `~/.claude/.credentials.json` on Linux.
 2. It makes a minimal API call to `api.anthropic.com/v1/messages` — one token of Haiku, basically free.
 3. The usage numbers come straight out of the response headers (`anthropic-ratelimit-unified-5h-utilization` and friends).
 4. The daemon connects to the ESP32 over BLE and writes a JSON payload to the GATT RX characteristic.

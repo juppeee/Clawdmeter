@@ -20,8 +20,8 @@ echo "[1/5] Checking prerequisites..."
 for cmd in python3 curl; do
     command -v "$cmd" >/dev/null || { echo "Error: $cmd is required"; exit 1; }
 done
-if [ ! -f "$HOME/.claude/.credentials.json" ]; then
-    echo "Warning: ~/.claude/.credentials.json not found."
+if ! security find-generic-password -s "Claude Code-credentials" -a "$USER" -w >/dev/null 2>&1; then
+    echo "Warning: Claude Code OAuth token not found in Keychain (service 'Claude Code-credentials')."
     echo "  Sign in via Claude Code first, then re-run this installer."
     echo "  Continuing anyway — the daemon will retry on each poll."
 fi
