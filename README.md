@@ -52,9 +52,11 @@ The macOS host pieces — Python daemon, LaunchAgent, and flash helper — were 
 ### Flash the firmware
 
 ```bash
-./flash-mac.sh                       # auto-detects /dev/cu.usbmodem*
-./flash-mac.sh /dev/cu.usbmodem1101  # or pass an explicit USB serial port
+./flash-mac.sh waveshare_amoled_216                       # auto-detects /dev/cu.usbmodem*
+./flash-mac.sh waveshare_amoled_18  /dev/cu.usbmodem1101  # or pass an explicit USB serial port
 ```
+
+The board env name is required. Run `./flash-mac.sh` with no args to see the available envs (scraped from `firmware/platformio.ini`).
 
 ### Pair the device
 
@@ -84,9 +86,11 @@ launchctl load -w ~/Library/LaunchAgents/com.user.claude-usage-daemon.plist # st
 ### Flash the firmware
 
 ```bash
-cd firmware
-pio run -t upload --upload-port /dev/ttyACM0
+./flash.sh waveshare_amoled_216                  # defaults to /dev/ttyACM0
+./flash.sh waveshare_amoled_18  /dev/ttyACM1     # or pass an explicit USB serial port
 ```
+
+The board env name is required. Run `./flash.sh` with no args to see the available envs (scraped from `firmware/platformio.ini`).
 
 ### Pair the device
 
