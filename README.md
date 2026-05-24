@@ -123,8 +123,8 @@ View logs: `journalctl --user -u claude-usage-daemon -f`
 ## How it works
 
 1. The daemon reads your Claude Code OAuth token — from the macOS Keychain (service `Claude Code-credentials`) on macOS, or from `~/.claude/.credentials.json` on Linux.
-2. It GETs `api.anthropic.com/api/oauth/usage` (the same endpoint `claude /usage` uses) — costs zero tokens.
-3. The response is JSON with `five_hour`, `seven_day`, `seven_day_sonnet`, `seven_day_opus`, `extra_usage` blocks; each window carries a `utilization` (0..1) and `resets_at` (ISO8601).
+2. It makes a minimal API call to `api.anthropic.com/v1/messages` — one token of Haiku, basically free.
+3. The usage numbers come straight out of the response headers (`anthropic-ratelimit-unified-5h-utilization` and friends).
 4. The daemon connects to the ESP32 over BLE and writes a JSON payload to the GATT RX characteristic.
 5. The firmware parses it and updates the LVGL dashboard.
 6. The firmware also tracks the rate of change of session % over a 5-minute window and picks splash animations from the matching mood group.

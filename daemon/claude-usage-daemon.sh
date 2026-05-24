@@ -1,10 +1,8 @@
 #!/bin/bash
 # Claude Usage Tracker Daemon (BLE)
-# Reads Claude Code OAuth token, polls usage via the OAuth usage endpoint
-# (api.anthropic.com/api/oauth/usage — same one `claude /usage` uses, costs
-# zero tokens), sends results to the ESP32 over BLE GATT.
+# Reads Claude Code OAuth token, polls usage via API, sends to ESP32 over BLE GATT.
 # Auto-connects and reconnects to the Claude Controller BLE device.
-# Dependencies: curl, awk, python3, bluetoothctl
+# Dependencies: curl, awk, bluetoothctl
 
 DEVICE_NAME="Claude Controller"
 DEVICE_MAC="${DEVICE_MAC:-}"  # auto-discovered if empty
@@ -196,56 +194,42 @@ write_gatt() {
 poll() {
     local token
     token=$(read_token) || { log "Error: could not read token"; return 1; }
+    local now
+    now=$(date +%s)
 
-    local body
-    body=$(curl -s \
-        "https://api.anthropic.com/api/oauth/usage" \
+    local headers
+    headers=$(curl -s -D - -o /dev/null \
+        "https://api.anthropic.com/v1/messages" \
         -H "Authorization: Bearer $token" \
+        -H "anthropic-version: 2023-06-01" \
         -H "anthropic-beta: oauth-2025-04-20" \
-        -H "Accept: application/json" \
+        -H "Content-Type: application/json" \
         -H "User-Agent: claude-code/2.1.5" \
+        -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
         2>/dev/null) || { log "Error: API call failed"; return 1; }
 
+    local s5h_util s5h_reset s7d_util s7d_reset status
+    s5h_util=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-5h-utilization" | tr -d '\r' | awk '{print $2}')
+    s5h_reset=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-5h-reset" | tr -d '\r' | awk '{print $2}')
+    s7d_util=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-7d-utilization" | tr -d '\r' | awk '{print $2}')
+    s7d_reset=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-7d-reset" | tr -d '\r' | awk '{print $2}')
+    status=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-5h-status" | tr -d '\r' | awk '{print $2}')
+
+    s5h_util=${s5h_util:-0}
+    s5h_reset=${s5h_reset:-0}
+    s7d_util=${s7d_util:-0}
+    s7d_reset=${s7d_reset:-0}
+    status=${status:-unknown}
+
     local payload
-    payload=$(python3 -c '
-import datetime, json, sys, time
-
-try:
-    data = json.loads(sys.stdin.read())
-except json.JSONDecodeError:
-    sys.exit(1)
-
-def pct(w):
-    if not isinstance(w, dict):
-        return 0
-    u = w.get("utilization")
-    return int(round(u)) if isinstance(u, (int, float)) else 0
-
-def reset_mins(w):
-    if not isinstance(w, dict):
-        return -1
-    s = w.get("resets_at")
-    if not isinstance(s, str):
-        return -1
-    try:
-        ts = datetime.datetime.fromisoformat(s.replace("Z", "+00:00")).timestamp()
-    except ValueError:
-        return -1
-    m = (ts - time.time()) / 60.0
-    return int(round(m)) if m > 0 else 0
-
-fh = data.get("five_hour")
-sd = data.get("seven_day")
-s = pct(fh)
-print(json.dumps({
-    "s": s,
-    "sr": reset_mins(fh),
-    "w": pct(sd),
-    "wr": reset_mins(sd),
-    "st": "limited" if s >= 100 else "allowed",
-    "ok": True,
-}, separators=(",", ":")))
-' <<< "$body") || { log "Error: failed to parse usage JSON"; return 1; }
+    payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$status" -v now="$now" \
+        'BEGIN {
+            sp = sprintf("%.0f", u5 * 100);
+            sr = (r5 - now) / 60; sr = sr > 0 ? sprintf("%.0f", sr) : 0;
+            wp = sprintf("%.0f", u7 * 100);
+            wr = (r7 - now) / 60; wr = wr > 0 ? sprintf("%.0f", wr) : 0;
+            printf "{\"s\":%s,\"sr\":%s,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"ok\":true}", sp, sr, wp, wr, st;
+        }')
 
     log "Sending: $payload"
     write_gatt "$RX_CHAR_PATH" "$payload" || { log "Write failed"; return 1; }
