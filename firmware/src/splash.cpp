@@ -103,11 +103,25 @@ void splash_init(lv_obj_t *parent) {
     int min_dim = (c.width < c.height) ? c.width : c.height;
     cell     = min_dim / GRID;       // fits within the smaller display dimension
     if (cell < 4) cell = 4;
+
+#ifdef BOARD_HAS_PSRAM
+    const uint32_t canvas_caps = MALLOC_CAP_SPIRAM;
+#else
+    // Without PSRAM the full 480×480 RGB565 canvas (460 KB) won't fit. Cap
+    // the canvas so the buffer stays under ~80 KB, leaving the rest of
+    // internal SRAM free for LVGL, NimBLE, and the audio/PMU stacks. The
+    // canvas is centered, so the cost is extra black border around the
+    // pixel art — not cropping.
+    const uint32_t canvas_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
+    const int MAX_CELL_NO_PSRAM = 10;  // 10*20=200; 200*200*2=78 KB
+    if (cell > MAX_CELL_NO_PSRAM) cell = MAX_CELL_NO_PSRAM;
+#endif
+
     canvas_w = GRID * cell;
     canvas_h = GRID * cell;
 
-    canvas_buf = (uint16_t*)heap_caps_malloc(canvas_w * canvas_h * 2, MALLOC_CAP_SPIRAM);
-    row_buf    = (uint16_t*)heap_caps_malloc(canvas_w * 2,             MALLOC_CAP_SPIRAM);
+    canvas_buf = (uint16_t*)heap_caps_malloc(canvas_w * canvas_h * 2, canvas_caps);
+    row_buf    = (uint16_t*)heap_caps_malloc(canvas_w * 2,             canvas_caps);
     if (!canvas_buf || !row_buf) {
         Serial.println("splash: failed to alloc canvas buffer");
         return;
