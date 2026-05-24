@@ -42,12 +42,17 @@
 #define AXP2101_ADDR         0x34
 
 // ---- Buttons ----
-// Only one user GPIO button (BOOT). The "PWR" side button is the AXP2101
-// PKEY input — already serviced by power.cpp via the PKEY_SHORT_IRQ path.
-#define BTN_BACK_GPIO        9     // BOOT — primary, Space (PTT)
+// Three side-mounted buttons:
+//   BOOT (primary) — GPIO 9, sends Space (PTT) over BLE HID
+//   PWR  (cycle screens) — AXP2101 PKEY IRQ, handled in power.cpp
+//   KEY  (secondary) — GPIO 10, sends Shift+Tab (mode toggle) over BLE HID
+// KEY GPIO isn't documented by Waveshare; identified empirically by
+// scanning unused GPIOs at boot (see git history of board_init.cpp).
+#define BTN_BACK_GPIO        9
+#define BTN_FWD_GPIO         10
 
 // ---- Capability flags ----
-#define BOARD_HAS_SECONDARY_BUTTON 0
+#define BOARD_HAS_SECONDARY_BUTTON 1
 #define BOARD_HAS_ROTATION         0    // C6 has no PSRAM headroom for the rotation strip
 #define BOARD_HAS_IMU              1    // present + initialized for I2C bus health
 #define BOARD_HAS_BATTERY          1
