@@ -236,6 +236,10 @@ void ble_clear_bonds(void) {
     need_advertise = true;
 }
 
+bool ble_has_bonds(void) {
+    return NimBLEDevice::getNumBonds() > 0;
+}
+
 bool ble_has_data(void) {
     return data_ready;
 }
