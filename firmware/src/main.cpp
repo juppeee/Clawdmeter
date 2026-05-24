@@ -21,8 +21,17 @@
 
 static UsageData usage = {};
 
-// ---- LVGL draw buffers (PSRAM, partial render mode) ----
+// ---- LVGL draw buffers (partial render mode) ----
+// PSRAM-equipped boards (S3) can comfortably hold larger strips. PSRAM-free
+// boards (e.g. ESP32-C6) allocate from internal SRAM, so we shrink the strip
+// — 480×20 RGB565 = 19 KB × 2 buffers = 38 KB, fits beside everything else.
+#ifdef BOARD_HAS_PSRAM
 #define BUF_LINES 40
+#define LV_BUF_CAPS (MALLOC_CAP_SPIRAM)
+#else
+#define BUF_LINES 20
+#define LV_BUF_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#endif
 static uint16_t* buf1 = nullptr;
 static uint16_t* buf2 = nullptr;
 
@@ -111,6 +120,12 @@ static char cmd_buf[CMD_BUF_SIZE];
 static int cmd_pos = 0;
 
 static void send_screenshot() {
+#ifndef BOARD_HAS_PSRAM
+    // A full RGB565 framebuffer doesn't fit in internal SRAM on PSRAM-free
+    // boards (e.g. 480×480×2 = 460 KB). Capture is unsupported there.
+    Serial.println("SCREENSHOT_UNSUPPORTED");
+    return;
+#else
     const uint32_t w = board_caps().width;
     const uint32_t h = board_caps().height;
     const uint32_t row_bytes = w * 2;
@@ -139,6 +154,7 @@ static void send_screenshot() {
     Serial.println();
     Serial.println("SCREENSHOT_END");
     heap_caps_free(sbuf);
+#endif
 }
 
 static void check_serial_cmd() {
@@ -182,8 +198,8 @@ void setup() {
     lv_init();
     lv_tick_set_cb(my_tick);
 
-    buf1 = (uint16_t*)heap_caps_malloc(W * BUF_LINES * 2, MALLOC_CAP_SPIRAM);
-    buf2 = (uint16_t*)heap_caps_malloc(W * BUF_LINES * 2, MALLOC_CAP_SPIRAM);
+    buf1 = (uint16_t*)heap_caps_malloc(W * BUF_LINES * 2, LV_BUF_CAPS);
+    buf2 = (uint16_t*)heap_caps_malloc(W * BUF_LINES * 2, LV_BUF_CAPS);
 
     lv_display_t* disp = lv_display_create(W, H);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
