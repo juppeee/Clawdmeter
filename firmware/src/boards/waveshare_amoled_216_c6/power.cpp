@@ -33,10 +33,6 @@ void power_hal_init(void) {
     // Mirror the Waveshare XiaoZhi BSP charging config so the on-chip
     // fuel gauge has the right reference numbers. Without these,
     // getBatteryPercent() returns -1 / shows "---" on the UI.
-    pmu.setChargeTargetVoltage(XPOWERS_AXP2101_CHG_VOL_4V1);
-    pmu.setChargerConstantCurr(XPOWERS_AXP2101_CHG_CUR_400MA);
-    pmu.setChargerTerminationCurr(XPOWERS_AXP2101_CHG_ITERM_25MA);
-    pmu.setPrechargeCurr(XPOWERS_AXP2101_PRECHARGE_50MA);
 
     pmu.disableIRQ(XPOWERS_AXP2101_ALL_IRQ);
     pmu.clearIrqStatus();
@@ -48,7 +44,7 @@ void power_hal_init(void) {
 }
 
 void power_hal_tick(void) {
-    uint32_t now = millis();
+    uint32_t now = millis(); 
 
     if (now - last_charging_ms >= CHARGING_POLL_MS) {
         last_charging_ms = now;
