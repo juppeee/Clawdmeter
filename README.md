@@ -92,13 +92,13 @@ The board env name is required. Run `./flash.sh` with no args to see the availab
 
 ### Pair the device
 
-After flashing, the device advertises as "Claudemeter". Pair it once:
+After flashing, the device advertises as "Clawdmeter". Pair it once:
 
 ```bash
 # Scan for the device
 bluetoothctl scan le
 
-# When "Claude Controller" appears, pair and trust it
+# When "Clawdmeter" appears, pair and trust it
 bluetoothctl pair F4:12:FA:C0:8F:E5    # use your device's MAC
 bluetoothctl trust F4:12:FA:C0:8F:E5
 ```
