@@ -280,8 +280,13 @@ void loop() {
 
         if (power_hal_pwr_pressed()) {
             if (!idle_consume_wake_press()) {
-                if (ui_get_current_screen() == SCREEN_SPLASH) splash_next();
-                else                                          ui_cycle_screen();
+                // Touch boards leave the splash via a screen tap, so PWR cycles
+                // splash animations there. Touchless boards (e-paper) have no tap,
+                // so PWR must advance off the splash instead.
+                if (ui_get_current_screen() == SCREEN_SPLASH && board_caps().has_touch)
+                    splash_next();
+                else
+                    ui_cycle_screen();
             }
         }
     }
