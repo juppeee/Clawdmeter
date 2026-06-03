@@ -48,7 +48,7 @@
 #define SND_I2S_DOUT         8      // ESP → ES8311 (speaker)
 #define SND_I2S_DIN          10     // ES8311 → ESP (mic; unused, set for STD mode)
 #define SND_PA_PIN           46     // power-amp enable, HIGH = on
-#define SND_SAMPLE_RATE      16000
+#define SND_SAMPLE_RATE      44100
 #define SND_ES8311_ADDR      0x18
 
 // ---- Capability flags (compile-time; redundant with BoardCaps but lets
