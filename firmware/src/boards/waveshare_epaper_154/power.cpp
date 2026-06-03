@@ -141,9 +141,9 @@ bool power_hal_is_charging(void) { return false; }   // no charge-status pin bro
 bool power_hal_is_vbus_in(void)  { return true; }     // keep idle SM awake (see top-of-file)
 
 bool power_hal_pwr_pressed(void) {
-    if (pwr_pressed_flag) {
-        pwr_pressed_flag = false;
-        return true;
-    }
+    if (pwr_pressed_flag) { pwr_pressed_flag = false; return true; }
     return false;
 }
+
+bool power_hal_pwr_long_pressed(void) { return false; }
+bool power_hal_pwr_released(void)     { return false; }
