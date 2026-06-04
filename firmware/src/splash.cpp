@@ -1,5 +1,6 @@
 #include "splash.h"
 #include "splash_animations.h"
+#include "splash_geometry.h"
 #include "theme.h"
 #include "usage_rate.h"
 #include "hal/board_caps.h"
@@ -9,8 +10,10 @@
 
 // 20×20 grid. CELL sized so the canvas fits the smaller display dimension —
 // the canvas is square and centered, so on portrait or letterboxed panels
-// it leaves vertical margin rather than cropping.
-#define GRID         20
+// it leaves vertical margin rather than cropping. On PSRAM-less boards the
+// buffer is rendered tiny (cell == 1) and LVGL scales it up to fill the panel;
+// the geometry decision lives in splash_compute_geometry() (splash_geometry.h).
+#define GRID         SPLASH_GRID
 static int  cell      = 24;        // recomputed in splash_init()
 static int  canvas_w  = GRID * 24;
 static int  canvas_h  = GRID * 24;
@@ -100,25 +103,26 @@ static void show_placeholder() {
 
 void splash_init(lv_obj_t *parent) {
     const BoardCaps& c = board_caps();
-    int min_dim = (c.width < c.height) ? c.width : c.height;
-    cell     = min_dim / GRID;       // fits within the smaller display dimension
-    if (cell < 4) cell = 4;
 
 #ifdef BOARD_HAS_PSRAM
+    const bool     has_psram   = true;
     const uint32_t canvas_caps = MALLOC_CAP_SPIRAM;
 #else
-    // Without PSRAM the full 480×480 RGB565 canvas (460 KB) won't fit. Cap
-    // the canvas so the buffer stays under ~80 KB, leaving the rest of
-    // internal SRAM free for LVGL, NimBLE, and the audio/PMU stacks. The
-    // canvas is centered, so the cost is extra black border around the
-    // pixel art — not cropping.
+    // Without PSRAM the full 480×480 RGB565 canvas (460 KB) won't fit in
+    // internal SRAM. splash_compute_geometry() returns a tiny 20×20 buffer
+    // (~800 bytes) plus an LVGL scale factor; LVGL nearest-neighbour upscales
+    // it to fill the panel, so the splash is full-screen rather than a small
+    // centered square. The buffer fits easily in internal SRAM, leaving the
+    // rest free for LVGL, NimBLE, and the audio/PMU stacks.
+    const bool     has_psram   = false;
     const uint32_t canvas_caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-    const int MAX_CELL_NO_PSRAM = 10;  // 10*20=200; 200*200*2=78 KB
-    if (cell > MAX_CELL_NO_PSRAM) cell = MAX_CELL_NO_PSRAM;
 #endif
 
-    canvas_w = GRID * cell;
-    canvas_h = GRID * cell;
+    SplashGeometry geo = splash_compute_geometry(c.width, c.height, has_psram);
+    cell                 = geo.cell;
+    canvas_w             = geo.canvas_dim;
+    canvas_h             = geo.canvas_dim;
+    const int img_scale  = geo.scale;
 
     canvas_buf = (uint16_t*)heap_caps_malloc(canvas_w * canvas_h * 2, canvas_caps);
     row_buf    = (uint16_t*)heap_caps_malloc(canvas_w * 2,             canvas_caps);
@@ -138,6 +142,16 @@ void splash_init(lv_obj_t *parent) {
 
     canvas = lv_canvas_create(splash_container);
     lv_canvas_set_buffer(canvas, canvas_buf, canvas_w, canvas_h, LV_COLOR_FORMAT_RGB565);
+
+    // On PSRAM-less boards the buffer is a tiny 20×20; upscale it to fill the
+    // panel. Nearest-neighbour (antialias off) keeps the pixel art crisp, and
+    // the pivot is the source centre so the scaled image grows symmetrically
+    // around the centered object rather than off-screen.
+    if (img_scale != SPLASH_SCALE_UNITY) {
+        lv_image_set_antialias(canvas, false);
+        lv_image_set_pivot(canvas, canvas_w / 2, canvas_h / 2);
+        lv_image_set_scale(canvas, img_scale);
+    }
     lv_obj_center(canvas);
 
     // Placeholder label (visible only when no animations are loaded)
