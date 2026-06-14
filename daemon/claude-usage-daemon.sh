@@ -12,6 +12,7 @@ REQ_CHAR_UUID="4c41555a-4465-7669-6365-000000000004"
 POLL_INTERVAL=60
 TICK=5
 SAVED_MAC_FILE="$HOME/.config/claude-usage-monitor/ble-address"
+CONFIG_FILE="$HOME/.config/claude-usage-monitor/config"
 REFRESH_FLAG="/tmp/claude-usage-refresh-$$"
 DBUS_DEST="org.bluez"
 NOTIFY_PID=""
@@ -22,6 +23,22 @@ log() {
 
 read_token() {
     grep -o '"accessToken":"[^"]*"' "$HOME/.claude/.credentials.json" | cut -d'"' -f4
+}
+
+# Read the `chime` option from the config file. Echoes one of: off|on.
+# Defaults to "off" so the device stays silent until the user opts in.
+read_chime_setting() {
+    local val=""
+    if [ -f "$CONFIG_FILE" ]; then
+        val=$(grep -E '^[[:space:]]*chime[[:space:]]*=' "$CONFIG_FILE" | tail -1 \
+            | tr -d '\r' \
+            | sed -E 's/^[[:space:]]*chime[[:space:]]*=[[:space:]]*//; s/[[:space:]]*(#.*)?$//' \
+            | tr '[:upper:]' '[:lower:]')
+    fi
+    case "$val" in
+        on) echo "on" ;;
+        *)  echo "off" ;;
+    esac
 }
 
 # Convert MAC to D-Bus path: AA:BB:CC:DD:EE:FF -> dev_AA_BB_CC_DD_EE_FF
@@ -221,14 +238,20 @@ poll() {
     s7d_reset=${s7d_reset:-0}
     status=${status:-unknown}
 
+    # Optional reset chime. When enabled, tell the firmware it may sound the
+    # session-reset chime by adding "c":1 to the payload (additive, off by default).
+    local chime chime_fragment=""
+    chime=$(read_chime_setting)
+    [ "$chime" = "on" ] && chime_fragment=",\"c\":1"
+
     local payload
-    payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$status" -v now="$now" \
+    payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$status" -v now="$now" -v chm="$chime_fragment" \
         'BEGIN {
             sp = sprintf("%.0f", u5 * 100);
             sr = (r5 - now) / 60; sr = sr > 0 ? sprintf("%.0f", sr) : 0;
             wp = sprintf("%.0f", u7 * 100);
             wr = (r7 - now) / 60; wr = wr > 0 ? sprintf("%.0f", wr) : 0;
-            printf "{\"s\":%s,\"sr\":%s,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"ok\":true}", sp, sr, wp, wr, st;
+            printf "{\"s\":%s,\"sr\":%s,\"w\":%s,\"wr\":%s,\"st\":\"%s\"%s,\"ok\":true}", sp, sr, wp, wr, st, chm;
         }')
 
     log "Sending: $payload"

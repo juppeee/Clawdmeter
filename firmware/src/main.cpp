@@ -111,6 +111,7 @@ static bool parse_json(const char* json, UsageData* out) {
     out->weekly_pct = doc["w"] | 0.0f;
     out->weekly_reset_mins = doc["wr"] | -1;
     strlcpy(out->status, doc["st"] | "unknown", sizeof(out->status));
+    out->chime = doc["c"] | false;   // absent (old daemon / chime off) → stay silent
     out->ok = doc["ok"] | false;
     out->valid = true;
     return true;
@@ -367,8 +368,9 @@ void loop() {
             bool session_reset = usage_rate_sample(usage.session_pct);
             int g_after = usage_rate_group();
             // 5-hour session limit refilled → chime so the user knows they can
-            // use Claude again (no-op on boards without a buzzer).
-            if (session_reset) {
+            // use Claude again (no-op on boards without a buzzer). Gated on the
+            // daemon's opt-in `chime` config; the `buzz` serial cmd ignores it.
+            if (session_reset && usage.chime) {
                 Serial.println("session reset detected — chime");
                 sound_hal_play_reset();
             }

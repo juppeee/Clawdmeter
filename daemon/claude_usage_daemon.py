@@ -35,6 +35,7 @@ SCAN_TIMEOUT = 8.0
 KEYCHAIN_SERVICE = "Claude Code-credentials"
 CREDENTIALS_PATH = Path.home() / ".claude" / ".credentials.json"
 SAVED_ADDR_FILE = Path.home() / ".config" / "claude-usage-monitor" / "ble-address"
+CONFIG_FILE = Path.home() / ".config" / "claude-usage-monitor" / "config"
 
 API_URL = "https://api.anthropic.com/v1/messages"
 API_HEADERS_TEMPLATE = {
@@ -271,6 +272,35 @@ async def discover_target(skip_addr: str | None = None):
     return address
 
 
+def read_chime_setting() -> str:
+    """Read the `chime` option from the config file. One of: off|on.
+
+    Defaults to "off" (the device stays silent) so existing setups are
+    unaffected until the user opts in.
+    """
+    try:
+        if CONFIG_FILE.exists():
+            for line in CONFIG_FILE.read_text().splitlines():
+                line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if key.strip().lower() == "chime":
+                    val = val.strip().lower()
+                    if val in ("off", "on"):
+                        return val
+    except OSError:
+        pass
+    return "off"
+
+
+def add_chime_field(payload: dict) -> None:
+    """Add "c":1 to the payload when the config opts in, so the firmware may
+    sound the session-reset chime. Omitted entirely when chime is off."""
+    if read_chime_setting() == "on":
+        payload["c"] = 1
+
+
 async def poll_api(token: str) -> dict | None:
     headers = dict(API_HEADERS_TEMPLATE)
     headers["Authorization"] = f"Bearer {token}"
@@ -311,6 +341,7 @@ async def poll_api(token: str) -> dict | None:
         "st": hdr("anthropic-ratelimit-unified-5h-status", "unknown"),
         "ok": True,
     }
+    add_chime_field(payload)   # adds "c":1 iff the config opts in
     return payload
 
 
