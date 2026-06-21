@@ -11,6 +11,7 @@ import getpass
 import json
 import os
 import re
+import shutil
 import signal
 import subprocess
 import sys
@@ -188,7 +189,7 @@ async def _get_cb_manager():
 
 
 async def retrieve_connected_macos(skip_addr: str | None = None):
-    """Return a BLEDevice for a system-connected 'Claude Controller', or None.
+    """Return a BLEDevice for a system-connected 'Clawdmeter', or None.
 
     Two-step lookup, strongest signal first:
 
@@ -324,10 +325,22 @@ class Session:
         self.refresh_requested.set()
 
     async def setup_refresh_subscription(self) -> None:
+        # start_notify awaits CoreBluetooth's CCCD-write confirmation, which
+        # never arrives if the peripheral doesn't ACK the subscribe (a
+        # half-open link after the OS auto-connects the HID). Unbounded, that
+        # await wedges the whole daemon between "Connected" and the first poll
+        # — the device then shows nothing until a manual restart. Bound it: the
+        # subscription is only an optional device-initiated refresh nudge (we
+        # poll every POLL_INTERVAL regardless), so on timeout we proceed.
         try:
-            await self.client.start_notify(REQ_CHAR_UUID, self._on_refresh)
+            await asyncio.wait_for(
+                self.client.start_notify(REQ_CHAR_UUID, self._on_refresh),
+                timeout=10,
+            )
         except (BleakError, ValueError) as e:
             log(f"Refresh subscription unavailable: {e}")
+        except asyncio.TimeoutError:
+            log("Refresh subscription timed out; polling without it")
 
     async def write_payload(self, payload: dict) -> bool:
         data = json.dumps(payload, separators=(",", ":")).encode()
@@ -338,6 +351,91 @@ class Session:
         except BleakError as e:
             log(f"Write failed: {e}")
             return False
+
+
+def _is_encryption_error(exc: BaseException) -> bool:
+    """True if a connect error is a macOS bonding/encryption mismatch.
+
+    macOS reports a stale bond as CBErrorDomain Code=15 ("Failed to encrypt
+    the connection..."). Match on the message text so we don't depend on how
+    bleak wraps the underlying CoreBluetooth error.
+    """
+    s = str(exc).lower()
+    return "code=15" in s or "encrypt" in s
+
+
+# blueutil talks to Bluetooth via IOBluetooth, which on recent macOS needs its
+# OWN Bluetooth TCC grant (separate from the daemon's CoreBluetooth grant).
+# Without it, blueutil *hangs* instead of erroring — so every call is bounded
+# by a timeout and a hang is reported as a permission problem, not a crash.
+BLUEUTIL_TIMEOUT = 8
+
+
+def _blueutil(*args: str) -> str | None:
+    """Run `blueutil <args>`, returning stdout, or None on failure/timeout.
+
+    A timeout almost always means blueutil lacks Bluetooth permission (it
+    blocks rather than failing), so we surface that cause explicitly.
+    """
+    try:
+        return subprocess.run(
+            ["blueutil", *args],
+            capture_output=True, text=True,
+            timeout=BLUEUTIL_TIMEOUT, check=True,
+        ).stdout
+    except subprocess.TimeoutExpired:
+        log(f"blueutil {' '.join(args)} timed out — it likely lacks Bluetooth "
+            "permission. Grant it under System Settings > Privacy & Security > "
+            "Bluetooth (run `blueutil --paired` once from Terminal to prompt).")
+        return None
+    except (subprocess.SubprocessError, OSError) as e:
+        log(f"blueutil {' '.join(args)} failed: {e}")
+        return None
+
+
+def unpair_macos() -> bool:
+    """Forget a stale macOS bond for DEVICE_NAME so the device can re-pair.
+
+    A Code=15 "failed to encrypt" connect error means macOS holds bonding
+    keys that no longer match the ESP32's (e.g. after a firmware reflash or
+    the on-device bond-clear gesture). The firmware pairs "just works" (no
+    MITM), so once the stale bond is gone the next connect re-bonds silently
+    with no GUI prompt.
+
+    CoreBluetooth exposes no unpair API, so we shell out to `blueutil`. The
+    daemon only knows the peripheral's CoreBluetooth UUID, not the BD_ADDR
+    that blueutil needs, so we map by name via `blueutil --paired`. Returns
+    True if a bond was removed. Mirrors the Linux daemon's `bluetoothctl
+    remove` self-heal.
+    """
+    if not shutil.which("blueutil"):
+        log("Stale bond detected but `blueutil` is not installed; cannot "
+            "auto-recover. Run `brew install blueutil`, or forget "
+            f"'{DEVICE_NAME}' in System Settings > Bluetooth and reconnect.")
+        return False
+
+    out = _blueutil("--paired")
+    if out is None:
+        return False
+
+    # Each line looks like:
+    #   address: 28-84-85-55-5c-3d, ... name: "Clawdmeter", ...
+    addr = None
+    for line in out.splitlines():
+        if f'name: "{DEVICE_NAME}"' in line:
+            m = re.search(r"address:\s*([0-9a-fA-F:-]+)", line)
+            if m:
+                addr = m.group(1)
+                break
+    if not addr:
+        log(f"No paired '{DEVICE_NAME}' found to unpair (already forgotten?)")
+        return False
+
+    if _blueutil("--unpair", addr) is None:
+        return False
+    log(f"Unpaired stale bond for '{DEVICE_NAME}' [{addr}]; re-pairing on "
+        "next connect")
+    return True
 
 
 async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
@@ -355,6 +453,9 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
         await client.connect()
     except (BleakError, asyncio.TimeoutError) as e:
         log(f"Connection failed: {e}")
+        if sys.platform == "darwin" and _is_encryption_error(e):
+            log("Encryption failed — likely a stale macOS bond; self-healing")
+            unpair_macos()
         return False
 
     if not client.is_connected:
