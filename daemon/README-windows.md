@@ -42,7 +42,7 @@ before running the daemon:
 
 1. Put the device on its Bluetooth waiting screen (powered on, not yet connected).
 2. Open **Settings → Bluetooth & devices → Add device → Bluetooth**.
-3. Select **Claude Controller** and complete pairing.
+3. Select **Clawdmeter** and complete pairing.
 
 **Why this is required:**
 
@@ -104,7 +104,7 @@ python daemon\claude_usage_daemon_windows.py
 ```
 [HH:MM:SS] === Claude Usage Tracker Daemon (BLE, Windows) ===
 [HH:MM:SS] Poll interval: 60s
-[HH:MM:SS] Scanning for 'Claude Controller' (8.0s)...
+[HH:MM:SS] Scanning for 'Clawdmeter' (8.0s)...
 [HH:MM:SS] Found: XX:XX:XX:XX:XX:XX
 [HH:MM:SS] Connecting to XX:XX:XX:XX:XX:XX...
 [HH:MM:SS] Connected
@@ -135,7 +135,7 @@ Press **Ctrl+C** in the terminal. The daemon logs `Daemon stopping` and exits cl
 | Symptom | Likely cause | Fix |
 |---------|-------------|-----|
 | `Warning: running under Linux/WSL` | Running in WSL, not native Windows | Run from a native PowerShell or Command Prompt on Windows |
-| `Scanning for 'Claude Controller'… Device not found` | Clawdmeter is off, out of range, or showing a non-Bluetooth screen | Power on the device and ensure it is on the Bluetooth waiting screen |
+| `Scanning for 'Clawdmeter'… Device not found` | Clawdmeter is off, out of range, or showing a non-Bluetooth screen | Power on the device and ensure it is on the Bluetooth waiting screen |
 | `No token; skipping poll` | No credentials file found at any candidate path | Confirm `claude login` ran on this machine; check `%USERPROFILE%\.claude\.credentials.json` exists |
 | `API HTTP 401` | Token expired | Re-run `claude login` in a terminal to refresh the token, then restart the daemon |
 | `Connection failed` | WinRT BLE initialisation issue | Ensure Windows Bluetooth is on; try toggling Bluetooth off/on in Windows Settings |

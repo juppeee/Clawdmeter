@@ -188,7 +188,7 @@ async def _get_cb_manager():
 
 
 async def retrieve_connected_macos(skip_addr: str | None = None):
-    """Return a BLEDevice for a system-connected 'Claude Controller', or None.
+    """Return a BLEDevice for a system-connected 'Clawdmeter', or None.
 
     Two-step lookup, strongest signal first:
 
