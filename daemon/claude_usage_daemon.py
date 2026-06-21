@@ -325,10 +325,22 @@ class Session:
         self.refresh_requested.set()
 
     async def setup_refresh_subscription(self) -> None:
+        # start_notify awaits CoreBluetooth's CCCD-write confirmation, which
+        # never arrives if the peripheral doesn't ACK the subscribe (a
+        # half-open link after the OS auto-connects the HID). Unbounded, that
+        # await wedges the whole daemon between "Connected" and the first poll
+        # — the device then shows nothing until a manual restart. Bound it: the
+        # subscription is only an optional device-initiated refresh nudge (we
+        # poll every POLL_INTERVAL regardless), so on timeout we proceed.
         try:
-            await self.client.start_notify(REQ_CHAR_UUID, self._on_refresh)
+            await asyncio.wait_for(
+                self.client.start_notify(REQ_CHAR_UUID, self._on_refresh),
+                timeout=10,
+            )
         except (BleakError, ValueError) as e:
             log(f"Refresh subscription unavailable: {e}")
+        except asyncio.TimeoutError:
+            log("Refresh subscription timed out; polling without it")
 
     async def write_payload(self, payload: dict) -> bool:
         data = json.dumps(payload, separators=(",", ":")).encode()
