@@ -30,6 +30,7 @@ REQ_CHAR_UUID = "4c41555a-4465-7669-6365-000000000004"
 POLL_INTERVAL = 60
 TICK = 5
 SCAN_TIMEOUT = 8.0
+CONNECT_TIMEOUT = 20.0
 
 # macOS: token lives in Keychain (service "Claude Code-credentials").
 # Linux: token lives in ~/.claude/.credentials.json.
@@ -450,7 +451,16 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
     log(f"Connecting to {display}...")
     client = BleakClient(target)
     try:
-        await client.connect()
+        # Bound the connect the same way #84 bounded the refresh subscribe.
+        # On macOS the OS auto-connects the firmware's HID link, so
+        # CoreBluetooth can hand us a half-open peripheral whose GATT connect
+        # handshake never completes. BleakClient's own timeout governs
+        # discovery, not connectPeripheral, so an unbounded await here wedges
+        # the single-threaded daemon forever at "Connecting..." (observed ~13h,
+        # device stuck on stale data). wait_for raises TimeoutError, which the
+        # handler below already treats as a connection failure -> drop the
+        # cached address and rescan.
+        await asyncio.wait_for(client.connect(), timeout=CONNECT_TIMEOUT)
     except (BleakError, asyncio.TimeoutError) as e:
         log(f"Connection failed: {e}")
         if sys.platform == "darwin" and _is_encryption_error(e):
