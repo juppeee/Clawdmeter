@@ -7,6 +7,7 @@ later plans.
 """
 
 import asyncio
+import calendar
 import datetime
 import json
 import logging
@@ -117,6 +118,22 @@ def read_chime_setting() -> str:
 
     Defaults to "off" so the device stays silent until the user opts in.
     """
+    try:
+        if CONFIG_FILE.exists():
+            for line in CONFIG_FILE.read_text().splitlines():
+                line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if key.strip().lower() == "chime":
+                    val = val.strip().lower()
+                    if val in ("off", "on"):
+                        return val
+    except OSError:
+        pass
+    return "off"
+
+
 def read_clock_setting() -> str:
     """Read the `clock` option from the config file. One of: off|auto|12|24.
 
@@ -129,9 +146,6 @@ def read_clock_setting() -> str:
                 if "=" not in line:
                     continue
                 key, val = line.split("=", 1)
-                if key.strip().lower() == "chime":
-                    val = val.strip().lower()
-                    if val in ("off", "on"):
                 if key.strip().lower() == "clock":
                     val = val.strip().lower()
                     if val in ("off", "auto", "12", "24"):
@@ -146,6 +160,8 @@ def add_chime_field(payload: dict) -> None:
     sound the session-reset chime. Omitted entirely when chime is off."""
     if read_chime_setting() == "on":
         payload["c"] = 1
+
+
 def detect_hour_format() -> int:
     """Best-effort 12h/24h detection on Windows via the registry. Returns 12 or 24."""
     try:
@@ -207,17 +223,59 @@ async def poll_api(token: str) -> dict | None:
         except ValueError:
             return 0
 
-    payload = {
-        "s": pct(hdr("anthropic-ratelimit-unified-5h-utilization")),
-        "sr": reset_minutes(hdr("anthropic-ratelimit-unified-5h-reset")),
-        "w": pct(hdr("anthropic-ratelimit-unified-7d-utilization")),
-        "wr": reset_minutes(hdr("anthropic-ratelimit-unified-7d-reset")),
-        "st": hdr("anthropic-ratelimit-unified-5h-status", "unknown"),
-        "ok": True,
-    }
+    if resp.headers.get("anthropic-ratelimit-unified-5h-utilization"):
+        payload = {
+            "s": pct(hdr("anthropic-ratelimit-unified-5h-utilization")),
+            "sr": reset_minutes(hdr("anthropic-ratelimit-unified-5h-reset")),
+            "w": pct(hdr("anthropic-ratelimit-unified-7d-utilization")),
+            "wr": reset_minutes(hdr("anthropic-ratelimit-unified-7d-reset")),
+            "st": hdr("anthropic-ratelimit-unified-5h-status", "unknown"),
+            "acct": "pro",
+            "ok": True,
+        }
+    else:
+        reset_ts = hdr("anthropic-ratelimit-unified-overage-reset")
+        payload = {
+            "s": pct(hdr("anthropic-ratelimit-unified-overage-utilization")),
+            "sr": reset_minutes(reset_ts),
+            "w": 0,
+            "wr": 0,
+            "st": hdr("anthropic-ratelimit-unified-status", "unknown"),
+            "acct": "ent",
+            **_billing_period_info(now, reset_ts),
+            "ok": True,
+        }
     add_chime_field(payload)   # adds "c":1 iff the config opts in
     add_clock_fields(payload)   # adds "t" + "tf" iff the config opts in
     return payload
+
+
+def _billing_period_info(now: float, reset_ts: str) -> dict:
+    """Fraction of billing period elapsed (tp, 0-100) and period length in days (pd).
+
+    Monthly window is assumed (headers expose only reset_ts, not period). Per the
+    Claude Enterprise Admin API reference, spend-limit period's "only value today
+    is monthly" — see the macOS daemon for the full note.
+    """
+    try:
+        period_end = float(reset_ts)
+    except ValueError:
+        return {"tp": 0, "pd": 30, "rd": ""}
+    dt_end = datetime.datetime.fromtimestamp(period_end)
+    prev_month = dt_end.month - 1 or 12
+    prev_year = dt_end.year if dt_end.month > 1 else dt_end.year - 1
+    prev_day = min(dt_end.day, calendar.monthrange(prev_year, prev_month)[1])
+    dt_start = dt_end.replace(year=prev_year, month=prev_month, day=prev_day)
+    period_start = dt_start.timestamp()
+    period_len = period_end - period_start
+    if period_len <= 0:
+        return {"tp": 0, "pd": 30, "rd": ""}
+    pct_val = (now - period_start) / period_len * 100
+    return {
+        "tp": max(0, min(100, int(round(pct_val)))),
+        "pd": int(round(period_len / 86400)),
+        "rd": f"{dt_end.strftime('%b')} {dt_end.day}",
+    }
 
 
 async def scan_for_device():

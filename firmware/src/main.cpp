@@ -112,6 +112,11 @@ static bool parse_json(const char* json, UsageData* out) {
     out->weekly_reset_mins = doc["wr"] | -1;
     strlcpy(out->status, doc["st"] | "unknown", sizeof(out->status));
     out->chime = doc["c"] | false;   // absent (old daemon / chime off) → stay silent
+    const char* acct = doc["acct"] | "pro";
+    out->enterprise = (strcmp(acct, "ent") == 0);
+    out->time_pct = doc["tp"] | 0;
+    out->period_days = doc["pd"] | 30;
+    strlcpy(out->reset_date, doc["rd"] | "", sizeof(out->reset_date));
     out->clock_epoch = doc["t"] | 0L;
     out->clock_fmt = doc["tf"] | 24;
     out->ok = doc["ok"] | false;
