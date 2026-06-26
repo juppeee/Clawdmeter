@@ -42,7 +42,9 @@ ZOMBIE_BREAK_LIMIT = 1     # D-03: consecutive write failures before abandoning 
 RECONNECT_BACKOFF_CAP = 8  # D-05: fast-reconnect cap (seconds); keeps stacked retries inside 120s SLA
                            # ~5–10s band per CONTEXT.md Claude's Discretion; 8 chosen as middle ground
 
-# Optional clock display. Config lives under the same Clawdmeter dir as daemon.log.
+# Optional reset chime.
+# Optional clock display. 
+# Config lives under the same Clawdmeter dir as daemon.log.
 CONFIG_FILE = Path(os.environ.get("LOCALAPPDATA", Path.home() / "AppData" / "Local")) / "Clawdmeter" / "config"
 
 API_URL = "https://api.anthropic.com/v1/messages"
@@ -111,6 +113,26 @@ class AuthError(Exception):
     must NOT be mislabeled as a token problem (SC#5: a boot-time `getaddrinfo
     failed` DNS blip wrongly fired the 'token expired' toast)."""
 
+def read_chime_setting() -> str:
+    """Read the `chime` option from the config file. One of: off|on.
+
+    Defaults to "off" so the device stays silent until the user opts in.
+    """
+    try:
+        if CONFIG_FILE.exists():
+            for line in CONFIG_FILE.read_text().splitlines():
+                line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if key.strip().lower() == "chime":
+                    val = val.strip().lower()
+                    if val in ("off", "on"):
+                        return val
+    except OSError:
+        pass
+    return "off"
+
 
 def read_clock_setting() -> str:
     """Read the `clock` option from the config file. One of: off|auto|12|24.
@@ -131,6 +153,13 @@ def read_clock_setting() -> str:
     except OSError:
         pass
     return "off"
+
+
+def add_chime_field(payload: dict) -> None:
+    """Add "c":1 to the payload when the config opts in, so the firmware may
+    sound the session-reset chime. Omitted entirely when chime is off."""
+    if read_chime_setting() == "on":
+        payload["c"] = 1
 
 
 def detect_hour_format() -> int:
@@ -216,6 +245,7 @@ async def poll_api(token: str) -> dict | None:
             **_billing_period_info(now, reset_ts),
             "ok": True,
         }
+    add_chime_field(payload)   # adds "c":1 iff the config opts in
     add_clock_fields(payload)   # adds "t" + "tf" iff the config opts in
     return payload
 

@@ -25,6 +25,22 @@ read_token() {
     grep -o '"accessToken":"[^"]*"' "$HOME/.claude/.credentials.json" | cut -d'"' -f4
 }
 
+# Read the `chime` option from the config file. Echoes one of: off|on.
+# Defaults to "off" so the device stays silent until the user opts in.
+read_chime_setting() {
+    local val=""
+    if [ -f "$CONFIG_FILE" ]; then
+        val=$(grep -E '^[[:space:]]*chime[[:space:]]*=' "$CONFIG_FILE" | tail -1 \
+            | tr -d '\r' \
+            | sed -E 's/^[[:space:]]*chime[[:space:]]*=[[:space:]]*//; s/[[:space:]]*(#.*)?$//' \
+            | tr '[:upper:]' '[:lower:]')
+    fi
+    case "$val" in
+        on) echo "on" ;;
+        *)  echo "off" ;;
+    esac
+}
+
 # Read the `clock` option from the config file. Echoes one of: off|auto|12|24.
 # Defaults to "off" so existing setups keep showing "Usage" until opted in.
 read_clock_setting() {
@@ -260,6 +276,12 @@ poll() {
     status=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-status" | tr -d '\r' | awk '{print $2}')
     status=${status:-unknown}
 
+    # Optional reset chime. When enabled, tell the firmware it may sound the
+    # session-reset chime by adding "c":1 to the payload (additive, off by default).
+    local chime chime_fragment=""
+    chime=$(read_chime_setting)
+    [ "$chime" = "on" ] && chime_fragment=",\"c\":1"
+
     local payload
     if [ -n "$s5h_util" ]; then
         # Pro/Max account — 5h/7d windows
@@ -271,13 +293,13 @@ poll() {
         s5h_util=${s5h_util:-0}; s5h_reset=${s5h_reset:-0}
         s7d_util=${s7d_util:-0}; s7d_reset=${s7d_reset:-0}
         s5h_status=${s5h_status:-unknown}
-        payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$s5h_status" -v now="$now" -v clk="$clock_fragment" \
+        payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$s5h_status" -v now="$now" -v clk="$clock_fragment" -v chm="$chime_fragment" \
             'BEGIN {
                 sp = sprintf("%.0f", u5 * 100);
                 sr = (r5 - now) / 60; sr = sr > 0 ? sprintf("%.0f", sr) : 0;
                 wp = sprintf("%.0f", u7 * 100);
                 wr = (r7 - now) / 60; wr = wr > 0 ? sprintf("%.0f", wr) : 0;
-                printf "{\"s\":%s,\"sr\":%s,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"acct\":\"pro\"%s,\"ok\":true}", sp, sr, wp, wr, st, clk;
+                printf "{\"s\":%s,\"sr\":%s,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"acct\":\"pro\"%s%s,\"ok\":true}", sp, sr, wp, wr, st, clk, chm;
             }')
     else
         # Enterprise account — spending-limit model
@@ -299,7 +321,7 @@ rd = f"{dt_end.strftime('%b')} {dt_end.day}"
 print(json.dumps({"tp": tp, "pd": pd_days, "rd": rd}))
 PYEOF
 )
-        payload=$(awk -v ou="$overage_util" -v or_="$overage_reset" -v st="$status" -v now="$now" -v pi="$period_info" -v clk="$clock_fragment" \
+        payload=$(awk -v ou="$overage_util" -v or_="$overage_reset" -v st="$status" -v now="$now" -v pi="$period_info" -v clk="$clock_fragment" -v chm="$chime_fragment" \
             'BEGIN {
                 sp = sprintf("%.0f", ou * 100);
                 sr = (or_ - now) / 60; sr = sr > 0 ? sprintf("%.0f", sr) : 0;
@@ -308,7 +330,7 @@ PYEOF
                 match(pi, /"tp": *([0-9]+)/, a); if (RSTART) tp = a[1];
                 match(pi, /"pd": *([0-9]+)/, b); if (RSTART) pd = b[1];
                 match(pi, /"rd": *"([^"]+)"/, c); if (RSTART) rd = c[1];
-                printf "{\"s\":%s,\"sr\":%s,\"w\":0,\"wr\":0,\"st\":\"%s\",\"acct\":\"ent\",\"tp\":%s,\"pd\":%s,\"rd\":\"%s\"%s,\"ok\":true}", sp, sr, st, tp, pd, rd, clk;
+                printf "{\"s\":%s,\"sr\":%s,\"w\":0,\"wr\":0,\"st\":\"%s\",\"acct\":\"ent\",\"tp\":%s,\"pd\":%s,\"rd\":\"%s\"%s%s,\"ok\":true}", sp, sr, st, tp, pd, rd, clk, chm;
             }')
     fi
 
