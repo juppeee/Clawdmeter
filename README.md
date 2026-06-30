@@ -25,7 +25,7 @@ While the splash is up, the middle (PWR) button cycles animations. **Hold the po
 
 ## Agent worktree manager
 
-Using this space to advertise another one of my projects. It's in the prototyping stages and is my take on an agent worktree manager similar to Claude Squad with integrations for GitHub and Azure DevOps. Written to meet my needs at work which is maintaining a monorepo and often having multiple worktrees open simultaniously as well as often needing to review code while I am working on other things.
+Using this space to advertise another one of my projects. It's in the prototyping stages and is my take on an agent worktree manager similar to Claude Squad with integrations for GitHub and Azure DevOps. Written to meet my needs at work which is maintaining a monorepo and often having multiple worktrees open simultaneously as well as often needing to review code while I am working on other things.
 
 [Kirby - AI Agent worktree and pull request manager](https://github.com/hermannbjorgvin/kirby)
 
