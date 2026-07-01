@@ -287,11 +287,20 @@ async def discover_target(skip_addr: str | None = None):
 
     Other platforms: keep the original cached-address / scan-by-name flow.
     A freshly scanned address is cached here (the only place it's saved).
+
+    When `system_peripheral_only` is on, the scan-by-name fallback is dropped so
+    the daemon only ever targets the peripheral the OS already holds (macOS) or a
+    previously-pinned address (Linux) — never an arbitrary nearby DEVICE_NAME.
     """
+    system_only = read_system_peripheral_only()
+
     if sys.platform == "darwin":
         dev = await retrieve_connected_macos(skip_addr=skip_addr)
         if dev is not None:
             return dev
+        if system_only:
+            log("system_peripheral_only: device not held by OS; waiting (not scanning by name)")
+            return None
         log(f"Not held by OS; scanning for '{DEVICE_NAME}' ({SCAN_TIMEOUT}s)...")
         dev = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=SCAN_TIMEOUT)
         if dev:
@@ -299,6 +308,9 @@ async def discover_target(skip_addr: str | None = None):
         return dev
 
     address = load_cached_address()
+    if not address and system_only:
+        log("system_peripheral_only: no pinned address cached; waiting (not scanning by name)")
+        return None
     if not address:
         address = await scan_for_device()
         if address:
@@ -348,6 +360,33 @@ def read_clock_setting() -> str:
     except OSError:
         pass
     return "off"
+
+
+def read_system_peripheral_only() -> bool:
+    """Read the `system_peripheral_only` option from the config file.
+
+    When on, the daemon isolates to the peripheral this system is already
+    connected to and to this machine's own account:
+      1. Connect only to the OS-connected/paired device — never fall back to
+         scanning for any nearby device named DEVICE_NAME (see discover_target).
+      2. Poll only the default account (~/.claude / Keychain), ignoring any
+         extra `config_dirs` — so the display stops rotating between plans
+         (see poll_active_payload).
+
+    Defaults to False (off), preserving the existing behavior.
+    """
+    try:
+        if CONFIG_FILE.exists():
+            for line in CONFIG_FILE.read_text().splitlines():
+                line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if key.strip().lower() == "system_peripheral_only":
+                    return val.strip().lower() in ("on", "true", "yes", "1")
+    except OSError:
+        pass
+    return False
 
 
 def add_chime_field(payload: dict) -> None:
@@ -525,8 +564,12 @@ async def poll_active_payload(selector: PlanSelector = _SELECTOR) -> dict | None
 
     Returns None when no dir yields a usable payload this cycle. A single
     configured dir (the default) collapses to exactly the old single-poll path.
+
+    When `system_peripheral_only` is on, multi-plan rotation is disabled: only
+    this machine's own account (DEFAULT_CONFIG_DIR) is polled, regardless of any
+    configured `config_dirs`.
     """
-    dirs = read_config_dirs()
+    dirs = [DEFAULT_CONFIG_DIR] if read_system_peripheral_only() else read_config_dirs()
     payloads: dict[Path, dict] = {}
     sessions: dict[Path, int] = {}
     for d in dirs:

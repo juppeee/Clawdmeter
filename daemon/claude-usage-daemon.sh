@@ -95,6 +95,24 @@ read_clock_setting() {
     esac
 }
 
+# Read the `system_peripheral_only` option. Echoes one of: on|off (default off).
+# When on, the daemon connects only to a device the system already knows (paired/
+# connected — see find_system_device_mac, never a name scan) and shows only this
+# machine's own account (~/.claude), disabling multi-plan rotation.
+read_system_only_setting() {
+    local val=""
+    if [ -f "$CONFIG_FILE" ]; then
+        val=$(grep -E '^[[:space:]]*system_peripheral_only[[:space:]]*=' "$CONFIG_FILE" | tail -1 \
+            | tr -d '\r' \
+            | sed -E 's/^[[:space:]]*system_peripheral_only[[:space:]]*=[[:space:]]*//; s/[[:space:]]*(#.*)?$//' \
+            | tr '[:upper:]' '[:lower:]')
+    fi
+    case "$val" in
+        on|true|yes|1) echo "on" ;;
+        *)             echo "off" ;;
+    esac
+}
+
 # Best-effort 12h/24h detection from the locale. Echoes 12 or 24 (default 24).
 detect_hour_format() {
     local tfmt
@@ -161,6 +179,27 @@ scan_for_device() {
         DEVICE_MAC="$found"
         save_mac
         log "Found: $DEVICE_MAC"
+        return 0
+    fi
+    return 1
+}
+
+# Find a Clawdmeter the system already knows about — paired first, then merely
+# connected — WITHOUT an LE advertising scan. This is the Linux analog of
+# "system-connected peripheral only": bluez only lists devices this host has
+# bonded/connected to, so we can't accidentally grab a stranger's advertising
+# unit. Sets DEVICE_MAC + caches it on success; returns non-zero if none found.
+find_system_device_mac() {
+    local found=""
+    local mode
+    for mode in Paired Connected; do
+        found=$(bluetoothctl devices "$mode" 2>/dev/null | grep "$DEVICE_NAME" | head -1 | awk '{print $2}')
+        [ -n "$found" ] && break
+    done
+    if [ -n "$found" ]; then
+        DEVICE_MAC="$found"
+        save_mac
+        log "Using system-known device: $DEVICE_MAC"
         return 0
     fi
     return 1
@@ -394,6 +433,10 @@ poll() {
 
     local -a dirs
     mapfile -t dirs < <(read_config_dirs)
+    # system_peripheral_only: show only this machine's own account, no rotation.
+    if [ "$(read_system_only_setting)" = "on" ]; then
+        dirs=("$HOME/.claude")
+    fi
 
     local -A cycle_payload cycle_s
     local dir token payload s
@@ -453,14 +496,24 @@ log "Poll interval: ${POLL_INTERVAL}s"
 BACKOFF=1
 
 while true; do
-    # Find the device
+    # Find the device. With system_peripheral_only on, restrict discovery to a
+    # device the system already knows (paired/connected) and never scan by name.
     if ! load_mac; then
-        scan_for_device || {
-            log "Device not found, retrying in ${BACKOFF}s..."
-            sleep "$BACKOFF"
-            BACKOFF=$((BACKOFF < 60 ? BACKOFF * 2 : 60))
-            continue
-        }
+        if [ "$(read_system_only_setting)" = "on" ]; then
+            find_system_device_mac || {
+                log "system_peripheral_only: no paired/connected '$DEVICE_NAME'; waiting ${BACKOFF}s (not scanning)..."
+                sleep "$BACKOFF"
+                BACKOFF=$((BACKOFF < 60 ? BACKOFF * 2 : 60))
+                continue
+            }
+        else
+            scan_for_device || {
+                log "Device not found, retrying in ${BACKOFF}s..."
+                sleep "$BACKOFF"
+                BACKOFF=$((BACKOFF < 60 ? BACKOFF * 2 : 60))
+                continue
+            }
+        fi
     fi
 
     # Connect if not connected

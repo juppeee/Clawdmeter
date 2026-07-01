@@ -7,6 +7,7 @@ Run: python -m pytest daemon/tests/test_macos_multidir.py -x -q
 """
 import asyncio
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 import daemon.claude_usage_daemon as mod
@@ -144,3 +145,101 @@ def test_poll_active_payload_selects_higher_util_plan(monkeypatch):
     with patch.object(mod, "poll_api", new=AsyncMock(side_effect=fake_poll)):
         payload = _run(mod.poll_active_payload(PlanSelector()))
     assert payload["s"] == 40  # startup -> highest util plan (B)
+
+
+# ---------------------------------------------------------------------------
+# system_peripheral_only — read_system_peripheral_only parsing
+# ---------------------------------------------------------------------------
+
+def test_system_only_defaults_off_when_config_absent(tmp_path, monkeypatch):
+    monkeypatch.setattr(mod, "CONFIG_FILE", tmp_path / "config")  # absent
+    assert mod.read_system_peripheral_only() is False
+
+
+def test_system_only_defaults_off_when_key_absent(tmp_path, monkeypatch):
+    cfg = tmp_path / "config"
+    cfg.write_text("clock = auto\nchime = on\n")
+    monkeypatch.setattr(mod, "CONFIG_FILE", cfg)
+    assert mod.read_system_peripheral_only() is False
+
+
+def test_system_only_on(tmp_path, monkeypatch):
+    cfg = tmp_path / "config"
+    cfg.write_text("system_peripheral_only = on\n")
+    monkeypatch.setattr(mod, "CONFIG_FILE", cfg)
+    assert mod.read_system_peripheral_only() is True
+
+
+def test_system_only_off_explicit(tmp_path, monkeypatch):
+    cfg = tmp_path / "config"
+    cfg.write_text("system_peripheral_only = off\n")
+    monkeypatch.setattr(mod, "CONFIG_FILE", cfg)
+    assert mod.read_system_peripheral_only() is False
+
+
+def test_system_only_accepts_true_and_strips_comment(tmp_path, monkeypatch):
+    cfg = tmp_path / "config"
+    cfg.write_text("system_peripheral_only = TRUE  # pin to this machine\n")
+    monkeypatch.setattr(mod, "CONFIG_FILE", cfg)
+    assert mod.read_system_peripheral_only() is True
+
+
+# ---------------------------------------------------------------------------
+# system_peripheral_only — account isolation in poll_active_payload
+# ---------------------------------------------------------------------------
+
+def test_poll_active_payload_system_only_polls_default_dir_only(monkeypatch):
+    default = Path("/default-account")
+    monkeypatch.setattr(mod, "DEFAULT_CONFIG_DIR", default)
+    monkeypatch.setattr(mod, "read_system_peripheral_only", lambda: True)
+    # config_dirs lists two OTHER plans; system_peripheral_only must ignore them.
+    monkeypatch.setattr(mod, "read_config_dirs", lambda: [A, B])
+
+    polled = []
+
+    def fake_token(d):
+        polled.append(d)
+        return "tok" if d == default else "SHOULD_NOT_BE_POLLED"
+
+    monkeypatch.setattr(mod, "read_token_for", fake_token)
+    with patch.object(mod, "poll_api", new=AsyncMock(return_value={"s": 7, "ok": True})):
+        payload = _run(mod.poll_active_payload(PlanSelector()))
+    assert payload == {"s": 7, "ok": True}
+    assert polled == [default]  # only this machine's own account was polled
+
+
+# ---------------------------------------------------------------------------
+# system_peripheral_only — device pin in discover_target (macOS/darwin)
+# ---------------------------------------------------------------------------
+
+def test_discover_target_darwin_system_only_uses_os_device(monkeypatch):
+    monkeypatch.setattr(mod.sys, "platform", "darwin")
+    monkeypatch.setattr(mod, "read_system_peripheral_only", lambda: True)
+    sentinel = object()
+    scanner = AsyncMock()
+    with patch.object(mod, "retrieve_connected_macos", new=AsyncMock(return_value=sentinel)), \
+         patch.object(mod.BleakScanner, "find_device_by_name", new=scanner):
+        assert _run(mod.discover_target()) is sentinel
+    scanner.assert_not_called()  # OS-connected device used directly, no scan
+
+
+def test_discover_target_darwin_system_only_no_scan_when_not_held(monkeypatch):
+    monkeypatch.setattr(mod.sys, "platform", "darwin")
+    monkeypatch.setattr(mod, "read_system_peripheral_only", lambda: True)
+    scanner = AsyncMock(return_value="STRANGER_DEVICE")
+    with patch.object(mod, "retrieve_connected_macos", new=AsyncMock(return_value=None)), \
+         patch.object(mod.BleakScanner, "find_device_by_name", new=scanner):
+        assert _run(mod.discover_target()) is None  # waits; never grabs by name
+    scanner.assert_not_called()
+
+
+def test_discover_target_darwin_scan_fallback_when_option_off(monkeypatch):
+    # Regression guard: with the option off, the name-scan fallback still runs.
+    monkeypatch.setattr(mod.sys, "platform", "darwin")
+    monkeypatch.setattr(mod, "read_system_peripheral_only", lambda: False)
+    fake_dev = SimpleNamespace(address="DEV")  # find_device_by_name yields a BLEDevice
+    scanner = AsyncMock(return_value=fake_dev)
+    with patch.object(mod, "retrieve_connected_macos", new=AsyncMock(return_value=None)), \
+         patch.object(mod.BleakScanner, "find_device_by_name", new=scanner):
+        assert _run(mod.discover_target()) is fake_dev
+    scanner.assert_called_once()

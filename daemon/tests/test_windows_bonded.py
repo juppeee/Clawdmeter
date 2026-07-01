@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 
+import daemon.claude_usage_daemon_windows as win
 from daemon.claude_usage_daemon_windows import (
     _mac_from_pnp_instance_id,
     acquire_target,
@@ -98,3 +99,49 @@ def test_acquire_target_returns_none_when_scan_and_bonded_both_miss():
         result = _run(acquire_target())
 
     assert result is None
+
+
+# ---------------------------------------------------------------------------
+# system_peripheral_only: pin to the bonded device, never scan by name
+# ---------------------------------------------------------------------------
+
+def test_acquire_target_system_only_uses_bonded_and_skips_scan():
+    """With the option on, only the device bonded to THIS machine is used."""
+    from bleak.backends.device import BLEDevice
+
+    async def fake_scan():
+        raise AssertionError("scan_for_device must not run with system_peripheral_only on")
+
+    with patch("daemon.claude_usage_daemon_windows.read_system_peripheral_only", return_value=True), \
+         patch("daemon.claude_usage_daemon_windows.scan_for_device", side_effect=fake_scan) as scan, \
+         patch("daemon.claude_usage_daemon_windows.discover_bonded_address",
+               return_value="98:A3:16:A5:D7:06"):
+        result = _run(acquire_target())
+
+    assert isinstance(result, BLEDevice)
+    assert result.address == "98:A3:16:A5:D7:06"
+    scan.assert_not_called()
+
+
+def test_acquire_target_system_only_none_when_not_bonded():
+    """Option on but no bonded device -> None, and still no name scan."""
+    async def fake_scan():
+        raise AssertionError("scan_for_device must not run with system_peripheral_only on")
+
+    with patch("daemon.claude_usage_daemon_windows.read_system_peripheral_only", return_value=True), \
+         patch("daemon.claude_usage_daemon_windows.scan_for_device", side_effect=fake_scan) as scan, \
+         patch("daemon.claude_usage_daemon_windows.discover_bonded_address", return_value=None):
+        result = _run(acquire_target())
+
+    assert result is None
+    scan.assert_not_called()
+
+
+def test_read_system_peripheral_only_parsing(tmp_path, monkeypatch):
+    cfg = tmp_path / "config"
+    monkeypatch.setattr(win, "CONFIG_FILE", cfg)
+    assert win.read_system_peripheral_only() is False  # absent
+    cfg.write_text("system_peripheral_only = on\n")
+    assert win.read_system_peripheral_only() is True
+    cfg.write_text("system_peripheral_only = off\n")
+    assert win.read_system_peripheral_only() is False

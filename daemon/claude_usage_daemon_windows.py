@@ -134,6 +134,30 @@ def read_chime_setting() -> str:
     return "off"
 
 
+def read_system_peripheral_only() -> bool:
+    """Read the `system_peripheral_only` option from the config file.
+
+    When on, the daemon connects only to the device bonded to THIS machine
+    (see acquire_target) and never falls back to scanning for a nearby device
+    named DEVICE_NAME. Windows already polls a single token, so there is no
+    multi-plan rotation to disable here — the option only affects discovery.
+
+    Defaults to False (off), preserving the existing behavior.
+    """
+    try:
+        if CONFIG_FILE.exists():
+            for line in CONFIG_FILE.read_text().splitlines():
+                line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if key.strip().lower() == "system_peripheral_only":
+                    return val.strip().lower() in ("on", "true", "yes", "1")
+    except OSError:
+        pass
+    return False
+
+
 def read_clock_setting() -> str:
     """Read the `clock` option from the config file. One of: off|auto|12|24.
 
@@ -351,10 +375,15 @@ async def acquire_target():
     is bonded-and-connected), then falls back to the bonded address (the steady
     state, where the device is connected to Windows and no longer advertising).
     Returns a BLEDevice, an address string, or None.
+
+    With `system_peripheral_only` on, the advertisement scan is skipped entirely
+    so we only ever target the device bonded to THIS machine (via the PnP table /
+    CLAWDMETER_BLE_ADDRESS) — never an arbitrary nearby DEVICE_NAME.
     """
-    device = await scan_for_device()
-    if device:
-        return device
+    if not read_system_peripheral_only():
+        device = await scan_for_device()
+        if device:
+            return device
     address = discover_bonded_address()
     if not address:
         return None
