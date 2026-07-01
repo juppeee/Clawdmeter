@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 import httpx
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 from bleak.exc import BleakError
 
 DEVICE_NAME = "Clawdmeter"
@@ -31,7 +31,6 @@ REQ_CHAR_UUID = "4c41555a-4465-7669-6365-000000000004"
 
 POLL_INTERVAL = 60
 TICK = 5
-SCAN_TIMEOUT = 8.0
 CONNECT_TIMEOUT = 20.0
 
 # macOS: token lives in Keychain (service "Claude Code-credentials").
@@ -177,21 +176,6 @@ def load_cached_address() -> str | None:
     return None
 
 
-def save_address(addr: str) -> None:
-    SAVED_ADDR_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SAVED_ADDR_FILE.write_text(addr)
-
-
-async def scan_for_device() -> str | None:
-    log(f"Scanning for '{DEVICE_NAME}' ({SCAN_TIMEOUT}s)...")
-    devices = await BleakScanner.discover(timeout=SCAN_TIMEOUT)
-    for d in devices:
-        if d.name == DEVICE_NAME:
-            log(f"Found: {d.address}")
-            return d.address
-    return None
-
-
 # --- macOS: recover a device the OS already holds as an HID keyboard --------
 #
 # The firmware advertises as a BLE HID keyboard so its buttons type into the
@@ -279,30 +263,24 @@ async def retrieve_connected_macos(skip_addr: str | None = None):
 async def discover_target(skip_addr: str | None = None):
     """Return a connectable target, or None.
 
-    macOS: prefer the system-connected peripheral (HID-grabbed devices are
-    invisible to scans); fall back to a normal scan that yields a BLEDevice
-    so the subsequent connect doesn't have to re-scan. ``skip_addr`` is
-    forwarded so a just-failed peripheral is skipped, making the scan
-    fallback reachable.
-
-    Other platforms: keep the original cached-address / scan-by-name flow.
-    A freshly scanned address is cached here (the only place it's saved).
+    The daemon only ever targets the device this system already holds — it
+    never scans for a nearby device by name, so it can't grab a stranger's or
+    the wrong nearby unit. On macOS that's the system-connected peripheral (the
+    firmware advertises as an HID keyboard, so once paired the OS auto-connects
+    and holds it — HID-grabbed devices are invisible to scans anyway). On other
+    platforms it's a previously-pinned address in the cache file. If the device
+    isn't held/pinned, we log and wait rather than scanning. ``skip_addr`` skips
+    a peripheral whose handle just failed to connect.
     """
     if sys.platform == "darwin":
         dev = await retrieve_connected_macos(skip_addr=skip_addr)
-        if dev is not None:
-            return dev
-        log(f"Not held by OS; scanning for '{DEVICE_NAME}' ({SCAN_TIMEOUT}s)...")
-        dev = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=SCAN_TIMEOUT)
-        if dev:
-            log(f"Found: {dev.address}")
+        if dev is None:
+            log("Device not held by OS; waiting (not scanning by name)")
         return dev
 
     address = load_cached_address()
     if not address:
-        address = await scan_for_device()
-        if address:
-            save_address(address)  # cache only freshly-scanned addresses
+        log("No pinned address cached; waiting (not scanning by name)")
     return address
 
 

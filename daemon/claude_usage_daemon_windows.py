@@ -22,7 +22,7 @@ import time
 from pathlib import Path
 
 import httpx
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 from bleak.backends.device import BLEDevice
 from bleak.exc import BleakError
 
@@ -33,7 +33,6 @@ REQ_CHAR_UUID = "4c41555a-4465-7669-6365-000000000004"
 
 POLL_INTERVAL = 60
 TICK = 5
-SCAN_TIMEOUT = 8.0
 CONNECT_RETRIES = 3        # D-01: attempts before giving up on a device
 CONNECT_RETRY_DELAY = 2.0  # D-01: seconds between failed connect attempts
 ZOMBIE_BREAK_LIMIT = 1     # D-03: consecutive write failures before abandoning a half-open link
@@ -278,15 +277,6 @@ def _billing_period_info(now: float, reset_ts: str) -> dict:
     }
 
 
-async def scan_for_device():
-    """Scan for DEVICE_NAME and return the BLEDevice, or None."""
-    log(f"Scanning for '{DEVICE_NAME}' ({SCAN_TIMEOUT}s)...")
-    device = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=SCAN_TIMEOUT)
-    if device:
-        log(f"Found: {device.address}")
-    return device  # BLEDevice or None — NOT an address string
-
-
 def _mac_from_pnp_instance_id(instance_id: str) -> str | None:
     """Recover a canonical BLE MAC ("AA:BB:CC:DD:EE:FF") from a PnP instance id.
 
@@ -316,7 +306,7 @@ def discover_bonded_address() -> str | None:
     1. CLAWDMETER_BLE_ADDRESS env override (skips discovery — testing / pinning).
     2. Windows PnP table, filtered to the device's FriendlyName.
 
-    Non-Windows or any failure returns None so the caller falls back to scanning.
+    Non-Windows or any failure returns None.
     """
     if override := os.environ.get("CLAWDMETER_BLE_ADDRESS"):
         return override.strip().upper()
@@ -347,14 +337,11 @@ def discover_bonded_address() -> str | None:
 async def acquire_target():
     """Return a connectable handle for the Clawdmeter, or None.
 
-    Tries an advertisement scan first (works on a fresh boot before the device
-    is bonded-and-connected), then falls back to the bonded address (the steady
-    state, where the device is connected to Windows and no longer advertising).
-    Returns a BLEDevice, an address string, or None.
+    Targets only the device bonded to THIS machine (via the PnP table /
+    CLAWDMETER_BLE_ADDRESS) — it never scans for a nearby device by name, so it
+    can't grab a stranger's or the wrong nearby unit. The device must be paired
+    with Windows once first (the documented setup). Returns a BLEDevice or None.
     """
-    device = await scan_for_device()
-    if device:
-        return device
     address = discover_bonded_address()
     if not address:
         return None

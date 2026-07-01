@@ -141,26 +141,22 @@ save_mac() {
     echo "$DEVICE_MAC" > "$SAVED_MAC_FILE"
 }
 
-# Scan for Clawdmeter
-scan_for_device() {
-    log "Scanning for '$DEVICE_NAME'..."
-    # Start LE scan
-    bluetoothctl scan le &>/dev/null &
-    local scan_pid=$!
-    sleep 8
-    kill "$scan_pid" 2>/dev/null
-    wait "$scan_pid" 2>/dev/null
-
-    # Pick the first matching device. Multiple matches happen when bluez
-    # remembers old hardware (e.g. after swapping ESP boards). Stale entries
-    # are removed on connect failure (see connect_device), so a few retry
-    # cycles will converge on the live device.
-    local found
-    found=$(bluetoothctl devices 2>/dev/null | grep "$DEVICE_NAME" | head -1 | awk '{print $2}')
+# Find a Clawdmeter the system already knows about — paired first, then merely
+# connected — WITHOUT an LE advertising scan. bluez only lists devices this host
+# has bonded/connected to, so we can't accidentally grab a stranger's advertising
+# unit. The device is a bonded BLE HID keyboard you pair once anyway, so we never
+# scan by name. Sets DEVICE_MAC + caches it on success; returns non-zero if none.
+find_system_device_mac() {
+    local found=""
+    local mode
+    for mode in Paired Connected; do
+        found=$(bluetoothctl devices "$mode" 2>/dev/null | grep "$DEVICE_NAME" | head -1 | awk '{print $2}')
+        [ -n "$found" ] && break
+    done
     if [ -n "$found" ]; then
         DEVICE_MAC="$found"
         save_mac
-        log "Found: $DEVICE_MAC"
+        log "Using system-known device: $DEVICE_MAC"
         return 0
     fi
     return 1
@@ -182,13 +178,15 @@ connect_device() {
         return 0
     fi
     log "Connection failed"
+    # Drop the cached MAC so the next loop re-derives it from bluez's paired/
+    # connected list (see find_system_device_mac). We deliberately do NOT
+    # `bluetoothctl remove` here: the daemon now only ever connects to a device
+    # the system already knows, so unpairing it on a transient failure would
+    # make it undiscoverable and strand the daemon.
     if [ -f "$SAVED_MAC_FILE" ] && [ "$(cat "$SAVED_MAC_FILE")" = "$DEVICE_MAC" ]; then
-        log "Invalidating cached MAC, will rescan by name"
+        log "Invalidating cached MAC, will re-derive from paired/connected devices"
         rm -f "$SAVED_MAC_FILE"
     fi
-    # Remove from bluez so the next scan won't re-pick this dead MAC.
-    # If the device comes back online it'll re-advertise and be re-discovered.
-    bluetoothctl remove "$DEVICE_MAC" &>/dev/null
     DEVICE_MAC=""
     return 1
 }
@@ -453,10 +451,12 @@ log "Poll interval: ${POLL_INTERVAL}s"
 BACKOFF=1
 
 while true; do
-    # Find the device
+    # Find the device: only a device the system already knows (paired/connected).
+    # We never scan by name, so we can't grab a stranger's or the wrong nearby
+    # unit. Pair the device once first (it's a bonded BLE HID keyboard anyway).
     if ! load_mac; then
-        scan_for_device || {
-            log "Device not found, retrying in ${BACKOFF}s..."
+        find_system_device_mac || {
+            log "No paired/connected '$DEVICE_NAME'; waiting ${BACKOFF}s (not scanning)..."
             sleep "$BACKOFF"
             BACKOFF=$((BACKOFF < 60 ? BACKOFF * 2 : 60))
             continue
