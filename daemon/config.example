@@ -17,19 +17,6 @@
 #   - install.sh can detect your ~/.claude* dirs and fill this in for you.
 # config_dirs = ~/.claude, ~/.claude-work
 
-# Lock the daemon to the peripheral THIS system is connected to, and to this
-# machine's own account only. Use this when several machines/devices are around
-# and you don't want the display to rotate or a daemon to grab the wrong unit.
-#   on  = 1. Connect only to the OS-connected/paired device — never fall back to
-#            scanning for a nearby device named "Clawdmeter".
-#            (macOS: the system-connected peripheral; Linux: a paired/connected
-#             device known to bluez; Windows: the device bonded to this machine.)
-#         2. Show only this machine's own account (~/.claude), ignoring any
-#            config_dirs above — so the display stops rotating between plans.
-#            (No effect on Windows, which already polls a single account.)
-#   off = default; existing discovery + multi-plan behavior is unchanged.
-# system_peripheral_only = off
-
 # Play a sound on the device when your 5-hour session limit resets, so you know
 # you can use Claude again without watching the screen.
 #   off = silent (default)

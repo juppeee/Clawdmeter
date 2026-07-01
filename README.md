@@ -65,7 +65,7 @@ The board env name is required. Run `./flash-mac.sh` with no args to see the ava
 
 ### Pair the device
 
-After flashing, open **System Settings → Bluetooth** and click *Connect* next to "Clawdmeter". The daemon will discover it on its next scan (~30 s).
+After flashing, open **System Settings → Bluetooth** and click *Connect* next to "Clawdmeter". The daemon only ever connects to the peripheral this Mac is paired/connected to — it never scans for a nearby device — so once it's connected here the daemon picks it up on its next poll (~60 s).
 
 ### Install the daemon
 

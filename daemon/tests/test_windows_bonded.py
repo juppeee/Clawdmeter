@@ -51,37 +51,19 @@ def test_ignores_short_hex_run_that_is_not_a_mac():
 
 
 # ---------------------------------------------------------------------------
-# acquire_target: scan first, bonded address as fallback
+# acquire_target: only ever targets the device bonded to THIS machine; it never
+# scans for a nearby device by name (there is no scan fallback).
 # ---------------------------------------------------------------------------
 
-def test_acquire_target_returns_scanned_device_without_bonded_lookup():
-    """A device found by advertisement scan is returned; bonded lookup is skipped."""
-    sentinel_device = object()
-
-    async def fake_scan():
-        return sentinel_device
-
-    with patch("daemon.claude_usage_daemon_windows.scan_for_device", side_effect=fake_scan), \
-         patch("daemon.claude_usage_daemon_windows.discover_bonded_address") as disc:
-        result = _run(acquire_target())
-
-    assert result is sentinel_device
-    disc.assert_not_called()  # never look up the bonded address when scan hits
-
-
-def test_acquire_target_falls_back_to_bonded_address_when_scan_misses():
-    """When the device isn't advertising, the bonded address is wrapped in a BLEDevice.
+def test_acquire_target_uses_bonded_address():
+    """The bonded address is wrapped in a BLEDevice and returned.
 
     A BLEDevice (not a bare string) is required so WinRT skips its advertisement
     scan and connects directly to the bonded device by address.
     """
     from bleak.backends.device import BLEDevice
 
-    async def fake_scan():
-        return None
-
-    with patch("daemon.claude_usage_daemon_windows.scan_for_device", side_effect=fake_scan), \
-         patch("daemon.claude_usage_daemon_windows.discover_bonded_address",
+    with patch("daemon.claude_usage_daemon_windows.discover_bonded_address",
                return_value="98:A3:16:A5:D7:06"):
         result = _run(acquire_target())
 
@@ -89,59 +71,15 @@ def test_acquire_target_falls_back_to_bonded_address_when_scan_misses():
     assert result.address == "98:A3:16:A5:D7:06"
 
 
-def test_acquire_target_returns_none_when_scan_and_bonded_both_miss():
-    """Neither advertising nor bonded -> None so the caller backs off."""
-    async def fake_scan():
-        return None
-
-    with patch("daemon.claude_usage_daemon_windows.scan_for_device", side_effect=fake_scan), \
-         patch("daemon.claude_usage_daemon_windows.discover_bonded_address", return_value=None):
+def test_acquire_target_returns_none_when_not_bonded():
+    """No bonded device -> None so the caller backs off; never scans by name."""
+    with patch("daemon.claude_usage_daemon_windows.discover_bonded_address", return_value=None):
         result = _run(acquire_target())
 
     assert result is None
 
 
-# ---------------------------------------------------------------------------
-# system_peripheral_only: pin to the bonded device, never scan by name
-# ---------------------------------------------------------------------------
-
-def test_acquire_target_system_only_uses_bonded_and_skips_scan():
-    """With the option on, only the device bonded to THIS machine is used."""
-    from bleak.backends.device import BLEDevice
-
-    async def fake_scan():
-        raise AssertionError("scan_for_device must not run with system_peripheral_only on")
-
-    with patch("daemon.claude_usage_daemon_windows.read_system_peripheral_only", return_value=True), \
-         patch("daemon.claude_usage_daemon_windows.scan_for_device", side_effect=fake_scan) as scan, \
-         patch("daemon.claude_usage_daemon_windows.discover_bonded_address",
-               return_value="98:A3:16:A5:D7:06"):
-        result = _run(acquire_target())
-
-    assert isinstance(result, BLEDevice)
-    assert result.address == "98:A3:16:A5:D7:06"
-    scan.assert_not_called()
-
-
-def test_acquire_target_system_only_none_when_not_bonded():
-    """Option on but no bonded device -> None, and still no name scan."""
-    async def fake_scan():
-        raise AssertionError("scan_for_device must not run with system_peripheral_only on")
-
-    with patch("daemon.claude_usage_daemon_windows.read_system_peripheral_only", return_value=True), \
-         patch("daemon.claude_usage_daemon_windows.scan_for_device", side_effect=fake_scan) as scan, \
-         patch("daemon.claude_usage_daemon_windows.discover_bonded_address", return_value=None):
-        result = _run(acquire_target())
-
-    assert result is None
-    scan.assert_not_called()
-
-
-def test_read_system_peripheral_only_parsing(tmp_path, monkeypatch):
-    cfg = tmp_path / "config"
-    monkeypatch.setattr(win, "CONFIG_FILE", cfg)
-    assert win.read_system_peripheral_only() is False  # absent
-    cfg.write_text("system_peripheral_only = on\n")
-    assert win.read_system_peripheral_only() is True
-    cfg.write_text("system_peripheral_only = off\n")
-    assert win.read_system_peripheral_only() is False
+def test_no_scan_by_name_path_remains():
+    """Regression guard: the by-name scan fallback and its config flag are gone."""
+    assert not hasattr(win, "scan_for_device")
+    assert not hasattr(win, "read_system_peripheral_only")

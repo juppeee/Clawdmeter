@@ -132,25 +132,6 @@ configure_chime() {
     fi
 }
 
-# Offer to lock the daemon to the peripheral this Mac is connected to and to this
-# machine's own account only (disables multi-plan rotation and the scan-by-name
-# fallback). Supersedes configure_config_dirs when enabled.
-configure_system_peripheral_only() {
-    [ -t 0 ] || return 0
-    local ans cur
-    cur=$(current_config_value system_peripheral_only)
-    read -r -p "  Lock to the device paired with THIS machine and show only ~/.claude (disables multi-plan rotation & name scanning)? [y/N] " ans || ans=""
-    if [[ "$ans" =~ ^[Yy]$ ]]; then
-        upsert_config_key system_peripheral_only on
-        echo "  Set: system_peripheral_only = on"
-    elif [ "$cur" = "on" ]; then
-        upsert_config_key system_peripheral_only off
-        echo "  Set: system_peripheral_only = off"
-    else
-        echo "  System-peripheral lock off (default)."
-    fi
-}
-
 echo "=== Clawdmeter macOS install ==="
 echo ""
 
@@ -230,7 +211,6 @@ echo ""
 # clock display and session-reset chime. All re-read by the daemon each poll.
 echo "[4/6] Configuring the daemon..."
 configure_config_dirs
-configure_system_peripheral_only
 configure_clock
 configure_chime
 echo ""

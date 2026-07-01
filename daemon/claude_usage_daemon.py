@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 
 import httpx
-from bleak import BleakClient, BleakScanner
+from bleak import BleakClient
 from bleak.exc import BleakError
 
 DEVICE_NAME = "Clawdmeter"
@@ -31,7 +31,6 @@ REQ_CHAR_UUID = "4c41555a-4465-7669-6365-000000000004"
 
 POLL_INTERVAL = 60
 TICK = 5
-SCAN_TIMEOUT = 8.0
 CONNECT_TIMEOUT = 20.0
 
 # macOS: token lives in Keychain (service "Claude Code-credentials").
@@ -177,21 +176,6 @@ def load_cached_address() -> str | None:
     return None
 
 
-def save_address(addr: str) -> None:
-    SAVED_ADDR_FILE.parent.mkdir(parents=True, exist_ok=True)
-    SAVED_ADDR_FILE.write_text(addr)
-
-
-async def scan_for_device() -> str | None:
-    log(f"Scanning for '{DEVICE_NAME}' ({SCAN_TIMEOUT}s)...")
-    devices = await BleakScanner.discover(timeout=SCAN_TIMEOUT)
-    for d in devices:
-        if d.name == DEVICE_NAME:
-            log(f"Found: {d.address}")
-            return d.address
-    return None
-
-
 # --- macOS: recover a device the OS already holds as an HID keyboard --------
 #
 # The firmware advertises as a BLE HID keyboard so its buttons type into the
@@ -279,42 +263,24 @@ async def retrieve_connected_macos(skip_addr: str | None = None):
 async def discover_target(skip_addr: str | None = None):
     """Return a connectable target, or None.
 
-    macOS: prefer the system-connected peripheral (HID-grabbed devices are
-    invisible to scans); fall back to a normal scan that yields a BLEDevice
-    so the subsequent connect doesn't have to re-scan. ``skip_addr`` is
-    forwarded so a just-failed peripheral is skipped, making the scan
-    fallback reachable.
-
-    Other platforms: keep the original cached-address / scan-by-name flow.
-    A freshly scanned address is cached here (the only place it's saved).
-
-    When `system_peripheral_only` is on, the scan-by-name fallback is dropped so
-    the daemon only ever targets the peripheral the OS already holds (macOS) or a
-    previously-pinned address (Linux) — never an arbitrary nearby DEVICE_NAME.
+    The daemon only ever targets the device this system already holds — it
+    never scans for a nearby device by name, so it can't grab a stranger's or
+    the wrong nearby unit. On macOS that's the system-connected peripheral (the
+    firmware advertises as an HID keyboard, so once paired the OS auto-connects
+    and holds it — HID-grabbed devices are invisible to scans anyway). On other
+    platforms it's a previously-pinned address in the cache file. If the device
+    isn't held/pinned, we log and wait rather than scanning. ``skip_addr`` skips
+    a peripheral whose handle just failed to connect.
     """
-    system_only = read_system_peripheral_only()
-
     if sys.platform == "darwin":
         dev = await retrieve_connected_macos(skip_addr=skip_addr)
-        if dev is not None:
-            return dev
-        if system_only:
-            log("system_peripheral_only: device not held by OS; waiting (not scanning by name)")
-            return None
-        log(f"Not held by OS; scanning for '{DEVICE_NAME}' ({SCAN_TIMEOUT}s)...")
-        dev = await BleakScanner.find_device_by_name(DEVICE_NAME, timeout=SCAN_TIMEOUT)
-        if dev:
-            log(f"Found: {dev.address}")
+        if dev is None:
+            log("Device not held by OS; waiting (not scanning by name)")
         return dev
 
     address = load_cached_address()
-    if not address and system_only:
-        log("system_peripheral_only: no pinned address cached; waiting (not scanning by name)")
-        return None
     if not address:
-        address = await scan_for_device()
-        if address:
-            save_address(address)  # cache only freshly-scanned addresses
+        log("No pinned address cached; waiting (not scanning by name)")
     return address
 
 
@@ -360,33 +326,6 @@ def read_clock_setting() -> str:
     except OSError:
         pass
     return "off"
-
-
-def read_system_peripheral_only() -> bool:
-    """Read the `system_peripheral_only` option from the config file.
-
-    When on, the daemon isolates to the peripheral this system is already
-    connected to and to this machine's own account:
-      1. Connect only to the OS-connected/paired device — never fall back to
-         scanning for any nearby device named DEVICE_NAME (see discover_target).
-      2. Poll only the default account (~/.claude / Keychain), ignoring any
-         extra `config_dirs` — so the display stops rotating between plans
-         (see poll_active_payload).
-
-    Defaults to False (off), preserving the existing behavior.
-    """
-    try:
-        if CONFIG_FILE.exists():
-            for line in CONFIG_FILE.read_text().splitlines():
-                line = line.split("#", 1)[0].strip()
-                if "=" not in line:
-                    continue
-                key, val = line.split("=", 1)
-                if key.strip().lower() == "system_peripheral_only":
-                    return val.strip().lower() in ("on", "true", "yes", "1")
-    except OSError:
-        pass
-    return False
 
 
 def add_chime_field(payload: dict) -> None:
@@ -564,12 +503,8 @@ async def poll_active_payload(selector: PlanSelector = _SELECTOR) -> dict | None
 
     Returns None when no dir yields a usable payload this cycle. A single
     configured dir (the default) collapses to exactly the old single-poll path.
-
-    When `system_peripheral_only` is on, multi-plan rotation is disabled: only
-    this machine's own account (DEFAULT_CONFIG_DIR) is polled, regardless of any
-    configured `config_dirs`.
     """
-    dirs = [DEFAULT_CONFIG_DIR] if read_system_peripheral_only() else read_config_dirs()
+    dirs = read_config_dirs()
     payloads: dict[Path, dict] = {}
     sessions: dict[Path, int] = {}
     for d in dirs:
