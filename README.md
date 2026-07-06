@@ -23,12 +23,6 @@ The device boots into the splash. Tap the screen anywhere to switch to the Usage
 
 While the splash is up, the middle (PWR) button cycles animations. **Hold the power button for 3 seconds, then release, to put the device into pairing mode** — this clears the saved Bluetooth bond and re-advertises. The firmware also auto-rotates animations every 20 s within the current usage-rate group, so a long stretch on the splash isn't just one Clawd on loop.
 
-## Agent worktree manager
-
-Using this space to advertise another one of my projects. It's in the prototyping stages and is my take on an agent worktree manager similar to Claude Squad with integrations for GitHub and Azure DevOps. Written to meet my needs at work which is maintaining a monorepo and often having multiple worktrees open simultaneously as well as often needing to review code while I am working on other things.
-
-[Kirby - AI Agent worktree and pull request manager](https://github.com/hermannbjorgvin/kirby)
-
 ## Hardware
 
 Boards supported out of the box:
