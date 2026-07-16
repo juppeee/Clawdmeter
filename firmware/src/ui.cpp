@@ -43,6 +43,7 @@ struct Layout {
     const lv_font_t* ent_pct_font;   // enterprise spending number
     const lv_font_t* pill_font;      // "Current" / "Weekly" pill
     const lv_font_t* reset_font;     // "Resets in ..." line
+    const lv_font_t* pace_font;      // enterprise "Under/On/Over pace" line
     const lv_font_t* anim_font;      // animated status line
     int16_t anim_y;                  // status line offset from bottom
     bool    show_logo;               // logo is 80x80 — hidden on small screens
@@ -84,6 +85,7 @@ static void compute_layout(const BoardCaps& c) {
     L.ent_pct_font = &font_tiempos_56;
     L.pill_font    = &font_styrene_28;
     L.reset_font   = &font_styrene_28;
+    L.pace_font    = &font_styrene_16;
     L.anim_font    = &font_mono_32;
     L.anim_y = -15;
     L.show_logo = true;
@@ -141,6 +143,7 @@ static void compute_layout(const BoardCaps& c) {
         L.ent_pct_font = &font_tiempos_34;
         L.pill_font    = &font_styrene_14;
         L.reset_font   = &font_styrene_14;
+        L.pace_font    = &font_styrene_12;
         L.anim_font    = &font_mono_18;
         L.anim_y = -4;
         L.show_logo = false;
@@ -491,7 +494,7 @@ static void init_usage_screen(lv_obj_t* scr) {
 
     lbl_spending_status = lv_label_create(panel_session);
     lv_label_set_text(lbl_spending_status, "");
-    lv_obj_set_style_text_font(lbl_spending_status, L.bt_credit_1_font, 0);
+    lv_obj_set_style_text_font(lbl_spending_status, L.pace_font, 0);
     lv_obj_set_pos(lbl_spending_status, 0, L.usage_reset_y + 20);
     lv_obj_add_flag(lbl_spending_status, LV_OBJ_FLAG_HIDDEN);
 
