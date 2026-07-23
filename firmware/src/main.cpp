@@ -365,6 +365,7 @@ void loop() {
         last_pct = pct;
         last_charging = charging;
         ui_update_battery(pct, charging);
+        ble_set_battery_level(pct);
     }
 
     check_serial_cmd();
