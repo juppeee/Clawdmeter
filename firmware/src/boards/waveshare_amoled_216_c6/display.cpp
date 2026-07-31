@@ -2,17 +2,28 @@
 #include "board.h"
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
+#include <esp_heap_caps.h>
 
 // C6 AMOLED-2.16 uses a CO5300 AMOLED panel (per the Waveshare
 // ESP32-C6-Touch-AMOLED-2.16 spec) — the same controller as the S3
 // AMOLED-2.16 sibling, so we drive it with Arduino_CO5300 and reuse that
 // class's vendor-correct init rather than the SH8601 class + a hand-patched
 // sequence. LCD reset is not wired to any MCU GPIO; the panel boots from its
-// internal power-on reset (rst = GFX_NOT_DEFINED). Rotation is disabled (no
-// PSRAM headroom for a rotation strip).
+// internal power-on reset (rst = GFX_NOT_DEFINED).
+//
+// Rotation: fixed, set by BOARD_FIXED_ROTATION in board.h, applied on the CPU
+// exactly like the S3 2.16 port does. The CO5300's MADCTL can flip axes but
+// cannot exchange rows and columns, so there is no hardware shortcut for 90°.
+// Unlike the S3 there is no IMU cycle and no PSRAM here: the strip buffer
+// comes out of internal SRAM and is sized to one LVGL partial flush
+// (LCD_WIDTH × ROT_BUF_LINES × 2 bytes = 19 KB at 20 lines).
+
+// Must match BUF_LINES in main.cpp for the PSRAM-free path.
+#define ROT_BUF_LINES 20
 
 static Arduino_DataBus* bus = nullptr;
 static Arduino_CO5300*  gfx = nullptr;
+static uint16_t*        rot_buf = nullptr;
 
 void display_hal_init(void) {
     bus = new Arduino_ESP32QSPI(
@@ -51,6 +62,19 @@ void display_hal_begin(void) {
     send_panel_driving_init(bus);   // panel-specific regs the class init omits
     gfx->fillScreen(0x0000);
     gfx->setBrightness(200);
+
+#if BOARD_FIXED_ROTATION != 0
+    // Strip buffer for the CPU rotation. Internal SRAM — this board has no
+    // PSRAM. If it ever fails to allocate we fall back to drawing unrotated
+    // rather than showing nothing: a sideways picture beats a black panel.
+    const size_t rot_bytes = (size_t)LCD_WIDTH * ROT_BUF_LINES * 2;
+    rot_buf = (uint16_t*)heap_caps_malloc(
+        rot_bytes, MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT);
+    Serial.printf("Display: rotation %d, strip %u bytes %s (free internal: %u)\n",
+                  BOARD_FIXED_ROTATION, (unsigned)rot_bytes,
+                  rot_buf ? "ok" : "FAILED -> drawing unrotated",
+                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_INTERNAL));
+#endif
 }
 
 void display_hal_set_brightness(uint8_t level) {
@@ -61,13 +85,57 @@ void display_hal_fill_screen(uint16_t color) {
     if (gfx) gfx->fillScreen(color);
 }
 
+#if BOARD_FIXED_ROTATION != 0
+// Rotate a w×h strip into rot_buf and compute where it lands on the 480×480
+// panel. Same mapping as the S3 2.16 port; src is row-major over (sx, sy, w, h).
+static void rotate_strip(const uint16_t* src, int32_t w, int32_t h,
+                         int32_t sx, int32_t sy,
+                         int32_t* dx, int32_t* dy, int32_t* dw, int32_t* dh) {
+    const int32_t S = LCD_WIDTH;
+#if BOARD_FIXED_ROTATION == 1
+    // 90° CW: (x,y) -> (S-1-y, x)
+    *dw = h; *dh = w;
+    *dx = S - sy - h;
+    *dy = sx;
+    for (int32_t y = 0; y < h; y++)
+        for (int32_t x = 0; x < w; x++)
+            rot_buf[x * h + (h - 1 - y)] = src[y * w + x];
+#elif BOARD_FIXED_ROTATION == 2
+    // 180°: (x,y) -> (S-1-x, S-1-y)
+    *dw = w; *dh = h;
+    *dx = S - sx - w;
+    *dy = S - sy - h;
+    for (int32_t y = 0; y < h; y++)
+        for (int32_t x = 0; x < w; x++)
+            rot_buf[(h - 1 - y) * w + (w - 1 - x)] = src[y * w + x];
+#else
+    // 270° CW (= 90° counter-clockwise): (x,y) -> (y, S-1-x)
+    *dw = h; *dh = w;
+    *dx = sy;
+    *dy = S - sx - w;
+    for (int32_t y = 0; y < h; y++)
+        for (int32_t x = 0; x < w; x++)
+            rot_buf[(w - 1 - x) * h + y] = src[y * w + x];
+#endif
+}
+#endif  // BOARD_FIXED_ROTATION != 0
+
 void display_hal_draw_bitmap(int32_t x, int32_t y, int32_t w, int32_t h,
                              const uint16_t* pixels) {
-    if (gfx) gfx->draw16bitRGBBitmap(x, y, (uint16_t*)pixels, w, h);
+    if (!gfx) return;
+#if BOARD_FIXED_ROTATION != 0
+    if (rot_buf && w * h <= LCD_WIDTH * ROT_BUF_LINES) {
+        int32_t dx, dy, dw, dh;
+        rotate_strip(pixels, w, h, x, y, &dx, &dy, &dw, &dh);
+        gfx->draw16bitRGBBitmap(dx, dy, rot_buf, dw, dh);
+        return;
+    }
+#endif
+    gfx->draw16bitRGBBitmap(x, y, (uint16_t*)pixels, w, h);
 }
 
 void display_hal_tick(void) {
-    // No rotation cycle on this board.
+    // Rotation is fixed at boot - nothing to poll.
 }
 
 // CO5300 requires even-aligned flush regions.
