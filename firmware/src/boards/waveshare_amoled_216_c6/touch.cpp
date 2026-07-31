@@ -37,6 +37,29 @@ void touch_hal_init(void) {
     Serial.println("Touch init OK");
 }
 
+// The panel image is rotated on the CPU (see display.cpp), but the touch
+// controller keeps reporting in the panel's own coordinate system. Apply the
+// same rotation here or every tap lands somewhere else on screen.
+//
+// display.cpp maps a panel point (px,py) to the rotated image; this is the
+// inverse, from a raw touch (rx,ry) to image coordinates.
+static inline void apply_rotation(uint16_t* x, uint16_t* y) {
+#if BOARD_FIXED_ROTATION == 1
+    uint16_t rx = *x, ry = *y;          // image 90° CW
+    *x = ry;
+    *y = (uint16_t)(LCD_WIDTH - 1 - rx);
+#elif BOARD_FIXED_ROTATION == 2
+    *x = (uint16_t)(LCD_WIDTH  - 1 - *x);
+    *y = (uint16_t)(LCD_HEIGHT - 1 - *y);
+#elif BOARD_FIXED_ROTATION == 3
+    uint16_t rx = *x, ry = *y;          // image 90° counter-clockwise
+    *x = (uint16_t)(LCD_HEIGHT - 1 - ry);
+    *y = rx;
+#else
+    (void)x; (void)y;
+#endif
+}
+
 void touch_hal_read(uint16_t* x, uint16_t* y, bool* pressed) {
     if (touch_data_ready) {
         touch_data_ready = false;
@@ -44,8 +67,10 @@ void touch_hal_read(uint16_t* x, uint16_t* y, bool* pressed) {
         uint8_t n = touch.getPoint(tx, ty, touch.getSupportTouchPoint());
         if (n > 0) {
             touch_pressed = true;
-            touch_x = (uint16_t)tx[0];
-            touch_y = (uint16_t)ty[0];
+            uint16_t px = (uint16_t)tx[0], py = (uint16_t)ty[0];
+            apply_rotation(&px, &py);
+            touch_x = px;
+            touch_y = py;
         } else {
             touch_pressed = false;
         }

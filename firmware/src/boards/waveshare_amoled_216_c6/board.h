@@ -53,7 +53,20 @@
 
 // ---- Capability flags ----
 #define BOARD_HAS_SECONDARY_BUTTON 1
-#define BOARD_HAS_ROTATION         0    // C6 has no PSRAM headroom for the rotation strip
+// No IMU-driven rotation cycle on this board (that needs a PSRAM-sized strip
+// and an accelerometer poll). What we do have is a FIXED rotation applied in
+// software, so the device can stand with its buttons on top instead of on the
+// left. The CO5300's MADCTL can flip axes but cannot exchange rows and
+// columns, so 90° has to be a CPU remap either way.
+//
+//   0 = as the panel ships (buttons on the left edge)
+//   1 = image 90° clockwise
+//   3 = image 90° counter-clockwise  ← buttons end up on top
+//
+// If the picture comes out upside down relative to what you wanted, swap
+// 3 and 1 here; nothing else needs to change.
+#define BOARD_FIXED_ROTATION       3
+#define BOARD_HAS_ROTATION         0    // no IMU auto-rotation (see above)
 #define BOARD_HAS_IMU              1    // present + initialized for I2C bus health
 #define BOARD_HAS_BATTERY          1
 #define BOARD_HAS_IO_EXPANDER      0    // TCA9554 exists on board but only services audio
