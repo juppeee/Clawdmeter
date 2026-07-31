@@ -28,6 +28,12 @@ void splash_pick_for_current_rate(void);
 // fight the PWR button.
 void splash_set_anim(const char *name);
 
+// Aus dem LVGL-Flush-Callback zu rufen, sobald der letzte Streifen eines
+// Bilddurchlaufs draussen ist. Der Splash malt auf manchen Boards direkt auf
+// den Panel und muss wissen, wann LVGL fertig ist - sonst uebermalt ein noch
+// laufender Durchlauf das gerade Gezeichnete.
+void splash_note_refresh_done(void);
+
 // True when splash is currently rendering (used to gate re-picks).
 bool splash_is_active(void);
 
