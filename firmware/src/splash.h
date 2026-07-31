@@ -21,6 +21,13 @@ void splash_hide(void);
 // trigger a re-pick when the rate group changes mid-display.
 void splash_pick_for_current_rate(void);
 
+// Let the host drive the animation instead of the usage-rate heuristic.
+// `name` is a splash_anims[] name (e.g. "work coding"); "" or NULL hands
+// control back to splash_pick_for_current_rate(). Only acts when the requested
+// name actually changes, so a host repeating the same name every poll doesn't
+// fight the PWR button.
+void splash_set_anim(const char *name);
+
 // True when splash is currently rendering (used to gate re-picks).
 bool splash_is_active(void);
 

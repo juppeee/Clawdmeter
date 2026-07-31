@@ -117,6 +117,7 @@ static bool parse_json(const char* json, UsageData* out) {
     out->time_pct = doc["tp"] | 0;
     out->period_days = doc["pd"] | 30;
     strlcpy(out->reset_date, doc["rd"] | "", sizeof(out->reset_date));
+    strlcpy(out->anim, doc["a"] | "", sizeof(out->anim));
     out->clock_epoch = doc["t"] | 0L;
     out->clock_fmt = doc["tf"] | 24;
     out->ok = doc["ok"] | false;
@@ -382,6 +383,9 @@ void loop() {
                 Serial.println("session reset detected — chime");
                 sound_hal_play_reset();
             }
+            // Host-driven animation. Sent only when the host is configured to
+            // mirror its desktop buddy; absent → "" → device keeps deciding.
+            splash_set_anim(usage.anim);
             if (g_after != g_before) {
                 Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
                     g_before, g_after, usage.session_pct);
