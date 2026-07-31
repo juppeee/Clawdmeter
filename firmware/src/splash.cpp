@@ -58,6 +58,12 @@ static const char* GROUP_NAMES[GROUP_COUNT][GROUP_MAX] = {
     { "dance bounce dj", "dance sway dj", "dance djmix", NULL },
 };
 
+// Host-driven animation (see splash_set_anim). -1 = no override, the usage-rate
+// groups decide. `forced_req` remembers what the host last asked for so a poll
+// repeating the same name is a no-op rather than a re-render.
+static int  forced_idx = -1;
+static char forced_req[24] = "";
+
 static void resolve_group_lists(void) {
     for (int g = 0; g < GROUP_COUNT; g++) {
         group_size[g] = 0;
@@ -342,8 +348,10 @@ void splash_tick(void) {
     }
 #endif
 
-    // Auto-rotate to the next animation in the current group.
-    if (millis() - last_pick_ms >= SPLASH_ROTATE_INTERVAL_MS) {
+    // Auto-rotate to the next animation in the current group. Suspended while
+    // the host drives the animation — otherwise its choice would be dropped
+    // after SPLASH_ROTATE_INTERVAL_MS.
+    if (forced_idx < 0 && millis() - last_pick_ms >= SPLASH_ROTATE_INTERVAL_MS) {
         splash_pick_for_current_rate();
     }
 
@@ -369,8 +377,45 @@ void splash_next(void) {
     Serial.printf("splash: -> %s\n", a->name);
 }
 
+// Switch to splash_anims[idx] and draw its first frame.
+static void show_anim(int idx) {
+    cur_anim = (uint16_t)idx;
+    cur_frame = 0;
+    frame_started_ms = millis();
+    last_pick_ms = frame_started_ms;
+    const splash_anim_def_t *a = &splash_anims[cur_anim];
+    render_frame(a->frames[0], a->palette);
+}
+
+void splash_set_anim(const char *name) {
+    if (SPLASH_ANIM_COUNT == 0) return;
+    if (!name) name = "";
+    if (strncmp(name, forced_req, sizeof(forced_req)) == 0) return;  // unchanged
+    strlcpy(forced_req, name, sizeof(forced_req));
+
+    if (name[0] == '\0') {                 // host released control
+        forced_idx = -1;
+        Serial.println("splash: host released, back to usage-rate groups");
+        if (active) splash_pick_for_current_rate();
+        return;
+    }
+    for (int i = 0; i < SPLASH_ANIM_COUNT; i++) {
+        if (strcmp(splash_anims[i].name, name) == 0) {
+            forced_idx = i;
+            Serial.printf("splash: host -> %s\n", name);
+            if (active) show_anim(i);
+            return;
+        }
+    }
+    // Unknown name (host newer than firmware): keep whatever is running rather
+    // than blanking the screen, but drop back to the device's own choice.
+    forced_idx = -1;
+    Serial.printf("splash: host asked for unknown anim '%s', ignoring\n", name);
+}
+
 void splash_pick_for_current_rate(void) {
     if (SPLASH_ANIM_COUNT == 0) return;
+    if (forced_idx >= 0) { show_anim(forced_idx); return; }
     int g = usage_rate_group();
     if (g < 0 || g >= GROUP_COUNT) g = 0;
     if (group_size[g] == 0) return;
