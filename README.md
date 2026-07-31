@@ -1,3 +1,41 @@
+> ### This is a fork
+>
+> The Clawdmeter — the device, this firmware, the board ports, the LVGL work,
+> the BLE service, the animation engine — is
+> **[Hermann Björgvin's](https://github.com/HermannBjorgvin/Clawdmeter)**
+> project. Everything below this box is his README, unchanged.
+>
+> This branch (`csb-buddy`) adds what the
+> **[Claude Session Browser](https://github.com/juppeee/claude-session-browser)**
+> needs on Windows, so the device shows *what Claude Code is doing* rather than
+> only how fast the quota is burning:
+>
+> - **A field in the BLE payload** (`a`) so a host can name the animation to
+>   play. Without a host naming one, nothing changes.
+> - **Five more animations** — done, think, write, allow, limit — for states the
+>   stock set doesn't cover. Reworked and partly redrawn from
+>   [claudepix](https://claudepix.vercel.app).
+> - **Two fixes for the C6-2.16**: bitmaps larger than the strip buffer were
+>   drawn unrotated (some emotes came out sideways), and the splash was only
+>   partly repainted after a screen switch (half a buddy, or just the moving
+>   pixels).
+>
+> **You only need this build if you want the device to react to Clawd.** For
+> the usage meter and battery, Hermann's firmware works with the Session
+> Browser as it is — it simply ignores the extra field.
+>
+> Flashing works exactly as upstream describes, from this branch:
+>
+> ```bash
+> ./flash.sh waveshare_amoled_216_c6          # Linux
+> pio run -d firmware -e waveshare_amoled_216_c6 -t upload --upload-port COM5
+> ```
+>
+> The fixes are offered upstream; if they land there, this branch shrinks to
+> the sprites. Anything broken here is my doing, not Hermann's — open an issue
+> [on the fork](https://github.com/juppeee/Clawdmeter/issues), not on his
+> tracker.
+
 # Clawdmeter
 
 A small ESP32 dashboard I made for my desk to keep an eye on Claude Code usage.
