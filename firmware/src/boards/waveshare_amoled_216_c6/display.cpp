@@ -124,11 +124,24 @@ void display_hal_draw_bitmap(int32_t x, int32_t y, int32_t w, int32_t h,
                              const uint16_t* pixels) {
     if (!gfx) return;
 #if BOARD_FIXED_ROTATION != 0
-    if (rot_buf && w * h <= LCD_WIDTH * ROT_BUF_LINES) {
-        int32_t dx, dy, dw, dh;
-        rotate_strip(pixels, w, h, x, y, &dx, &dy, &dw, &dh);
-        gfx->draw16bitRGBBitmap(dx, dy, rot_buf, dw, dh);
-        return;
+    // Rotate in horizontal slices. Callers are NOT limited to one LVGL flush:
+    // splash.cpp pushes bands of (up to 480 × scr_cell) straight to the panel,
+    // and scr_cell is 24 here — bigger than one ROT_BUF_LINES strip. Bailing
+    // out to the unrotated draw in that case left wide repaints sideways while
+    // narrow ones came out upright, so slice instead of giving up.
+    if (rot_buf && w > 0 && w <= LCD_WIDTH) {
+        int32_t max_rows = (LCD_WIDTH * ROT_BUF_LINES) / w;
+        max_rows &= ~1;                       // keep slices even (CO5300 alignment)
+        if (max_rows >= 2) {
+            for (int32_t y0 = 0; y0 < h; y0 += max_rows) {
+                int32_t hh = h - y0 < max_rows ? h - y0 : max_rows;
+                int32_t dx, dy, dw, dh;
+                rotate_strip(pixels + (size_t)y0 * w, w, hh, x, y + y0,
+                             &dx, &dy, &dw, &dh);
+                gfx->draw16bitRGBBitmap(dx, dy, rot_buf, dw, dh);
+            }
+            return;
+        }
     }
 #endif
     gfx->draw16bitRGBBitmap(x, y, (uint16_t*)pixels, w, h);
