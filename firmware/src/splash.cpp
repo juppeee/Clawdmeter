@@ -42,20 +42,25 @@ static bool active = false;
 // Usage-rate animation groups: 4 groups × up to 4 animations each.
 // Filled at init by matching literal names from splash_anims[].
 #define GROUP_COUNT 4
-#define GROUP_MAX   4
+#define GROUP_MAX   5
 static int8_t  group_lists[GROUP_COUNT][GROUP_MAX];
 static uint8_t group_size[GROUP_COUNT] = {0};
 static uint8_t group_rotation[GROUP_COUNT] = {0};
 
 static const char* GROUP_NAMES[GROUP_COUNT][GROUP_MAX] = {
+    // Every animation in splash_anims[] should appear in exactly one group,
+    // otherwise it is only ever reachable by pressing PWR. The five Session
+    // Browser ones are sorted by mood, not by their buddy meaning — "limit"
+    // lands in heavy because that is when it reads as true here.
+    //
     // Group 0 — idle / sleepy
-    { "expression sleep", "idle breathe", "idle blink", "expression wink" },
+    { "expression sleep", "idle breathe", "idle blink", "expression wink", "done" },
     // Group 1 — normal pace
-    { "idle look around", "work think", "work coding", NULL },
+    { "idle look around", "work think", "work coding", "think", "allow" },
     // Group 2 — active
-    { "dance sway", "expression surprise", "dance bounce", NULL },
+    { "dance sway", "expression surprise", "dance bounce", "write", NULL },
     // Group 3 — heavy
-    { "dance bounce dj", "dance sway dj", "dance djmix", NULL },
+    { "dance bounce dj", "dance sway dj", "dance djmix", "limit", NULL },
 };
 
 // Host-driven animation (see splash_set_anim). -1 = no override, the usage-rate
