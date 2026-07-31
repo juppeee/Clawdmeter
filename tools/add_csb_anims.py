@@ -22,9 +22,13 @@ import os
 import re
 import sys
 
-# Namen die aus dem Session Browser uebernommen werden. Alles andere ist
-# entweder schon in der Firmware oder gehoert nicht aufs Geraet.
-EXTRA = ["done", "think", "write", "allow", "limit"]
+# Uebernommen wird ALLES was der Session Browser kennt - auch Namen die es
+# upstream schon gibt. Beide Seiten stammen zwar aus claudepix, aber aus
+# verschiedenen Staenden: "work coding" hat dort 18 Frames, upstream 23,
+# "expression sleep" 5 gegen 24. Gleicher Name, andere Bewegung - auf dem
+# Geraet lief dann sichtbar etwas anderes als auf dem Desktop.
+#
+# Was der Buddy nicht kennt (die DJ-Animationen) bleibt unangetastet.
 
 # Der Session Browser kennt keine Haltezeiten pro Frame -- sein Buddy laeuft
 # mit fester Rate (_FRAME_MS). Dieselbe Rate hier, sonst laufen dieselben
@@ -70,10 +74,15 @@ def load_anims(csb_path: str) -> dict:
 
 
 def c_ident(name: str) -> str:
-    return "splash_" + re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
+    """Eigenes Praefix: die von convert_to_c.js erzeugten Arrays heissen
+    splash_<name>_* und stehen weiter in der Datei. Gleiche Namen waeren eine
+    Doppeldefinition. Die verdraengten bleiben ungenutzt liegen - der Linker
+    wirft sie mit --gc-sections raus, und die generierte Datei bleibt so, wie
+    ihr eigener Generator sie schreiben wuerde."""
+    return "splash_csb_" + re.sub(r"[^a-z0-9]+", "_", name.lower()).strip("_")
 
 
-def emit(name: str, anim: dict) -> tuple[str, str]:
+def emit(name: str, anim: dict, category: str = "Session Browser") -> tuple[str, str]:
     """(Definitionen, Tabellenzeile) fuer eine Animation."""
     ident = c_ident(name)
     pal = [rgb565(c) for c in anim["palette"]]
@@ -93,7 +102,7 @@ def emit(name: str, anim: dict) -> tuple[str, str]:
     out.append("};")
     out.append(f"static const uint16_t {ident}_holds[{len(frames)}] = {{"
                + ",".join([str(FRAME_MS)] * len(frames)) + "};")
-    row = (f'    {{"{name}", "Session Browser", {len(frames)}, '
+    row = (f'    {{"{name}", "{category}", {len(frames)}, '
            f"{ident}_palette, {ident}_frames, {ident}_holds}},")
     return "\n".join(out), row
 
@@ -108,9 +117,8 @@ def main() -> int:
     args = ap.parse_args()
 
     anims = load_anims(args.csb)
-    missing = [n for n in EXTRA if n not in anims]
-    if missing:
-        print(f"FEHLER: im Session Browser nicht gefunden: {missing}")
+    if not anims:
+        print("FEHLER: der Session Browser liefert keine Animationen")
         return 1
 
     path = os.path.abspath(args.out)
@@ -134,21 +142,26 @@ def main() -> int:
     # uebersprungen. Uebrig bleiben nur die Zeilen von upstream.
     upstream = [ln for ln in rows.splitlines()
                 if ln.strip() and '"Session Browser"' not in ln]
-    base_count = len(upstream)
 
-    # Was upstream unter gleichem Namen schon liefert, wird nicht ersetzt.
-    known = set(re.findall(r'\{"([^"]+)"', "\n".join(upstream)))
-    todo = [n for n in EXTRA if n not in known]
-    skipped = [n for n in EXTRA if n in known]
-    if skipped:
-        print(f"kommt schon von upstream, uebersprungen: {skipped}")
-    if not todo:
-        print("nichts zu ergaenzen")
-        return 0
+    # Kategorie je Name merken - eine ersetzte Animation soll in derselben
+    # Rubrik bleiben, nicht auf einmal unter "Session Browser" auftauchen.
+    cats = dict(re.findall(r'\{"([^"]+)",\s*"([^"]+)"', "\n".join(upstream)))
+
+    # Namen, die der Buddy kennt, kommen jetzt von ihm. Die Zeile von
+    # upstream fliegt raus, sonst stuende der Name zweimal in der Tabelle.
+    todo = [n for n in anims if n in cats]           # ersetzt
+    todo += [n for n in anims if n not in cats]      # neu dazu
+    replaced = [n for n in todo if n in cats]
+    keep = [ln for ln in upstream
+            if re.match(r'\s*\{"([^"]+)"', ln)
+            and re.match(r'\s*\{"([^"]+)"', ln).group(1) not in anims]
+    base_count = len(keep)
+    if replaced:
+        print(f"aus dem Session Browser ersetzt: {replaced}")
 
     defs, new_rows = [], []
     for name in todo:
-        d, r = emit(name, anims[name])
+        d, r = emit(name, anims[name], cats.get(name, "Session Browser"))
         defs.append(d)
         new_rows.append(r)
 
@@ -160,15 +173,16 @@ def main() -> int:
     total = base_count + len(todo)
     table = ("#define SPLASH_ANIM_COUNT " + str(total) + "\n"
              "static const splash_anim_def_t splash_anims[SPLASH_ANIM_COUNT] = {\n"
-             + "\n".join(upstream) + "\n" + "\n".join(new_rows) + "\n};")
+             + "\n".join(keep) + "\n" + "\n".join(new_rows) + "\n};")
     src = src[:m.start()] + block + "\n" + table + src[m.end():]
 
     with open(path, "w", encoding="utf-8", newline="\n") as fh:
         fh.write(src)
 
     frames = sum(len(anims[n]["frames"]) for n in todo)
-    print(f"{len(todo)} Animationen ergaenzt ({frames} Frames, "
-          f"{frames * 400 / 1024:.1f} KB Flash), SPLASH_ANIM_COUNT {base_count} -> {total}")
+    print(f"{len(todo)} Animationen aus dem Session Browser ({frames} Frames, "
+          f"{frames * 400 / 1024:.1f} KB), davon {len(replaced)} ersetzt. "
+          f"Dazu {base_count} von upstream -> SPLASH_ANIM_COUNT {total}")
     return 0
 
 

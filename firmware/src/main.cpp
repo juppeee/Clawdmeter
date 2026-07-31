@@ -37,6 +37,10 @@ static UsageData usage = {};
 static uint16_t* buf1 = nullptr;
 static uint16_t* buf2 = nullptr;
 
+// Abstecher vom Splash auf die Auslastungszahlen: alle EVERY fuer SHOW lang.
+#define USAGE_PEEK_EVERY_MS  (5UL * 60UL * 1000UL)
+#define USAGE_PEEK_SHOW_MS   (60UL * 1000UL)
+
 static uint32_t my_tick(void) { return millis(); }
 
 static void my_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
@@ -350,6 +354,45 @@ void loop() {
         }
 
         pair_tick();
+    }
+
+    // ---- Zwischendurch die Zahlen zeigen ----
+    // Wer den Clawd als Animation laufen laesst, will trotzdem ab und zu
+    // sehen wie es um die Auslastung steht. Alle USAGE_PEEK_EVERY_MS also
+    // fuer USAGE_PEEK_SHOW_MS auf den Usage-Screen und wieder zurueck.
+    //
+    // Bewusst nur aus dem Splash heraus und nur solange der Nutzer nicht
+    // selbst umschaltet: ein Tastendruck waehrend des Abstechers beendet ihn,
+    // und wer laenger freiwillig auf den Zahlen steht, faengt danach mit
+    // vollem Abstand wieder an - sonst wechselt das Ding vor der Nase hin
+    // und her.
+    {
+        static uint32_t peek_ref_ms = 0;
+        static bool     peeking     = false;
+        const uint32_t now_ms = millis();
+        const screen_t cur    = ui_get_current_screen();
+
+        if (idle_is_asleep()) {
+            peek_ref_ms = now_ms;          // im Schlaf laeuft die Uhr nicht
+            peeking = false;
+        } else if (peeking) {
+            if (cur != SCREEN_USAGE) {     // Nutzer hat selbst umgeschaltet
+                peeking = false;
+                peek_ref_ms = now_ms;
+            } else if (now_ms - peek_ref_ms >= USAGE_PEEK_SHOW_MS) {
+                peeking = false;
+                peek_ref_ms = now_ms;
+                ui_show_screen(SCREEN_SPLASH);
+                Serial.println("peek: zurueck zu den Animationen");
+            }
+        } else if (cur != SCREEN_SPLASH) {
+            peek_ref_ms = now_ms;          // steht ohnehin auf den Zahlen
+        } else if (now_ms - peek_ref_ms >= USAGE_PEEK_EVERY_MS) {
+            peeking = true;
+            peek_ref_ms = now_ms;
+            ui_show_screen(SCREEN_USAGE);
+            Serial.println("peek: zeige kurz die Auslastung");
+        }
     }
 
     ble_state_t bs = ble_get_state();
