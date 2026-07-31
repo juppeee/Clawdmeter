@@ -116,6 +116,14 @@ static uint8_t         prev_cells[GRID * GRID];
 static const uint16_t* prev_palette = NULL;
 static bool            prev_valid   = false;
 static bool            force_full   = false;  // repaint everything on the next render
+// Zaehlt abgeschlossene LVGL-Durchlaeufe (hochgezaehlt aus dem Flush-Callback).
+// splash_show merkt sich den Stand und wartet auf eine Aenderung, bevor es
+// wieder direkt auf den Panel malt.
+static volatile uint32_t refresh_seq = 0;
+static uint32_t          wait_seq      = 0;
+static uint32_t          wait_until_ms = 0;
+
+void splash_note_refresh_done(void) { refresh_seq++; }
 
 // Upscale grid cells [gx0..gx1]×[gy0..gy1] and push them to the panel, one
 // grid-row band at a time so the scratch buffer stays (GRID*scr_cell × scr_cell).
@@ -345,9 +353,15 @@ void splash_tick(void) {
     if (!active || SPLASH_ANIM_COUNT == 0) return;
 
 #if SPLASH_DIRECT_DRAW
-    // Deferred full repaint after a (re)show — runs now that LVGL has drawn the
-    // black background this loop iteration.
-    if (force_full) {
+    // Voller Neuaufbau nach dem Wiederanzeigen — erst wenn LVGL einen
+    // kompletten Durchlauf abgeschlossen hat, sonst uebermalen die restlichen
+    // schwarzen Streifen den halben Buddy.
+    //
+    // Die Notbremse ist noetig, weil ohne Aenderung auch kein Durchlauf
+    // stattfindet: haette LVGL nichts neu zu zeichnen, wuerde refresh_seq nie
+    // hochgehen und der Splash bliebe fuer immer leer.
+    if (force_full && (refresh_seq != wait_seq
+                       || (int32_t)(millis() - wait_until_ms) >= 0)) {
         const splash_anim_def_t *fa = &splash_anims[cur_anim];
         if (fa->frame_count) render_frame(fa->frames[cur_frame], fa->palette);
     }
@@ -445,10 +459,21 @@ void splash_show(void) {
     if (splash_container) lv_obj_clear_flag(splash_container, LV_OBJ_FLAG_HIDDEN);
     active = true;
 #if SPLASH_DIRECT_DRAW
-    // LVGL fills the container black once on unhide; that would erase a creature
-    // drawn now. Defer the full repaint to the next splash_tick(), which runs
-    // after lv_timer_handler() in the main loop.
-    force_full = true;
+    // LVGL fills the container black on unhide, and that black would erase a
+    // creature drawn now. Deferring to the next splash_tick() was not enough:
+    // this panel renders partially (BUF_LINES 20 of 480), so one
+    // lv_timer_handler() pass flushes only a few strips. The creature got
+    // painted between two of them, and the remaining black strips wiped part
+    // of it — from then on only changed cells are redrawn, so the damage
+    // stayed. Half a creature, or just the pixels that move.
+    //
+    // So wait for LVGL to report a finished pass (splash_note_refresh_done,
+    // called from the flush callback on the last strip). lv_refr_now() would
+    // be the obvious tool but splash_show() also runs from an LVGL event
+    // handler — starting a refresh from inside one is asking for trouble.
+    force_full   = true;
+    wait_seq     = refresh_seq;
+    wait_until_ms = millis() + 250;   // Notbremse, siehe splash_tick
 #endif
 }
 

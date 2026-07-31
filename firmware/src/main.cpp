@@ -47,6 +47,9 @@ static void my_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_m
     int32_t w = area->x2 - area->x1 + 1;
     int32_t h = area->y2 - area->y1 + 1;
     display_hal_draw_bitmap(area->x1, area->y1, w, h, (uint16_t*)px_map);
+    // Letzter Streifen eines Durchlaufs: der Splash wartet darauf, bevor er
+    // nach einem Screenwechsel wieder direkt auf den Panel malt.
+    if (lv_display_flush_is_last(disp)) splash_note_refresh_done();
     lv_display_flush_ready(disp);
 }
 
