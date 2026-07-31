@@ -15,24 +15,32 @@
 > - **Five more animations** — done, think, write, allow, limit — for states the
 >   stock set doesn't cover. Reworked and partly redrawn from
 >   [claudepix](https://claudepix.vercel.app).
-> - **Two fixes for the C6-2.16**: bitmaps larger than the strip buffer were
->   drawn unrotated (some emotes came out sideways), and the splash was only
->   partly repainted after a screen switch (half a buddy, or just the moving
->   pixels).
+> - **A fixed 90° rotation** on the C6-2.16, because I mount mine with the
+>   buttons on top. Upstream has rotation disabled on this board; enabling it
+>   revealed that bitmaps larger than the strip buffer were drawn unrotated, so
+>   that path is rewritten to work in slices.
+> - **A full splash rebuild after a screen switch**, needed because this build
+>   flips to the usage screen on its own every few minutes. LVGL repaints in
+>   strips, and the deferred rebuild left half a buddy behind.
+>
+> None of that is a fix to Hermann's project — every one of these exists
+> because of a choice made here. That's why this is a fork and not a pull
+> request.
 >
 > **You only need this build if you want the device to react to Clawd.** For
 > the usage meter and battery, Hermann's firmware works with the Session
 > Browser as it is — it simply ignores the extra field.
 >
-> Flashing works exactly as upstream describes, from this branch:
+> The Session Browser is Windows-only, so that's the flashing command that
+> matters here — from this branch, with your device's COM port:
 >
-> ```bash
-> ./flash.sh waveshare_amoled_216_c6          # Linux
+> ```
 > pio run -d firmware -e waveshare_amoled_216_c6 -t upload --upload-port COM5
 > ```
 >
-> The fixes are offered upstream; if they land there, this branch shrinks to
-> the sprites. Anything broken here is my doing, not Hermann's — open an issue
+> Everything else about flashing is unchanged from upstream.
+>
+> Anything broken here is my doing, not Hermann's — open an issue
 > [on the fork](https://github.com/juppeee/Clawdmeter/issues), not on his
 > tracker.
 
