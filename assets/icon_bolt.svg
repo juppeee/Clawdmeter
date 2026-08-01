@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="20 4 24 28" width="24" height="28">
+  <!-- Charge bolt. Same path as the battery-charging Lucide glyph carries,
+       kept as its own asset because the charge animation draws it large and
+       on its own, not inside a battery outline. -->
+  <path d="M34 4 L20 20 L30 20 L26 32 L44 13 L33 13 Z" fill="#ffffff"/>
+</svg>

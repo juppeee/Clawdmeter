@@ -1,5 +1,6 @@
 #include "ui.h"
 #include "splash.h"
+#include "charge_anim.h"
 #include <lvgl.h>
 #include <time.h>
 #include "logo.h"
@@ -571,6 +572,9 @@ void ui_init(void) {
         lv_obj_del(battery_img);
         battery_img = nullptr;
     }
+
+    // Last, so the charge overlay covers everything else when it plays.
+    charge_anim_init(scr);
 }
 
 void ui_update(const UsageData* data) {
