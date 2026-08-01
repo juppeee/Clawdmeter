@@ -8,6 +8,7 @@
 #include "ui.h"
 #include "ble.h"
 #include "splash.h"
+#include "charge_anim.h"
 #include "usage_rate.h"
 #include "idle.h"
 #include "idle_cfg.h"
@@ -182,6 +183,11 @@ static void check_serial_cmd() {
             cmd_buf[cmd_pos] = '\0';
             if (strcmp(cmd_buf, "screenshot") == 0) send_screenshot();
             else if (strcmp(cmd_buf, "buzz") == 0)  sound_hal_play_reset();
+            // Play the charge overlay without touching the cable — the real
+            // trigger needs a USB transition, which is awkward to produce on a
+            // device that is being flashed over that same cable.
+            else if (strcmp(cmd_buf, "charge") == 0)   charge_anim_play(true);
+            else if (strcmp(cmd_buf, "uncharge") == 0) charge_anim_play(false);
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;
@@ -413,6 +419,22 @@ void loop() {
         last_pct = pct;
         last_charging = charging;
         ui_update_battery(pct, charging);
+    }
+
+    // Cable in / out gets a short animation. Driven by VBUS rather than the
+    // charging flag, which also drops when the battery reaches full with the
+    // cable still in — that would play the unplug sequence for nothing.
+    // The first reading only records the state: booting on USB is not an event.
+    static bool vbus_known = false;
+    static bool last_vbus  = false;
+    bool vbus = power_hal_is_vbus_in();
+    if (!vbus_known) {
+        vbus_known = true;
+        last_vbus  = vbus;
+    } else if (vbus != last_vbus) {
+        last_vbus = vbus;
+        Serial.printf("USB %s\n", vbus ? "in" : "out");
+        charge_anim_play(vbus);
     }
 
     check_serial_cmd();
