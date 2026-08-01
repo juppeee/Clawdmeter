@@ -1,6 +1,7 @@
 #include "splash.h"
 #include "splash_animations.h"
 #include "splash_geometry.h"
+#include "charge_anim.h"
 #include "theme.h"
 #include "usage_rate.h"
 #include "hal/board_caps.h"
@@ -352,6 +353,11 @@ void splash_init(lv_obj_t *parent) {
 void splash_tick(void) {
     if (!active || SPLASH_ANIM_COUNT == 0) return;
 
+    // The charge overlay is an ordinary LVGL widget, but on the direct-draw
+    // boards this module paints straight onto the panel and would scribble
+    // over it. Standing still for the two seconds it runs is enough.
+    if (charge_anim_is_active()) return;
+
 #if SPLASH_DIRECT_DRAW
     // Voller Neuaufbau nach dem Wiederanzeigen — erst wenn LVGL einen
     // kompletten Durchlauf abgeschlossen hat, sonst uebermalen die restlichen
@@ -454,10 +460,7 @@ void splash_pick_for_current_rate(void) {
 
 bool splash_is_active(void) { return active; }
 
-void splash_show(void) {
-    splash_pick_for_current_rate();   // select animation; direct path defers the draw
-    if (splash_container) lv_obj_clear_flag(splash_container, LV_OBJ_FLAG_HIDDEN);
-    active = true;
+void splash_request_full_redraw(void) {
 #if SPLASH_DIRECT_DRAW
     // LVGL fills the container black on unhide, and that black would erase a
     // creature drawn now. Deferring to the next splash_tick() was not enough:
@@ -469,12 +472,20 @@ void splash_show(void) {
     //
     // So wait for LVGL to report a finished pass (splash_note_refresh_done,
     // called from the flush callback on the last strip). lv_refr_now() would
-    // be the obvious tool but splash_show() also runs from an LVGL event
-    // handler — starting a refresh from inside one is asking for trouble.
-    force_full   = true;
-    wait_seq     = refresh_seq;
+    // be the obvious tool but the callers run from LVGL event handlers and
+    // animation callbacks — starting a refresh from inside one is asking for
+    // trouble.
+    force_full    = true;
+    wait_seq      = refresh_seq;
     wait_until_ms = millis() + 250;   // Notbremse, siehe splash_tick
 #endif
+}
+
+void splash_show(void) {
+    splash_pick_for_current_rate();   // select animation; direct path defers the draw
+    if (splash_container) lv_obj_clear_flag(splash_container, LV_OBJ_FLAG_HIDDEN);
+    active = true;
+    splash_request_full_redraw();
 }
 
 void splash_hide(void) {
