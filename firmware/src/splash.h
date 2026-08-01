@@ -16,6 +16,13 @@ void splash_next(void);
 void splash_show(void);
 void splash_hide(void);
 
+// Repaint every cell on the next tick instead of only the ones that changed.
+// Needed whenever something else has drawn over the splash — a screen switch,
+// or an overlay that has just gone away. Without it the covered part stays
+// black until the animation happens to change those cells, which on a mostly
+// still frame can be never.
+void splash_request_full_redraw(void);
+
 // Pick the next animation matching the current usage-rate group.
 // Called automatically by splash_show(); also exposed so other modules can
 // trigger a re-pick when the rate group changes mid-display.
