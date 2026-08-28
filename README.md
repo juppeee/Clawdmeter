@@ -8,7 +8,7 @@ It runs on a [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/es
 busier when your usage rate climbs. The two side buttons send Space and
 Shift+Tab over BLE HID for Claude Code's voice mode and mode-toggle shortcuts.
 
-![Usage meter](assets/demo.jpeg)
+<img width="1179" height="994" alt="Usage meter" src="https://github.com/user-attachments/assets/83e54aea-0932-428f-94aa-b3ede3a360aa" />
 
 ## Screens
 
