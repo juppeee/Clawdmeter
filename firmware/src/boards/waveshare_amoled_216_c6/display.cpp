@@ -30,8 +30,8 @@ void display_hal_init(void) {
 // does not set is this panel's manufacturer page-0x20 driving-voltage
 // registers (0x19/0x1C) — without them the panel stays black even with the
 // rails up. Set just those; everything else the SH8601-era hack also wrote
-// (0xC4/0x36/0x53/0x51/0x63/0x29) is now covered by the class init.
-//
+// (0xC4/0x53/0x51/0x63/0x29) is now covered by the class init, and we override
+// MADCTL below to fix orientation.
 // The CO5300 class default (rotation-0, MADCTL 0x00) leaves the panel
 // sideways on this board — confirmed on hardware. Restore the MV+ML
 // transpose (MADCTL 0x30) that the pre-CO5300-rebase SH8601-hack version
