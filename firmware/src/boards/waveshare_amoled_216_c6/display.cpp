@@ -32,16 +32,17 @@ void display_hal_init(void) {
 // rails up. Set just those; everything else the SH8601-era hack also wrote
 // (0xC4/0x36/0x53/0x51/0x63/0x29) is now covered by the class init.
 //
-// Note: we deliberately do NOT restore the old MADCTL 0x30 (MV transpose).
-// The CO5300 class default (rotation-0, MADCTL 0x00) orients the panel with
-// the USB port on the side, which is the preferred desk orientation for this
-// board.
+// The CO5300 class default (rotation-0, MADCTL 0x00) leaves the panel
+// sideways on this board — confirmed on hardware. Restore the MV+ML
+// transpose (MADCTL 0x30) that the pre-CO5300-rebase SH8601-hack version
+// used to write; touch mapping in touch.cpp is calibrated to match.
 static void send_panel_driving_init(Arduino_DataBus* b) {
     b->beginWrite();
     b->writeC8D8(0xFE, 0x20);    // enter manufacturer command page 0x20
     b->writeC8D8(0x19, 0x10);    // panel driving voltage
     b->writeC8D8(0x1C, 0xA0);    // panel driving voltage
     b->writeC8D8(0xFE, 0x00);    // back to user command page
+    b->writeC8D8(0x36, 0x30);    // MADCTL: MV transpose + ML (orientation fix)
     b->endWrite();
     delay(20);
 }
