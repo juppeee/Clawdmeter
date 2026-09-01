@@ -81,12 +81,15 @@ def _extract_access_token(blob: str) -> str | None:
         data = None
     if isinstance(data, dict):
         # direct: {"accessToken": "..."}
-        if isinstance(data.get("accessToken"), str):
-            return data["accessToken"]
+        tok = data.get("accessToken")
+        if isinstance(tok, str) and tok.strip():
+            return tok
         # nested: {"claudeAiOauth": {"accessToken": "..."}}
         for v in data.values():
-            if isinstance(v, dict) and isinstance(v.get("accessToken"), str):
-                return v["accessToken"]
+            if isinstance(v, dict):
+                tok = v.get("accessToken")
+                if isinstance(tok, str) and tok.strip():
+                    return tok
     m = re.search(r'"accessToken"\s*:\s*"([^"]+)"', blob)
     if m:
         return m.group(1)
