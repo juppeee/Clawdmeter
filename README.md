@@ -53,8 +53,9 @@ The macOS host pieces — Python daemon, LaunchAgent, and flash helper — were 
 ### Flash the firmware
 
 ```bash
-./flash-mac.sh waveshare_amoled_216                       # auto-detects /dev/cu.usbmodem*
-./flash-mac.sh waveshare_amoled_18  /dev/cu.usbmodem1101  # or pass an explicit USB serial port
+./flash-mac.sh waveshare_amoled_216                       # ESP32-S3 2.16" (auto-detects /dev/cu.usbmodem*)
+./flash-mac.sh waveshare_amoled_216_c6                    # ESP32-C6 2.16" variant
+./flash-mac.sh waveshare_amoled_18  /dev/cu.usbmodem1101  # ESP32-S3 1.8" (or pass an explicit USB serial port)
 ```
 
 The board env name is required. Run `./flash-mac.sh` with no args to see the available envs (scraped from `firmware/platformio.ini`).
@@ -87,8 +88,9 @@ launchctl load -w ~/Library/LaunchAgents/com.user.claude-usage-daemon.plist # st
 ### Flash the firmware
 
 ```bash
-./flash.sh waveshare_amoled_216                  # defaults to /dev/ttyACM0
-./flash.sh waveshare_amoled_18  /dev/ttyACM1     # or pass an explicit USB serial port
+./flash.sh waveshare_amoled_216                  # ESP32-S3 2.16" (defaults to /dev/ttyACM0)
+./flash.sh waveshare_amoled_216_c6               # ESP32-C6 2.16" variant
+./flash.sh waveshare_amoled_18  /dev/ttyACM1     # ESP32-S3 1.8" (or pass an explicit USB serial port)
 ```
 
 The board env name is required. Run `./flash.sh` with no args to see the available envs (scraped from `firmware/platformio.ini`).
