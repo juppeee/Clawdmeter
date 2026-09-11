@@ -18,3 +18,9 @@ daemon/.venv/
 # Python bytecode cache
 __pycache__/
 *.pyc
+
+# Windows daemon venv (install-windows.ps1 creates it at the repo root)
+.venv/
+
+# Local flash backups and dumps
+Original/
