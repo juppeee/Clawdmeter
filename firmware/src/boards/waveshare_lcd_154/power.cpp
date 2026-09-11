@@ -7,7 +7,10 @@
 
 // No PMU on this kit — the ETA6098 charger is standalone and exposes nothing
 // over I2C. Battery percentage comes from the VBAT divider on BAT_ADC_PIN;
-// charging / VBUS state is unknowable, so both report false.
+// charging comes from the charger's status output on BAT_CHRG_PIN (LOW while
+// charging). VBUS itself is not wired to any GPIO, so is_vbus_in reports
+// false — deriving it from the charge pin would fake a cable-out event every
+// time the battery reaches full.
 //
 // The PWR-role button is a plain active-LOW GPIO. Same software edge
 // synthesis as the AMOLED-1.8 port (which polls an IO expander instead):
@@ -21,9 +24,9 @@
 // BAT_EN latch (hard power cut on battery) and deep-sleeps (pseudo-off on
 // USB, where the rail can't be cut). The pairing gesture in main.cpp already
 // disarms at 6 s precisely to leave this window free, so the timings compose
-// without any shared-code change. Power back ON: center PWR button (battery,
-// re-raises the latched rail) or BOOT press / reset (USB deep sleep, via the
-// ext0 wake armed below).
+// without any shared-code change. Power back ON: PWR key (battery, re-raises
+// the latched rail) or BOOT press / reset (USB deep sleep, via the ext0 wake
+// armed below).
 
 #define BATTERY_POLL_MS  2000
 #define PWR_POLL_MS      50
@@ -31,6 +34,7 @@
 #define PWR_OFF_HOLD_MS  8000   // mirrors the AXP2101 PKEY 8s shutdown
 
 static int      cached_pct        = -1;
+static bool     cached_charging   = false;
 static bool     pwr_pressed_flag  = false;
 static bool     pwr_long_flag     = false;
 static bool     pwr_released_flag = false;
@@ -49,12 +53,15 @@ static void sample_battery(void) {
 
     if (vbat < 3.0f) {          // divider floating — no battery connected
         cached_pct = -1;
+        // Without a battery the charger's status output isn't meaningful.
+        cached_charging = false;
         return;
     }
     // Linear 3.3 V → 0%, 4.2 V → 100%. Crude but serviceable for a
     // four-state indicator icon.
     int pct = (int)((vbat - 3.3f) * (100.0f / 0.9f) + 0.5f);
     cached_pct = pct < 0 ? 0 : pct > 100 ? 100 : pct;
+    cached_charging = (digitalRead(BAT_CHRG_PIN) == LOW);
 }
 
 static void power_off(void) {
@@ -77,6 +84,7 @@ static void power_off(void) {
 
 void power_hal_init(void) {
     pinMode(BTN_PWR_GPIO, INPUT_PULLUP);
+    pinMode(BAT_CHRG_PIN, INPUT_PULLUP);   // charger status is open-drain
     analogReadResolution(12);
     sample_battery();
 }
@@ -111,7 +119,7 @@ void power_hal_tick(void) {
 }
 
 int  power_hal_battery_pct(void) { return cached_pct; }
-bool power_hal_is_charging(void) { return false; }
+bool power_hal_is_charging(void) { return cached_charging; }
 bool power_hal_is_vbus_in(void)  { return false; }
 
 bool power_hal_pwr_pressed(void) {

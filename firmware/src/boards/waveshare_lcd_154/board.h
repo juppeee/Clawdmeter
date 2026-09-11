@@ -35,8 +35,12 @@
 // ---- Battery (ADC divider, no I2C-readable PMU) ----
 // VBAT → 3.0x divider → GPIO1. BAT_EN (GPIO2) is the power-hold line: must be
 // driven HIGH early in board_init() or the board browns out on battery power.
+// BAT_CHRG (GPIO3) is the charger's status output: LOW while charging, HIGH
+// when full or on battery (open-drain, needs the pull-up). Pin and polarity
+// from Waveshare's own XiaoZhi board support (power_manager.h).
 #define BAT_EN               2
 #define BAT_ADC_PIN          1
+#define BAT_CHRG_PIN         3
 #define BAT_VOLT_DIVIDER     3.0f
 
 // ---- Audio (ES8311 mono codec + speaker, I2S) ----
@@ -51,10 +55,15 @@
 #define SND_SAMPLE_RATE      44100  // must match the embedded PCM (bell_pcm.h)
 #define SND_ES8311_ADDR      0x18
 
-// ---- Buttons (active-LOW GPIOs, from the Waveshare button example) ----
+// ---- Buttons (active-LOW GPIOs) ----
+// The kit's three keys are labelled BOOT, PWR and PLUS. Label → GPIO from
+// Waveshare's XiaoZhi board config (PWR_BUTTON_GPIO 5, VOLUME_UP 4 = PLUS,
+// VOLUME_DOWN 0 = BOOT). PWR is also the hardware power-on key on battery, so
+// it takes the PWR role: screen cycling, hold-to-pair and the 8 s power-off
+// all land on the key that says PWR.
 #define BTN_BACK_GPIO        0     // BOOT — primary, Space (PTT)
-#define BTN_FWD_GPIO         5     // secondary, Shift+Tab (mode toggle)
-#define BTN_PWR_GPIO         4     // PWR-role button — screens/brightness/pairing;
+#define BTN_FWD_GPIO         4     // PLUS — secondary, Shift+Tab (mode toggle)
+#define BTN_PWR_GPIO         5     // PWR  — screens/brightness/pairing;
                                    // hold 8s = power off (see power.cpp)
 
 // ---- Capability flags ----
