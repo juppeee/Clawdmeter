@@ -24,3 +24,8 @@ void input_hal_init(void);
 // de-bounced at the caller's expense — the existing code polls every
 // loop iteration). Boards lacking a button always return false.
 bool input_hal_is_held(InputButton btn);
+
+// Detents turned on a rotary ring/knob since the last call; positive is the
+// "next" direction. Only boards with BoardCaps.has_encoder implement it — a
+// weak default returning 0 (input_hal_defaults.cpp) covers the rest.
+int input_hal_encoder_steps(void);
