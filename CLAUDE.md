@@ -6,13 +6,14 @@ selected via PlatformIO's `build_src_filter`. Adding a board means dropping in
 a new folder + a new `[env:...]` block — `main.cpp`, `ui.cpp`, and `splash.cpp`
 never see board-specific code. See [`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md).
 
-Five ports today (two SoC families, three panel sizes):
+Six ports today (two SoC families, four panel sizes, AMOLED + one TFT):
 
 - `boards/waveshare_amoled_216/` — original Waveshare ESP32-S3-Touch-AMOLED-2.16 (CO5300, 480×480 square, CST9220 touch, IMU rotation). Build env: `waveshare_amoled_216`.
 - `boards/waveshare_amoled_18/` — Waveshare ESP32-S3-Touch-AMOLED-1.8 (368×448 portrait, XCA9554 IO expander). Build env: `waveshare_amoled_18`. **Two panel revisions are auto-detected at boot** (`board_rev()` in `board_init.cpp`, enum in `board_rev.h`): original = SH8601 display + FT3168 touch (0x38); later = CO5300 display + CST816 touch (0x15). One binary drives both.
 - `boards/waveshare_amoled_216_c6/` — Waveshare ESP32-C6-Touch-AMOLED-2.16 (SH8601, 480×480, CST9217 touch). Build env: `waveshare_amoled_216_c6`. ESP32-C6 SoC: single-core RISC-V, **no PSRAM**, BLE 5 only.
 - `boards/waveshare_amoled_18_c6/` — Waveshare ESP32-C6-Touch-AMOLED-1.8 (368×448 portrait, SH8601, FT3168 touch, TCA9554 expander). Build env: `waveshare_amoled_18_c6`. Same panel as the S3 1.8 but on the C6 SoC. All subsystems (display, touch, BOOT + PWR buttons, battery, BLE) verified on hardware.
 - `boards/waveshare_amoled_206/` — Waveshare ESP32-S3-Touch-AMOLED-2.06 (CO5300, 410×502 watch form factor, FT3168 touch, no IO expander, 32 MB flash, PCF85063 RTC, ES8311 codec). Build env: `waveshare_amoled_206`. Display, touch, battery, IMU init, and BLE verified on hardware; the ES8311 chime path is not wired up (`sound.cpp` no-ops).
+- `boards/waveshare_lcd_154/` — Waveshare ESP32-S3-Touch-LCD-1.54 (**ST7789 TFT** over plain 4-wire SPI, 240×240, CST816 touch, no PMU, ES8311 speaker). Build env: `waveshare_lcd_154`. The only non-AMOLED port and the only one below 300 px, which is why `compute_layout()` has a "small" breakpoint.
 
 **C6 ports have no PSRAM** — shared code gates on `BOARD_HAS_PSRAM` (absent on C6) to use `MALLOC_CAP_INTERNAL` for LVGL/splash buffers, and the `screenshot` serial command is disabled (`LV_USE_SNAPSHOT=0`), so UI changes on a C6 board must be eyeballed on hardware, not auto-captured.
 
@@ -61,6 +62,15 @@ ESP32-C6 sibling of the S3 1.8: same 368×448 SH8601 panel + FocalTech touch, di
 - Buttons: GPIO 0 (BOOT → Space/voice-mode), AXP PKEY (PWR → cycle screens; hold-to-pair). **No third button**.
 - Flash: 32 MB. Uses `default_32MB.csv` partition table.
 
+### LCD-1.54 (TFT) — `waveshare_lcd_154`
+Pin map cross-checked against Waveshare's own XiaoZhi board config (`main/boards/waveshare/esp32-s3-touch-lcd-1.54/config.h` in 78/xiaozhi-esp32) — the factory firmware shipped on the unit. Module is ESP32-S3R8: 16 MB quad flash + 8 MB embedded octal PSRAM.
+- Display: **ST7789** TFT via 4-wire SPI (CS=21, SCLK=38, MOSI=39, DC=45, RST=40), 240×240, colour inversion on, no offsets. **Backlight on GPIO 46 via LEDC PWM** — a TFT has no in-panel brightness command, so `display_hal_set_brightness()` is a PWM duty.
+- Touch: **CST816** @ 0x15 (SDA=42, SCL=41, INT=48, RST=47). Same FocalTech-style inline reader as the 1.8 port.
+- **No PMU.** Battery % from a 3:1 VBAT divider on GPIO 1 (ADC). **GPIO 2 = BAT_EN power-hold latch** — `board_init()` must drive it HIGH or the board dies on battery; `power.cpp` drops it for the 8 s power-off. **GPIO 3 = charger status, LOW while charging.** VBUS itself is not sensed, so `power_hal_is_vbus_in()` stays false.
+- Audio: ES8311 @ 0x18 (I2S MCLK=8, BCLK=9, WS=10, DOUT=12), amp enable GPIO 7. ES7210 mic ADC present, unused.
+- IMU QMI8658 and RTC PCF85063 present, unused. Orientation fixed at 0°.
+- Buttons (labels printed on the case): **BOOT = GPIO 0** (Space), **PLUS = GPIO 4** (Shift+Tab), **PWR = GPIO 5** (cycle screens, hold-to-pair, 8 s = power off). All plain active-LOW GPIOs; PWR edges are synthesized in software in `power.cpp`.
+
 ## Architecture
 
 ```text
@@ -78,9 +88,10 @@ firmware/src/
     waveshare_amoled_216_c6/— C6: SH8601 + CST9217 + AXP PKEY, no PSRAM
     waveshare_amoled_18_c6/ — C6: SH8601 + FT3168 + AXP PKEY + TCA9554 (gates power), no PSRAM
     waveshare_amoled_206/   — CO5300 + FT3168 + AXP PKEY, no IO expander, 32 MB, no rotation
+    waveshare_lcd_154/      — ST7789 SPI TFT + CST816 + GPIO buttons, no PMU (ADC battery), 240×240
     template/               — copy this to bootstrap a new port
   main.cpp                  — setup() + loop(): HAL calls only, zero #ifdef BOARD_*
-  ui.{h,cpp}                — 3-screen UI (splash, usage, bluetooth). compute_layout() picks fonts/positions from board_caps() (responsive — current breakpoint: H >= 460 → large, else compact)
+  ui.{h,cpp}                — 3-screen UI (splash, usage, bluetooth). compute_layout() picks fonts/positions from board_caps() (responsive — breakpoints: H >= 460 → large, H >= 300 → compact, else small)
   splash.{h,cpp}            — 20×20 pixel-art engine. CELL = min(W,H)/20, centered.
   ble.{h,cpp}               — NimBLE peripheral: custom data service + HID keyboard
   data.h                    — UsageData struct
@@ -105,6 +116,7 @@ pio run -d firmware -e waveshare_amoled_18                                      
 pio run -d firmware -e waveshare_amoled_216_c6                                  # build 2.16 (C6)
 pio run -d firmware -e waveshare_amoled_18_c6                                   # build 1.8 (C6)
 pio run -d firmware -e waveshare_amoled_206                                     # build 2.06 (S3, watch)
+pio run -d firmware -e waveshare_lcd_154                                        # build LCD-1.54 (S3, TFT)
 pio run -d firmware -e waveshare_amoled_18 -t upload --upload-port /dev/cu.usbmodem101   # flash 1.8 on macOS
 pio run -d firmware -e waveshare_amoled_216 -t upload --upload-port /dev/ttyACM0         # flash 2.16 on Linux
 # C6 boards: same native USB-JTAG flashing; flag a chip mismatch ("This chip is ESP32-C6,
