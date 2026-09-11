@@ -176,6 +176,10 @@ static void render_frame(const uint8_t *cells, const uint16_t *palette) {
 
 #else  // ── PSRAM: LVGL canvas render (unchanged) ──
 
+// LVGL draws the canvas itself here, so there is no direct paint to hold back.
+// main.cpp calls this on every board, so it still has to exist.
+void splash_note_refresh_done(void) {}
+
 static void render_frame(const uint8_t *cells, const uint16_t *palette) {
     if (!row_buf || !canvas_buf) return;
     for (int gy = 0; gy < GRID; gy++) {
