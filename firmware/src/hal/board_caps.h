@@ -18,6 +18,13 @@ struct BoardCaps {
     bool    has_rotation;    // IMU-driven CPU rotation in the flush callback
     bool    has_battery;     // AXP2101 battery measurement is meaningful
     bool    has_imu;         // QMI8658 (or compatible) is populated
+
+    // Fields below default to false for boards that don't set them.
+    bool    has_encoder;     // rotary ring/knob: input_hal_encoder_steps() replaces the PWR short press
+    bool    is_round;        // circular panel: only the inscribed circle is visible
+    bool    touch_keys;      // no reachable keys: touch hold = Space (PTT), double tap = Shift+Tab,
+                             // 3 s hold + release while disconnected = pair
+    const char* pair_key;    // hold-to-pair key as the pairing hint names it; nullptr = "the power button"
 };
 
 const BoardCaps& board_caps(void);

@@ -2,9 +2,11 @@
 #include "splash.h"
 #include "charge_anim.h"
 #include <lvgl.h>
+#include <math.h>
 #include <time.h>
 #include "logo.h"
 #include "icons.h"
+#include "theme.h"
 #include "hal/board_caps.h"
 
 // Custom fonts (scaled for 314 PPI, ~1.9x from original 165 PPI)
@@ -47,11 +49,32 @@ struct Layout {
     const lv_font_t* pace_font;      // enterprise "Under/On/Over pace" line
     const lv_font_t* anim_font;      // animated status line
     int16_t anim_y;                  // status line offset from bottom
+    bool    show_logo;               // corner logo; off on round panels, where no corner is visible
     bool    small_icons;             // 40px logo + 24px battery (vs 80/48) on small screens
     int16_t title_nudge;             // title x-shift balancing the corner logo
     int16_t logo_y;                  // logo top edge
     int16_t batt_y;                  // battery icon top edge
     int16_t batt_w;                  // battery icon width, for position math
+
+    // Round panels: two ring gauges (session outside, weekly inside) replace
+    // the bar panels; the numbers stack in the middle. The r_* values are
+    // label offsets from the screen centre.
+    bool    round;
+    int16_t ring_d;                  // outer ring diameter
+    int16_t ring_w;                  // stroke width
+    int16_t ring_gap;                // space between the two rings
+    int16_t ring_start, ring_end;    // sweep in LVGL degrees (0 = 3 o'clock, clockwise)
+    int16_t ring_tick_w;             // quarter-mark notch width (0 = none)
+    int16_t ring_label_r;            // radius of the quarter-mark labels, inside the rings
+    const lv_font_t* ring_label_font;
+
+    // Gauge colours: track, and fill (bars: below the 50 / 80 % warning
+    // levels; rings: always)
+    lv_color_t gauge_track;
+    lv_color_t gauge_ok;
+    const lv_font_t* week_pct_font;  // weekly number, one step below the session number
+    int16_t r_s_label_y, r_s_pct_y, r_s_reset_y;
+    int16_t r_w_row_y, r_w_reset_y;
 
     // Pairing hint / idle screen
     int16_t pair_y1, pair_y2, pair_y3;
@@ -93,6 +116,10 @@ static void compute_layout(const BoardCaps& c) {
     L.pace_font    = &font_styrene_16;
     L.anim_font    = &font_mono_32;
     L.anim_y = -15;
+    L.show_logo = true;
+    L.round = false;
+    L.gauge_track = THEME_BAR_BG;
+    L.gauge_ok    = THEME_GREEN;
     L.small_icons = false;
     L.title_nudge = 16;
     L.logo_y = L.title_y - 10;
@@ -175,11 +202,58 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_credit_2_font = &font_styrene_12;
     }
 
+    if (c.is_round) {
+        // Round layout — tuned for 360x360 (Knob-1.8). Applied on top of the
+        // size breakpoint above; only what the circle changes is overridden.
+        // Rings: 6 px off the bezel, 270° sweep with the gap at the bottom,
+        // where the status line sits. Everything else stays inside the inner
+        // ring (inner edge ~140 px from the centre).
+        const int16_t mind = c.width < c.height ? c.width : c.height;
+        L.round = true;
+        L.show_logo = false;
+        L.ring_d = mind - 12;
+        L.ring_w = 14;
+        L.ring_gap = 6;
+        L.ring_start = 135;
+        L.ring_end = 45;
+        L.ring_tick_w = 3;
+        L.ring_label_r = 128;
+        L.ring_label_font = &font_styrene_12;
+        // Always-orange fill (set_gauge doesn't recolour rings) on a lighter
+        // track, so the unfilled part of the scale is visible too.
+        L.gauge_track = THEME_RING_BG;
+        L.gauge_ok    = THEME_ACCENT;
+        L.title_font   = &font_tiempos_34;
+        L.title_y = 62;
+        L.title_nudge = 0;
+        L.pct_font      = &font_styrene_48;
+        L.ent_pct_font  = &font_tiempos_56;
+        L.week_pct_font = &font_styrene_28;
+        L.pill_font     = &font_styrene_16;
+        L.reset_font    = &font_styrene_16;
+        L.pace_font     = &font_styrene_14;
+        L.anim_font     = &font_mono_18;
+        L.anim_y = -36;
+        L.r_s_label_y = -60;
+        L.r_s_pct_y   = -26;
+        L.r_s_reset_y = 12;
+        L.r_w_row_y   = 50;
+        L.r_w_reset_y = 80;
+        // Pairing hint and idle creature: the rings are hidden there, so the
+        // full circle is available below the title.
+        L.content_y = 118;
+        L.pair_y1 = 4;
+        L.pair_y2 = 62;
+        L.pair_y3 = 92;
+        L.idle_px = 160;
+        L.bt_status_font = &font_styrene_28;
+        L.bt_device_font = &font_styrene_20;
+    }
+
     L.content_w = L.scr_w - 2 * L.margin;
 }
 
 // Anthropic brand palette — design tokens live in theme.h
-#include "theme.h"
 #define COL_BG        THEME_BG
 #define COL_PANEL     THEME_PANEL
 #define COL_TEXT      THEME_TEXT
@@ -295,7 +369,7 @@ static const char* const anim_messages[] = {
 static lv_color_t pct_color(float pct) {
     if (pct >= 80.0f) return COL_RED;
     if (pct >= 50.0f) return COL_AMBER;
-    return COL_GREEN;
+    return L.gauge_ok;
 }
 
 static void format_reset_time(int mins, char* buf, size_t len) {
@@ -312,6 +386,70 @@ static void format_reset_time(int mins, char* buf, size_t len) {
 
 // Forward decls — callbacks defined near ui_show_screen below
 static void global_click_cb(lv_event_t* e);
+
+// ---- Touch as keys (BoardCaps.touch_keys) ----
+// Boards whose keys can't be reached map them onto the screen:
+//   tap        → toggle splash <-> usage, as everywhere
+//   double tap → touch_keys->double_tap
+//   hold       → touch_keys->hold_start at LVGL's long-press time, then
+//                touch_keys->hold_end(held_ms) on release
+// A single tap only acts once the double-tap window has passed, so a double
+// tap never flips the screen on its first half. A hold never counts as a tap
+// (SHORT_CLICKED isn't sent after a long press).
+#define DOUBLE_TAP_MS 300
+
+static const UiTouchKeys* touch_keys = nullptr;
+static lv_timer_t*        tap_timer = nullptr;
+static uint32_t           press_start_ms = 0;
+static bool               holding = false;
+
+void ui_set_touch_keys(const UiTouchKeys* keys) { touch_keys = keys; }
+
+static void tap_timer_cb(lv_timer_t* t) {
+    (void)t;
+    tap_timer = nullptr;   // one-shot; LVGL deletes it after this call
+    ui_toggle_splash();
+}
+
+static void touch_key_cb(lv_event_t* e) {
+    switch (lv_event_get_code(e)) {
+    case LV_EVENT_PRESSED:
+        press_start_ms = lv_tick_get();
+        break;
+    case LV_EVENT_SHORT_CLICKED:
+        if (tap_timer) {                       // second tap inside the window
+            lv_timer_delete(tap_timer);
+            tap_timer = nullptr;
+            if (touch_keys && touch_keys->double_tap) touch_keys->double_tap();
+        } else {
+            tap_timer = lv_timer_create(tap_timer_cb, DOUBLE_TAP_MS, NULL);
+            lv_timer_set_repeat_count(tap_timer, 1);
+        }
+        break;
+    case LV_EVENT_LONG_PRESSED:
+        holding = true;
+        if (touch_keys && touch_keys->hold_start) touch_keys->hold_start();
+        break;
+    case LV_EVENT_RELEASED:
+    case LV_EVENT_PRESS_LOST:
+        if (holding) {
+            holding = false;
+            if (touch_keys && touch_keys->hold_end)
+                touch_keys->hold_end(lv_tick_get() - press_start_ms);
+        }
+        break;
+    default:
+        break;
+    }
+}
+
+static void attach_touch_actions(lv_obj_t* obj) {
+    if (board_caps().touch_keys) {
+        lv_obj_add_event_cb(obj, touch_key_cb, LV_EVENT_ALL, NULL);
+    } else {
+        lv_obj_add_event_cb(obj, global_click_cb, LV_EVENT_CLICKED, NULL);
+    }
+}
 
 static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_t* panel = lv_obj_create(parent);
@@ -343,6 +481,82 @@ static lv_obj_t* make_bar(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_set_style_bg_opa(bar, LV_OPA_COVER, LV_PART_INDICATOR);
     lv_obj_set_style_radius(bar, 6, LV_PART_INDICATOR);
     return bar;
+}
+
+// Ring gauge for round panels — the counterpart of make_bar(). Not clickable,
+// so a tap on it still reaches the screen-toggle handler instead of dragging
+// the value.
+static lv_obj_t* make_ring(lv_obj_t* parent, int diameter) {
+    lv_obj_t* arc = lv_arc_create(parent);
+    lv_obj_set_size(arc, diameter, diameter);
+    lv_obj_align(arc, LV_ALIGN_CENTER, 0, 0);
+    lv_arc_set_rotation(arc, 0);
+    lv_arc_set_bg_angles(arc, L.ring_start, L.ring_end);
+    lv_arc_set_range(arc, 0, 100);
+    lv_arc_set_value(arc, 0);
+    lv_obj_remove_style(arc, NULL, LV_PART_KNOB);
+    lv_obj_clear_flag(arc, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(arc, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_set_style_pad_all(arc, 0, LV_PART_MAIN);
+    lv_obj_set_style_bg_opa(arc, LV_OPA_TRANSP, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, L.ring_w, LV_PART_MAIN);
+    lv_obj_set_style_arc_width(arc, L.ring_w, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_color(arc, L.gauge_track, LV_PART_MAIN);
+    lv_obj_set_style_arc_color(arc, L.gauge_ok, LV_PART_INDICATOR);
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_MAIN);
+    lv_obj_set_style_arc_rounded(arc, true, LV_PART_INDICATOR);
+    return arc;
+}
+
+// Quarter marks for the ring gauges: notches in the background colour cut
+// through both rings at 25 / 50 / 75 %, so a small fill can be read against
+// the scale (the sweep is 270°, which makes 12 % look shorter than a clock
+// face would suggest). 0 and 100 % are the ring ends. lv_line keeps a pointer
+// to its points, hence the static array.
+static lv_point_precise_t ring_tick_pts[3][2];
+
+static void add_ring_ticks(lv_obj_t* parent) {
+    if (L.ring_tick_w <= 0) return;
+    const float c     = L.scr_w / 2.0f;   // round panels are square
+    const float r_out = L.ring_d / 2.0f + 1;
+    const float r_in  = L.ring_d / 2.0f - 2 * L.ring_w - L.ring_gap - 1;
+    const int   sweep = (L.ring_end - L.ring_start + 360) % 360;
+    for (int i = 0; i < 3; i++) {
+        const float rad = (L.ring_start + sweep * (i + 1) / 4.0f) * (float)M_PI / 180.0f;
+        ring_tick_pts[i][0].x = (lv_value_precise_t)lroundf(c + r_in  * cosf(rad));
+        ring_tick_pts[i][0].y = (lv_value_precise_t)lroundf(c + r_in  * sinf(rad));
+        ring_tick_pts[i][1].x = (lv_value_precise_t)lroundf(c + r_out * cosf(rad));
+        ring_tick_pts[i][1].y = (lv_value_precise_t)lroundf(c + r_out * sinf(rad));
+        lv_obj_t* tick = lv_line_create(parent);
+        lv_line_set_points(tick, ring_tick_pts[i], 2);
+        lv_obj_set_pos(tick, 0, 0);
+        lv_obj_set_style_line_width(tick, L.ring_tick_w, 0);
+        lv_obj_set_style_line_color(tick, COL_BG, 0);
+        lv_obj_clear_flag(tick, LV_OBJ_FLAG_CLICKABLE);
+        lv_obj_add_flag(tick, LV_OBJ_FLAG_EVENT_BUBBLE);
+
+        // The mark's value, small and just inside the inner ring.
+        lv_obj_t* lbl = lv_label_create(parent);
+        lv_label_set_text_fmt(lbl, "%d", 25 * (i + 1));
+        lv_obj_set_style_text_font(lbl, L.ring_label_font, 0);
+        lv_obj_set_style_text_color(lbl, COL_DIM, 0);
+        lv_obj_align(lbl, LV_ALIGN_CENTER,
+                     (int32_t)lroundf(L.ring_label_r * cosf(rad)),
+                     (int32_t)lroundf(L.ring_label_r * sinf(rad)));
+    }
+}
+
+// Fill level + colour of a usage gauge — a bar on rectangular panels, a ring
+// on round ones. Rings keep the single fill colour make_ring() gave them
+// (the level is read off the scale marks and the number in the middle), so
+// `color` only applies to bars.
+static void set_gauge(lv_obj_t* gauge, int value, lv_color_t color) {
+    if (L.round) {
+        lv_arc_set_value(gauge, value);
+    } else {
+        lv_bar_set_value(gauge, value, LV_ANIM_ON);
+        lv_obj_set_style_bg_color(gauge, color, LV_PART_INDICATOR);
+    }
 }
 
 static void init_icon_dsc_rgb565a8(lv_image_dsc_t* dsc, int w, int h, const uint8_t* data) {
@@ -413,6 +627,89 @@ static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text
     return panel;
 }
 
+// Transparent full-screen layer, so the round widgets can be shown / hidden
+// as a unit exactly like the bar panels they replace.
+static lv_obj_t* make_layer(lv_obj_t* parent) {
+    lv_obj_t* layer = lv_obj_create(parent);
+    lv_obj_set_size(layer, L.scr_w, L.scr_h);
+    lv_obj_set_pos(layer, 0, 0);
+    lv_obj_set_style_bg_opa(layer, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(layer, 0, 0);
+    lv_obj_set_style_pad_all(layer, 0, 0);
+    lv_obj_clear_flag(layer, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(layer, LV_OBJ_FLAG_EVENT_BUBBLE);
+    return layer;
+}
+
+static lv_obj_t* make_centered_label(lv_obj_t* parent, const char* text,
+                                     const lv_font_t* font, lv_color_t color, int y) {
+    lv_obj_t* lbl = lv_label_create(parent);
+    lv_label_set_text(lbl, text);
+    lv_obj_set_style_text_font(lbl, font, 0);
+    lv_obj_set_style_text_color(lbl, color, 0);
+    lv_obj_align(lbl, LV_ALIGN_CENTER, 0, y);
+    return lbl;
+}
+
+// Round counterpart of the two usage panels. Fills the same widget pointers
+// the bar layout does, so ui_update() drives both without knowing which is
+// on screen: panel_session / panel_weekly become transparent layers, the bars
+// become rings, the pills become plain captions.
+static void build_round_usage(lv_obj_t* parent) {
+    panel_session = make_layer(parent);
+    panel_weekly  = make_layer(parent);
+
+    bar_session = make_ring(panel_session, L.ring_d);
+    bar_weekly  = make_ring(panel_weekly, L.ring_d - 2 * (L.ring_w + L.ring_gap));
+    add_ring_ticks(panel_weekly);   // last layer, so the notches cut both rings
+
+    lbl_session_label = make_centered_label(panel_session, "Current", L.pill_font, COL_DIM, L.r_s_label_y);
+    lbl_session_pct   = make_centered_label(panel_session, "---%", L.pct_font, COL_TEXT, L.r_s_pct_y);
+    lbl_session_reset = make_centered_label(panel_session, "---", L.reset_font, COL_DIM, L.r_s_reset_y);
+
+    // Enterprise-only overlays — hidden until enterprise data arrives.
+    lbl_session_pct_sym = lv_label_create(panel_session);
+    lv_label_set_text(lbl_session_pct_sym, "%");
+    lv_obj_set_style_text_font(lbl_session_pct_sym, L.reset_font, 0);
+    lv_obj_set_style_text_color(lbl_session_pct_sym, COL_TEXT, 0);
+    lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
+
+    lbl_spending_desc = make_centered_label(panel_session, "of your monthly budget",
+                                            L.reset_font, COL_DIM, L.r_s_reset_y);
+    lv_obj_add_flag(lbl_spending_desc, LV_OBJ_FLAG_HIDDEN);
+
+    lbl_spending_status = make_centered_label(panel_session, "", L.pace_font, COL_DIM,
+                                              L.r_s_reset_y + 20);
+    lv_obj_add_flag(lbl_spending_status, LV_OBJ_FLAG_HIDDEN);
+
+    // Weekly caption and number share one row, bottom-aligned so the two
+    // font sizes read as one line.
+    lv_obj_t* row = lv_obj_create(panel_weekly);
+    lv_obj_set_size(row, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
+    lv_obj_set_style_bg_opa(row, LV_OPA_TRANSP, 0);
+    lv_obj_set_style_border_width(row, 0, 0);
+    lv_obj_set_style_pad_all(row, 0, 0);
+    lv_obj_set_style_pad_column(row, 8, 0);
+    lv_obj_set_flex_flow(row, LV_FLEX_FLOW_ROW);
+    lv_obj_set_flex_align(row, LV_FLEX_ALIGN_CENTER, LV_FLEX_ALIGN_END, LV_FLEX_ALIGN_END);
+    lv_obj_clear_flag(row, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_flag(row, LV_OBJ_FLAG_EVENT_BUBBLE);
+    lv_obj_align(row, LV_ALIGN_CENTER, 0, L.r_w_row_y);
+
+    lbl_weekly_label = lv_label_create(row);
+    lv_label_set_text(lbl_weekly_label, "Weekly");
+    lv_obj_set_style_text_font(lbl_weekly_label, L.pill_font, 0);
+    lv_obj_set_style_text_color(lbl_weekly_label, COL_DIM, 0);
+    lv_obj_set_style_pad_bottom(lbl_weekly_label, 3, 0);   // baseline, not bottom edge
+
+    lbl_weekly_pct = lv_label_create(row);
+    lv_label_set_text(lbl_weekly_pct, "---%");
+    lv_obj_set_style_text_font(lbl_weekly_pct, L.week_pct_font, 0);
+    lv_obj_set_style_text_color(lbl_weekly_pct, COL_TEXT, 0);
+
+    lbl_weekly_reset = make_centered_label(panel_weekly, "---", L.reset_font, COL_DIM, L.r_w_reset_y);
+}
+
 // Pairing hint — shown when disconnected so the screen isn't empty and the
 // user knows how to (re)pair. Wording matches the 3-second release gesture.
 static void build_pair_group(lv_obj_t* parent) {
@@ -432,7 +729,8 @@ static void build_pair_group(lv_obj_t* parent) {
     lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, L.pair_y1);
 
     lv_obj_t* l2 = lv_label_create(pair_group);
-    lv_label_set_text(l2, "hold the power button");
+    const char* key = board_caps().pair_key ? board_caps().pair_key : "the power button";
+    lv_label_set_text_fmt(l2, "hold %s", key);
     lv_obj_set_style_text_font(l2, L.bt_device_font, 0);
     lv_obj_set_style_text_color(l2, COL_DIM, 0);
     lv_obj_align(l2, LV_ALIGN_TOP_MID, 0, L.pair_y2);
@@ -476,7 +774,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_set_style_border_width(usage_container, 0, 0);
     lv_obj_set_style_pad_all(usage_container, 0, 0);
     lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(usage_container, global_click_cb, LV_EVENT_CLICKED, NULL);
+    attach_touch_actions(usage_container);
 
     lbl_title = lv_label_create(usage_container);
     lv_label_set_text(lbl_title, "Usage");
@@ -497,34 +795,38 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_clear_flag(usage_group, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(usage_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    panel_session = make_usage_panel(usage_group, L.content_y, "Current",
-                     &lbl_session_pct, &lbl_session_label,
-                     &bar_session, &lbl_session_reset);
+    if (L.round) {
+        build_round_usage(usage_group);
+    } else {
+        panel_session = make_usage_panel(usage_group, L.content_y, "Current",
+                         &lbl_session_pct, &lbl_session_label,
+                         &bar_session, &lbl_session_reset);
 
-    // Enterprise-only overlays inside panel_session — hidden until enterprise data arrives
-    lbl_session_pct_sym = lv_label_create(panel_session);
-    lv_label_set_text(lbl_session_pct_sym, "%");
-    lv_obj_set_style_text_font(lbl_session_pct_sym, L.reset_font, 0);
-    lv_obj_set_style_text_color(lbl_session_pct_sym, COL_TEXT, 0);
-    lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
+        // Enterprise-only overlays inside panel_session — hidden until enterprise data arrives
+        lbl_session_pct_sym = lv_label_create(panel_session);
+        lv_label_set_text(lbl_session_pct_sym, "%");
+        lv_obj_set_style_text_font(lbl_session_pct_sym, L.reset_font, 0);
+        lv_obj_set_style_text_color(lbl_session_pct_sym, COL_TEXT, 0);
+        lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
 
-    lbl_spending_desc = lv_label_create(panel_session);
-    lv_label_set_text(lbl_spending_desc, "of your monthly budget");
-    lv_obj_set_style_text_font(lbl_spending_desc, L.reset_font, 0);
-    lv_obj_set_style_text_color(lbl_spending_desc, COL_DIM, 0);
-    lv_obj_set_pos(lbl_spending_desc, 0, L.usage_reset_y);
-    lv_obj_add_flag(lbl_spending_desc, LV_OBJ_FLAG_HIDDEN);
+        lbl_spending_desc = lv_label_create(panel_session);
+        lv_label_set_text(lbl_spending_desc, "of your monthly budget");
+        lv_obj_set_style_text_font(lbl_spending_desc, L.reset_font, 0);
+        lv_obj_set_style_text_color(lbl_spending_desc, COL_DIM, 0);
+        lv_obj_set_pos(lbl_spending_desc, 0, L.usage_reset_y);
+        lv_obj_add_flag(lbl_spending_desc, LV_OBJ_FLAG_HIDDEN);
 
-    lbl_spending_status = lv_label_create(panel_session);
-    lv_label_set_text(lbl_spending_status, "");
-    lv_obj_set_style_text_font(lbl_spending_status, L.pace_font, 0);
-    lv_obj_set_pos(lbl_spending_status, 0, L.usage_reset_y + 20);
-    lv_obj_add_flag(lbl_spending_status, LV_OBJ_FLAG_HIDDEN);
+        lbl_spending_status = lv_label_create(panel_session);
+        lv_label_set_text(lbl_spending_status, "");
+        lv_obj_set_style_text_font(lbl_spending_status, L.pace_font, 0);
+        lv_obj_set_pos(lbl_spending_status, 0, L.usage_reset_y + 20);
+        lv_obj_add_flag(lbl_spending_status, LV_OBJ_FLAG_HIDDEN);
 
-    panel_weekly = make_usage_panel(usage_group,
-                     L.content_y + L.usage_panel_h + L.usage_panel_gap, "Weekly",
-                     &lbl_weekly_pct, &lbl_weekly_label,
-                     &bar_weekly, &lbl_weekly_reset);
+        panel_weekly = make_usage_panel(usage_group,
+                         L.content_y + L.usage_panel_h + L.usage_panel_gap, "Weekly",
+                         &lbl_weekly_pct, &lbl_weekly_label,
+                         &bar_weekly, &lbl_weekly_reset);
+    }
     // Recolor enabled so enterprise period box can color pace and reset separately
     lv_label_set_recolor(lbl_weekly_reset, true);
 
@@ -556,12 +858,14 @@ void ui_init(void) {
     splash_init(scr);
 
     if (splash_get_root()) {
-        lv_obj_add_event_cb(splash_get_root(), global_click_cb, LV_EVENT_CLICKED, NULL);
+        attach_touch_actions(splash_get_root());
     }
 
-    logo_img = lv_image_create(scr);
-    lv_image_set_src(logo_img, &logo_dsc);
-    lv_obj_set_pos(logo_img, L.margin, L.logo_y);
+    if (L.show_logo) {
+        logo_img = lv_image_create(scr);
+        lv_image_set_src(logo_img, &logo_dsc);
+        lv_obj_set_pos(logo_img, L.margin, L.logo_y);
+    }
 
     battery_img = lv_image_create(scr);
     lv_image_set_src(battery_img, &battery_dscs[0]);
@@ -635,26 +939,23 @@ void ui_update(const UsageData* data) {
         lv_label_set_text(lbl_session_reset, buf);
     }
 
-    lv_bar_set_value(bar_session, s_pct, LV_ANIM_ON);
-    lv_obj_set_style_bg_color(bar_session, pct_color(data->session_pct), LV_PART_INDICATOR);
+    set_gauge(bar_session, s_pct, pct_color(data->session_pct));
 
     if (data->enterprise) {
         // Period box: time % + dynamic pace color + "Resets <date>" label
         lv_label_set_text(lbl_weekly_label, "Period");
         lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", data->time_pct);
-        lv_bar_set_value(bar_weekly, data->time_pct, LV_ANIM_ON);
-        lv_color_t bar_pace = (data->session_pct <= (float)data->time_pct) ? COL_GREEN :
+        lv_color_t bar_pace = (data->session_pct <= (float)data->time_pct) ? L.gauge_ok :
                               (data->session_pct <= (float)data->time_pct + 15.0f) ? COL_AMBER :
                               COL_RED;
-        lv_obj_set_style_bg_color(bar_weekly, bar_pace, LV_PART_INDICATOR);
+        set_gauge(bar_weekly, data->time_pct, bar_pace);
         snprintf(buf, sizeof(buf), "#%s %s# - #faf9f5 Resets %s#",
                  pace_hex, pace_text, data->reset_date);
         lv_label_set_text(lbl_weekly_reset, buf);
     } else {
         int w_pct = (int)(data->weekly_pct + 0.5f);
         lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", w_pct);
-        lv_bar_set_value(bar_weekly, w_pct, LV_ANIM_ON);
-        lv_obj_set_style_bg_color(bar_weekly, pct_color(data->weekly_pct), LV_PART_INDICATOR);
+        set_gauge(bar_weekly, w_pct, pct_color(data->weekly_pct));
         format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
         lv_label_set_text(lbl_weekly_reset, buf);
     }

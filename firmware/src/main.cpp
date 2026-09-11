@@ -201,6 +201,57 @@ static void check_serial_cmd() {
 // reset line). Called exactly once at the start of setup().
 extern "C" void board_init(void);
 
+// ---- Touch as keys (BoardCaps.touch_keys) ----
+// The same three jobs the buttons do elsewhere, driven by ui.cpp's gestures:
+//   double tap          → Shift+Tab, one keystroke
+//   hold                → Space held until release (voice-mode PTT) — only
+//                         while a host is connected, there's nobody to type to
+//                         otherwise
+//   hold 3-6 s, release → pairing, only once the link has been down for
+//                         TOUCH_PAIR_DOWN_MS (where the hold isn't Space).
+//                         Same window as the PWR gesture: 3 s to arm,
+//                         disarmed past 6 s.
+// The down-time guard matters: after a reflash or a radio hiccup the host
+// reconnects in bursts, and a talk-hold landing in one of the gaps would
+// otherwise wipe the bond — leaving the host retrying with a key the board no
+// longer has. Counting from boot too, so it also covers the first seconds
+// after a restart.
+#define TOUCH_PAIR_MIN_MS  3000
+#define TOUCH_PAIR_MAX_MS  6000
+#define TOUCH_PAIR_DOWN_MS 15000
+
+static bool     touch_space_down = false;
+static uint32_t ble_down_since_ms = 0;   // last time the link went down (boot = 0)
+
+static void touch_double_tap(void) {
+    ble_keyboard_press(0x2B, 0x02);  // HID Tab + LEFT_SHIFT
+    ble_keyboard_release();
+}
+
+static void touch_hold_start(void) {
+    if (ble_get_state() != BLE_STATE_CONNECTED) return;
+    ble_keyboard_press(0x2C, 0);     // HID Space, no mods
+    touch_space_down = true;
+}
+
+static void touch_hold_end(uint32_t held_ms) {
+    if (touch_space_down) {
+        ble_keyboard_release();
+        touch_space_down = false;
+        return;
+    }
+    if (held_ms < TOUCH_PAIR_MIN_MS || held_ms >= TOUCH_PAIR_MAX_MS) return;
+    if (ble_get_state() == BLE_STATE_CONNECTED ||
+        millis() - ble_down_since_ms < TOUCH_PAIR_DOWN_MS) {
+        Serial.println("Pair: touch hold ignored — link not down long enough");
+        return;
+    }
+    Serial.println("Pair: touch held in window — clearing bonds, advertising");
+    ble_clear_bonds();
+}
+
+static const UiTouchKeys touch_keys = {touch_double_tap, touch_hold_start, touch_hold_end};
+
 void setup() {
     Serial.begin(115200);
     delay(300);
@@ -243,6 +294,7 @@ void setup() {
     input_hal_init();
 
     ui_init();
+    if (board_caps().touch_keys) ui_set_touch_keys(&touch_keys);
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging());
     ui_show_screen(SCREEN_SPLASH);
@@ -362,6 +414,21 @@ void loop() {
             }
         }
 
+        // Rotary ring: the PWR short press in both directions — next/previous
+        // animation on the splash, brighter/darker on the usage view. The
+        // first turn from sleep only wakes, like a first button press.
+        if (board_caps().has_encoder) {
+            int steps = input_hal_encoder_steps();
+            if (steps != 0 && !idle_consume_wake_press()) {
+                const bool on_splash = ui_get_current_screen() == SCREEN_SPLASH;
+                const int  dir = steps > 0 ? 1 : -1;
+                for (int n = steps > 0 ? steps : -steps; n > 0; n--) {
+                    if (on_splash) dir > 0 ? splash_next() : splash_prev();
+                    else           brightness_step(dir);
+                }
+            }
+        }
+
         pair_tick();
     }
 
@@ -406,6 +473,7 @@ void loop() {
 
     ble_state_t bs = ble_get_state();
     if (bs != last_ble_state) {
+        if (last_ble_state == BLE_STATE_CONNECTED) ble_down_since_ms = millis();
         last_ble_state = bs;
         ui_update_ble_status(bs, ble_get_device_name(), ble_get_mac_address());
     }

@@ -16,3 +16,12 @@ void ui_toggle_splash(void);
 screen_t ui_get_current_screen(void);
 void ui_update_ble_status(ble_state_t state, const char* name, const char* mac);
 void ui_update_battery(int percent, bool charging);
+
+// What the touch gestures do on boards with BoardCaps.touch_keys (main.cpp
+// supplies the key actions). Ignored elsewhere — there every touch is a tap.
+struct UiTouchKeys {
+    void (*double_tap)(void);
+    void (*hold_start)(void);             // finger held past LVGL's long-press time
+    void (*hold_end)(uint32_t held_ms);   // that finger lifted; held_ms from first contact
+};
+void ui_set_touch_keys(const UiTouchKeys* keys);
