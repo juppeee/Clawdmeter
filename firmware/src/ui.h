@@ -27,8 +27,15 @@ enum pair_ui_t {
     PAIR_UI_HOLDING,    // long-press seen, not armed yet
     PAIR_UI_ARMED,      // inside the window: releasing now pairs
     PAIR_UI_TOO_LONG,   // past the window, heading for power-off
-    PAIR_UI_DONE,       // bonds cleared, advertising (self-hides)
+    PAIR_UI_NOT_YET,    // gesture refused: the link hasn't been down long enough
+    PAIR_UI_DONE,       // bonds cleared, advertising
 };
+
+// The overlay hides itself two seconds after the last call, so a live gesture
+// has to keep reporting (pair_tick does it every loop, hold_tick every 100 ms).
+// That also ends the states nothing else clears — DONE, and any gesture whose
+// finger left without a release event. Repeat calls with an unchanged state are
+// cheap: they only feed the timer.
 void ui_set_pair_state(pair_ui_t state);
 
 // True while the pairing overlay owns pixels. The splash paints straight to

@@ -246,7 +246,14 @@ static bool touch_pair_eligible(void) {
 // with nothing else to go by.
 static void touch_hold_tick(uint32_t held_ms) {
     static bool announced = false;
-    if (touch_space_down || !touch_pair_eligible()) return;
+    if (touch_space_down) return;          // that hold is push-to-talk, not pairing
+    if (!touch_pair_eligible()) {
+        // Say so rather than ignoring the hold in silence: refusing to pair
+        // while the link is merely mid-reconnect is deliberate, but from the
+        // outside it looks identical to a dead gesture.
+        ui_set_pair_state(PAIR_UI_NOT_YET);
+        return;
+    }
     if (held_ms >= TOUCH_PAIR_MAX_MS) {
         ui_set_pair_state(PAIR_UI_TOO_LONG);
     } else if (held_ms >= TOUCH_PAIR_MIN_MS) {
@@ -264,12 +271,15 @@ static void touch_hold_end(uint32_t held_ms) {
         touch_space_down = false;
         return;
     }
-    if (held_ms < TOUCH_PAIR_MIN_MS || held_ms >= TOUCH_PAIR_MAX_MS) {
+    // Anything already on screen — "Release and retry", "Not yet" — stays for
+    // its two seconds; only a hold too short to have meant anything is wiped
+    // right away, since "Keep holding" after the finger is gone reads as a bug.
+    if (held_ms < TOUCH_PAIR_MIN_MS) {
         ui_set_pair_state(PAIR_UI_NONE);
         return;
     }
+    if (held_ms >= TOUCH_PAIR_MAX_MS) return;
     if (!touch_pair_eligible()) {
-        ui_set_pair_state(PAIR_UI_NONE);
         Serial.println("Pair: touch hold ignored — link not down long enough");
         return;
     }
@@ -388,7 +398,13 @@ static void pair_tick(void) {
         pair_state = PAIR_IDLE;  // power-off territory; don't pair
         ui_set_pair_state(PAIR_UI_TOO_LONG);
         Serial.println("Pair: disarmed (holding toward power-off)");
+        return;
     }
+
+    // Feed the overlay's watchdog for as long as the gesture is live. Without
+    // this the button path would announce a state once and watch it time out
+    // mid-hold — the armed window alone is three seconds long.
+    ui_set_pair_state(pair_state == PAIR_ARMED ? PAIR_UI_ARMED : PAIR_UI_HOLDING);
 }
 
 void loop() {
