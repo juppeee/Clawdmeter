@@ -64,6 +64,9 @@ static NimBLECharacteristic* req_char = nullptr;
 
 static ble_state_t state = BLE_STATE_INIT;
 static uint32_t    auth_fail_ms = 0;   // millis() of the last un-bonded handshake, 0 = none
+
+// How often ble_tick() checks that the controller is really advertising.
+#define ADV_CHECK_MS 2000
 static bool need_advertise = false;
 
 // One-shot supervision-timeout pushback (see onConnParamsUpdate). Written by
@@ -147,7 +150,12 @@ static void claim_owner(const std::string& id) {
     prune_foreign_bonds();
 }
 
-static void start_advertising() {
+// Build the advertising payload. Split out so a restart only has to call
+// start() — the payload never changes, and rebuilding it on every restart put
+// a reset() in a path that runs every couple of seconds. (Rebuilding was NOT
+// what stopped the radio; that turned out to be the missing watchdog in
+// ble_tick. Kept split because it is the cheaper shape, not as a fix.)
+static void configure_advertising() {
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     adv->reset();
     // Primary advertising packet (≤31 bytes):
@@ -165,6 +173,10 @@ static void start_advertising() {
     scanResp.setCompleteServices(NimBLEUUID(SERVICE_UUID));
     adv->setScanResponseData(scanResp);
     adv->enableScanResponse(true);
+}
+
+static void start_advertising() {
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     bool ok = adv->start();
     // Only reflect ADVERTISING in the UI state when no client is connected.
     // With MAX_CONNECTIONS=2, onConnect re-advertises to fill the second slot;
@@ -376,6 +388,7 @@ void ble_init(void) {
 
     svc->start();
     server->start();
+    configure_advertising();   // once — see the comment on that function
     start_advertising();
 
     Serial.printf("BLE: init complete, MAC=%s\n", mac_str);
@@ -385,6 +398,27 @@ void ble_tick(void) {
     if (need_advertise) {
         need_advertise = false;
         start_advertising();
+    }
+
+    // Advertising can stop without anything telling us to restart it. A central
+    // that connects and drops takes it down, and a connection that dies during
+    // establishment does the same while firing no onConnect at all — so the one
+    // need_advertise restart on disconnect can itself be swallowed by the next
+    // attempt. The board then sits invisible indefinitely: state says
+    // ADVERTISING, the controller says nothing, and no host can find it.
+    // Measured on hardware, hence a periodic check rather than trust in events.
+    static uint32_t adv_check_ms = 0;
+    if (millis() - adv_check_ms >= ADV_CHECK_MS) {
+        adv_check_ms = millis();
+        // Free slot, not zero connections: the OS holds the HID link while the
+        // daemon needs a second one, so going quiet after the first connect
+        // would leave the daemon unable to find the board at all.
+        NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+        if (adv && !adv->isAdvertising() && server &&
+            server->getConnectedCount() < CONFIG_BT_NIMBLE_MAX_CONNECTIONS) {
+            Serial.println("BLE: advertising had stopped — restarting");
+            start_advertising();
+        }
     }
     // Deferred one-shot supervision-timeout pushback (see onConnParamsUpdate).
     if (param_fix_handle != CONN_HANDLE_NONE &&
