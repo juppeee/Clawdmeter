@@ -275,6 +275,10 @@ static int      clock_fmt = 24;   // 12 or 24, set from the daemon payload
 static int      clock_last_min = -1;   // last rendered minute; avoids redrawing the title every tick
 static lv_obj_t* usage_group;   // the two usage panels — shown when connected
 static lv_obj_t* pair_group;    // pairing hint — shown when disconnected
+static lv_obj_t* pair_l1;       // its three lines; the wording swaps when a host
+static lv_obj_t* pair_l2;       // keeps failing the handshake (ui_set_pairing_rejected)
+static lv_obj_t* pair_l3;
+static bool      pair_rejected = false;
 static lv_obj_t* bar_session;
 static lv_obj_t* lbl_session_pct;
 static lv_obj_t* lbl_session_label;
@@ -728,24 +732,24 @@ static void build_pair_group(lv_obj_t* parent) {
     lv_obj_clear_flag(pair_group, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(pair_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    lv_obj_t* l1 = lv_label_create(pair_group);
-    lv_label_set_text(l1, "To pair");
-    lv_obj_set_style_text_font(l1, L.bt_status_font, 0);
-    lv_obj_set_style_text_color(l1, COL_TEXT, 0);
-    lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, L.pair_y1);
+    pair_l1 = lv_label_create(pair_group);
+    lv_label_set_text(pair_l1, "To pair");
+    lv_obj_set_style_text_font(pair_l1, L.bt_status_font, 0);
+    lv_obj_set_style_text_color(pair_l1, COL_TEXT, 0);
+    lv_obj_align(pair_l1, LV_ALIGN_TOP_MID, 0, L.pair_y1);
 
-    lv_obj_t* l2 = lv_label_create(pair_group);
+    pair_l2 = lv_label_create(pair_group);
     const char* key = board_caps().pair_key ? board_caps().pair_key : "the power button";
-    lv_label_set_text_fmt(l2, "hold %s", key);
-    lv_obj_set_style_text_font(l2, L.bt_device_font, 0);
-    lv_obj_set_style_text_color(l2, COL_DIM, 0);
-    lv_obj_align(l2, LV_ALIGN_TOP_MID, 0, L.pair_y2);
+    lv_label_set_text_fmt(pair_l2, "hold %s", key);
+    lv_obj_set_style_text_font(pair_l2, L.bt_device_font, 0);
+    lv_obj_set_style_text_color(pair_l2, COL_DIM, 0);
+    lv_obj_align(pair_l2, LV_ALIGN_TOP_MID, 0, L.pair_y2);
 
-    lv_obj_t* l3 = lv_label_create(pair_group);
-    lv_label_set_text(l3, "for 3 seconds, then release");
-    lv_obj_set_style_text_font(l3, L.bt_device_font, 0);
-    lv_obj_set_style_text_color(l3, COL_DIM, 0);
-    lv_obj_align(l3, LV_ALIGN_TOP_MID, 0, L.pair_y3);
+    pair_l3 = lv_label_create(pair_group);
+    lv_label_set_text(pair_l3, "for 3 seconds, then release");
+    lv_obj_set_style_text_font(pair_l3, L.bt_device_font, 0);
+    lv_obj_set_style_text_color(pair_l3, COL_DIM, 0);
+    lv_obj_align(pair_l3, LV_ALIGN_TOP_MID, 0, L.pair_y3);
 
     lv_obj_add_flag(pair_group, LV_OBJ_FLAG_HIDDEN);  // ui_update_ble_status decides
 }
@@ -1196,6 +1200,30 @@ void ui_set_pair_state(pair_ui_t state) {
 }
 
 bool ui_pair_overlay_active(void) { return pair_ui_state != PAIR_UI_NONE; }
+
+void ui_set_pairing_rejected(bool rejected) {
+    if (!pair_l1 || rejected == pair_rejected) return;
+    pair_rejected = rejected;
+
+    if (rejected) {
+        // "To pair" is true but useless here: the host says the two ARE paired,
+        // so the user needs to hear that the host's key is the stale one and
+        // that clearing it there is the half that this board cannot do.
+        lv_label_set_text(pair_l1, "Pairing failed");
+        lv_label_set_text(pair_l2, "the host has a stale key");
+        lv_label_set_text(pair_l3, "remove it there, then retry");
+        lv_obj_set_style_text_color(pair_l1, COL_RED, 0);
+    } else {
+        const char* key = board_caps().pair_key ? board_caps().pair_key : "the power button";
+        lv_label_set_text(pair_l1, "To pair");
+        lv_label_set_text_fmt(pair_l2, "hold %s", key);
+        lv_label_set_text(pair_l3, "for 3 seconds, then release");
+        lv_obj_set_style_text_color(pair_l1, COL_TEXT, 0);
+    }
+    lv_obj_align(pair_l1, LV_ALIGN_TOP_MID, 0, L.pair_y1);
+    lv_obj_align(pair_l2, LV_ALIGN_TOP_MID, 0, L.pair_y2);
+    lv_obj_align(pair_l3, LV_ALIGN_TOP_MID, 0, L.pair_y3);
+}
 
 void ui_update_battery(int percent, bool charging) {
     if (!battery_img) return;

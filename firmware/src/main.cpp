@@ -534,6 +534,11 @@ void loop() {
         ui_update_ble_status(bs, ble_get_device_name(), ble_get_mac_address());
     }
 
+    // Polled rather than event-driven: this goes true on a failed handshake but
+    // false again by simply timing out, which no BLE event announces. The UI
+    // ignores repeats.
+    ui_set_pairing_rejected(ble_pairing_rejected());
+
     static int  last_pct      = -2;
     static bool last_charging = false;
     int  pct      = power_hal_battery_pct();
