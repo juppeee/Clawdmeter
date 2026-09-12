@@ -65,11 +65,11 @@ ESP32-C6 sibling of the S3 1.8: same 368×448 SH8601 panel + FocalTech touch, di
 
 ### LCD-1.54 (TFT) — `waveshare_lcd_154`
 Pin map cross-checked against Waveshare's own XiaoZhi board config (`main/boards/waveshare/esp32-s3-touch-lcd-1.54/config.h` in 78/xiaozhi-esp32) — the factory firmware shipped on the unit. Module is ESP32-S3R8: 16 MB quad flash + 8 MB embedded octal PSRAM.
-- Display: **ST7789** TFT via 4-wire SPI (CS=21, SCLK=38, MOSI=39, DC=45, RST=40), 240×240, colour inversion on, no offsets. **Backlight on GPIO 46 via LEDC PWM** — a TFT has no in-panel brightness command, so `display_hal_set_brightness()` is a PWM duty.
+- Display: **ST7789** TFT via 4-wire SPI (CS=21, SCLK=38, MOSI=39, DC=45, RST=40), 240×240, colour inversion on. **Backlight on GPIO 46 via LEDC PWM** — a TFT has no in-panel brightness command, so `display_hal_set_brightness()` is a PWM duty. **Turned a quarter turn left** — `LCD_ROTATION_LEFT` in `board.h` picks GFX rotation 3 (MADCTL MY|MV, free) and `touch.cpp` turns its coordinates back. Rotation 3 reverses the page order, so the 240-row window sits at the far end of the 240×320 GRAM: `row_offset2 = 80` (rotation 0 needs no offsets).
 - Touch: **CST816** @ 0x15 (SDA=42, SCL=41, INT=48, RST=47). Same FocalTech-style inline reader as the 1.8 port.
 - **No PMU.** Battery % from a 3:1 VBAT divider on GPIO 1 (ADC). **GPIO 2 = BAT_EN power-hold latch** — `board_init()` must drive it HIGH or the board dies on battery; `power.cpp` drops it for the 8 s power-off. **GPIO 3 = charger status, LOW while charging.** VBUS itself is not sensed, so `power_hal_is_vbus_in()` stays false.
 - Audio: ES8311 @ 0x18 (I2S MCLK=8, BCLK=9, WS=10, DOUT=12), amp enable GPIO 7. ES7210 mic ADC present, unused.
-- IMU QMI8658 and RTC PCF85063 present, unused. Orientation fixed at 0°.
+- IMU QMI8658 and RTC PCF85063 present, unused. Orientation fixed (no auto-rotation) — see the quarter turn left above.
 - Buttons (labels printed on the case): **BOOT = GPIO 0** (Space), **PLUS = GPIO 4** (Shift+Tab), **PWR = GPIO 5** (cycle screens, hold-to-pair, 8 s = power off). All plain active-LOW GPIOs; PWR edges are synthesized in software in `power.cpp`.
 
 ### Knob-1.8 (round TFT) — `waveshare_knob_18`

@@ -14,11 +14,14 @@ static Arduino_ST7789*  gfx = nullptr;
 void display_hal_init(void) {
     bus = new Arduino_ESP32SPI(LCD_DC, LCD_CS, LCD_SCLK, LCD_MOSI,
                                GFX_NOT_DEFINED /* no MISO */);
-    // 240x240 window of the 240x320 GRAM: rows 0-239 at rotation 0, so
-    // offsets are 0,0 (the 80-row offset only matters for rotations 2/3).
+    // 240x240 window of the 240x320 GRAM: visible rows are 0-239, so rotation 0
+    // needs no offsets. Rotation 3 (quarter turn left) reverses the page order,
+    // which pushes the window to the far end of the 320-row address space —
+    // GFX feeds it ROW_OFFSET2, hence the 80 in the last slot.
     // ips=true — this module needs color inversion (matches the
     // hardware-tested BambuHelper config's USE_ST7789_INVERT).
-    gfx = new Arduino_ST7789(bus, LCD_RST, 0 /* rotation */, true /* ips */,
+    gfx = new Arduino_ST7789(bus, LCD_RST, LCD_ROTATION_LEFT ? 3 : 0 /* rotation */,
+                             true /* ips */,
                              LCD_WIDTH, LCD_HEIGHT, 0, 0, 0, 80);
 }
 
