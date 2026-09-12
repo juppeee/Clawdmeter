@@ -17,6 +17,11 @@ screen_t ui_get_current_screen(void);
 void ui_update_ble_status(ble_state_t state, const char* name, const char* mac);
 void ui_update_battery(int percent, bool charging);
 
+// Swap the pairing hint's wording when a host keeps failing the handshake
+// (ble_pairing_rejected). Without it the board shows "To pair" while the host
+// shows the board as paired, and the user is left to reconcile the two.
+void ui_set_pairing_rejected(bool rejected);
+
 // ---- Hold-to-pair feedback ----
 // The pairing gesture is a blind 3-second hold with a 6-second cut-off, so it
 // needs to say where it is while the finger is still down. main.cpp's

@@ -63,6 +63,7 @@ static NimBLECharacteristic* rx_char = nullptr;
 static NimBLECharacteristic* req_char = nullptr;
 
 static ble_state_t state = BLE_STATE_INIT;
+static uint32_t    auth_fail_ms = 0;   // millis() of the last un-bonded handshake, 0 = none
 static bool need_advertise = false;
 
 // One-shot supervision-timeout pushback (see onConnParamsUpdate). Written by
@@ -239,6 +240,12 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         std::string id = info.getIdAddress().toString();
         Serial.printf("BLE: auth complete peer=%s bonded=%d enc=%d\n",
             id.c_str(), info.isBonded() ? 1 : 0, info.isEncrypted() ? 1 : 0);
+        // A handshake that ends un-bonded is a host reconnecting with a key we
+        // no longer have. It will keep trying and keep failing, so remember it
+        // for the pairing hint — otherwise the board just says "To pair" while
+        // the host insists the two are paired.
+        if (info.isBonded() && info.isEncrypted()) auth_fail_ms = 0;
+        else auth_fail_ms = millis() | 1;   // never 0; 0 means "never happened"
         // Bonded reconnects START at the central's clamped parameters (no
         // later update event fires), so the supervision-timeout pushback must
         // also arm here, not just in onConnParamsUpdate.
@@ -398,6 +405,7 @@ const char* ble_get_mac_address(void) {
 void ble_clear_bonds(void) {
     NimBLEDevice::deleteAllBonds();
     clear_owner();  // release ownership so the board can be handed to another machine
+    auth_fail_ms = 0;   // the user is acting on it; stop reporting the old failure
     Serial.println("BLE: bonds cleared");
     if (state == BLE_STATE_CONNECTED) {
         server->disconnect(server->getPeerInfo(0).getConnHandle());
@@ -407,6 +415,16 @@ void ble_clear_bonds(void) {
 
 bool ble_has_bonds(void) {
     return NimBLEDevice::getNumBonds() > 0;
+}
+
+// Long enough to outlast a host's retry gap, so the hint doesn't flicker
+// between attempts, and short enough to disappear once the host is fixed.
+#define AUTH_FAIL_HINT_MS 180000
+
+bool ble_pairing_rejected(void) {
+    if (auth_fail_ms == 0) return false;
+    if (state == BLE_STATE_CONNECTED) return false;   // whatever it was, it's moot now
+    return (millis() - auth_fail_ms) < AUTH_FAIL_HINT_MS;
 }
 
 bool ble_has_data(void) {
