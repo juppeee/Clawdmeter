@@ -2,6 +2,7 @@
 #include "splash_animations.h"
 #include "splash_geometry.h"
 #include "charge_anim.h"
+#include "ui.h"
 #include "theme.h"
 #include "usage_rate.h"
 #include "hal/board_caps.h"
@@ -369,6 +370,10 @@ void splash_tick(void) {
     // boards this module paints straight onto the panel and would scribble
     // over it. Standing still for the two seconds it runs is enough.
     if (charge_anim_is_active()) return;
+
+    // Same deal for the hold-to-pair overlay — it sits on screen only while a
+    // finger is on the button, so freezing the creature that long is fine.
+    if (ui_pair_overlay_active()) return;
 
 #if SPLASH_DIRECT_DRAW
     // Voller Neuaufbau nach dem Wiederanzeigen — erst wenn LVGL einen

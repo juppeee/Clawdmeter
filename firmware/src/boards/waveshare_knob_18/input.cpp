@@ -93,6 +93,19 @@ static void haptic_click(void) {
     drv_write(0x0C, 0x01);                   // GO
 }
 
+// Exposed to this board's sound.cpp, which answers the pairing cues with
+// haptics — there is no speaker here. The DRV2605 sequencer plays slots 1..n
+// back-to-back on a single GO, so a two-pulse pattern costs the main loop
+// nothing but the I2C writes. Declared at the call site rather than in a
+// header: one function, one caller, same board folder.
+void knob_haptic_effects(uint8_t first, uint8_t second) {
+    if (!haptic_ok) return;
+    drv_write(0x04, first);
+    drv_write(0x05, second);     // 0x00 here ends the sequence after slot 1
+    drv_write(0x06, 0x00);
+    drv_write(0x0C, 0x01);       // GO
+}
+
 void input_hal_init(void) {
     pinMode(BTN_BACK_GPIO, INPUT_PULLUP);
     pinMode(ENC_A_GPIO, INPUT_PULLUP);

@@ -234,23 +234,53 @@ static void touch_hold_start(void) {
     touch_space_down = true;
 }
 
+// Whether this hold could pair at all — the link has to be down, and down long
+// enough that a reconnect burst isn't mistaken for a dead bond.
+static bool touch_pair_eligible(void) {
+    return ble_get_state() != BLE_STATE_CONNECTED &&
+           millis() - ble_down_since_ms >= TOUCH_PAIR_DOWN_MS;
+}
+
+// Same feedback the PWR gesture gets in pair_tick(), driven off the live hold
+// instead of a button edge: on this board the gesture is a finger on the glass
+// with nothing else to go by.
+static void touch_hold_tick(uint32_t held_ms) {
+    static bool announced = false;
+    if (touch_space_down || !touch_pair_eligible()) return;
+    if (held_ms >= TOUCH_PAIR_MAX_MS) {
+        ui_set_pair_state(PAIR_UI_TOO_LONG);
+    } else if (held_ms >= TOUCH_PAIR_MIN_MS) {
+        if (!announced) { sound_hal_play_pair_armed(); announced = true; }
+        ui_set_pair_state(PAIR_UI_ARMED);
+    } else {
+        announced = false;
+        ui_set_pair_state(PAIR_UI_HOLDING);
+    }
+}
+
 static void touch_hold_end(uint32_t held_ms) {
     if (touch_space_down) {
         ble_keyboard_release();
         touch_space_down = false;
         return;
     }
-    if (held_ms < TOUCH_PAIR_MIN_MS || held_ms >= TOUCH_PAIR_MAX_MS) return;
-    if (ble_get_state() == BLE_STATE_CONNECTED ||
-        millis() - ble_down_since_ms < TOUCH_PAIR_DOWN_MS) {
+    if (held_ms < TOUCH_PAIR_MIN_MS || held_ms >= TOUCH_PAIR_MAX_MS) {
+        ui_set_pair_state(PAIR_UI_NONE);
+        return;
+    }
+    if (!touch_pair_eligible()) {
+        ui_set_pair_state(PAIR_UI_NONE);
         Serial.println("Pair: touch hold ignored — link not down long enough");
         return;
     }
     Serial.println("Pair: touch held in window — clearing bonds, advertising");
     ble_clear_bonds();
+    ui_set_pair_state(PAIR_UI_DONE);   // self-clears after a moment
+    sound_hal_play_paired();
 }
 
-static const UiTouchKeys touch_keys = {touch_double_tap, touch_hold_start, touch_hold_end};
+static const UiTouchKeys touch_keys = {touch_double_tap, touch_hold_start,
+                                       touch_hold_tick, touch_hold_end};
 
 void setup() {
     Serial.begin(115200);
@@ -325,6 +355,7 @@ static void pair_tick(void) {
         pair_state = PAIR_PENDING;
         pair_long_seen_ms = millis();
         (void)power_hal_pwr_released();  // drain any stale release edge
+        ui_set_pair_state(PAIR_UI_HOLDING);
         Serial.println("PWR long-press: hold to ~3s then release to pair");
         return;
     }
@@ -334,8 +365,11 @@ static void pair_tick(void) {
         if (pair_state == PAIR_ARMED) {
             Serial.println("Pair: released in window — clearing bonds, advertising");
             ble_clear_bonds();
+            ui_set_pair_state(PAIR_UI_DONE);      // self-clears after a moment
+            sound_hal_play_paired();
         } else {
             Serial.println("Pair: released too early — cancelled");
+            ui_set_pair_state(PAIR_UI_NONE);
         }
         pair_state = PAIR_IDLE;
         return;
@@ -344,9 +378,15 @@ static void pair_tick(void) {
     uint32_t held = millis() - pair_long_seen_ms;
     if (pair_state == PAIR_PENDING && held >= PAIR_ARM_AFTER_LONG_MS) {
         pair_state = PAIR_ARMED;
+        // The one moment that actually needs announcing: from here a release
+        // pairs. Screen and speaker both say so, because the finger is on the
+        // button and the eyes may not be on the panel.
+        ui_set_pair_state(PAIR_UI_ARMED);
+        sound_hal_play_pair_armed();
         Serial.println("Pair: armed — release to pair");
     } else if (pair_state == PAIR_ARMED && held >= PAIR_DISARM_AFTER_LONG_MS) {
         pair_state = PAIR_IDLE;  // power-off territory; don't pair
+        ui_set_pair_state(PAIR_UI_TOO_LONG);
         Serial.println("Pair: disarmed (holding toward power-off)");
     }
 }

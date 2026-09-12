@@ -430,6 +430,12 @@ static void touch_key_cb(lv_event_t* e) {
         holding = true;
         if (touch_keys && touch_keys->hold_start) touch_keys->hold_start();
         break;
+    case LV_EVENT_LONG_PRESSED_REPEAT:
+        // Lets the pairing gesture report its progress while the finger is
+        // still down — hold_end alone comes too late to say "release now".
+        if (holding && touch_keys && touch_keys->hold_tick)
+            touch_keys->hold_tick(lv_tick_get() - press_start_ms);
+        break;
     case LV_EVENT_RELEASED:
     case LV_EVENT_PRESS_LOST:
         if (holding) {
@@ -744,6 +750,52 @@ static void build_pair_group(lv_obj_t* parent) {
     lv_obj_add_flag(pair_group, LV_OBJ_FLAG_HIDDEN);  // ui_update_ble_status decides
 }
 
+// ---- Hold-to-pair overlay ----
+// Lives on the shared screen above both the usage view and the splash, because
+// the gesture works from either. Only the pair_group hint below is tied to the
+// usage view; this one floats.
+static lv_obj_t*   pair_toast = nullptr;
+static lv_obj_t*   pair_toast_lbl = nullptr;
+static lv_timer_t* pair_toast_timer = nullptr;
+static pair_ui_t   pair_ui_state = PAIR_UI_NONE;
+
+static void pair_toast_dismiss(lv_timer_t* t) {
+    if (t) lv_timer_pause(t);
+    if (!pair_toast) return;
+    lv_obj_add_flag(pair_toast, LV_OBJ_FLAG_HIDDEN);
+    pair_ui_state = PAIR_UI_NONE;
+    // Same reason the charge overlay does it: the splash repaints only cells
+    // that changed, so whatever this covered would stay black until the
+    // creature happens to move through it.
+    splash_request_full_redraw();
+}
+
+static void build_pair_toast(lv_obj_t* parent) {
+    pair_toast = lv_obj_create(parent);
+    // Narrower than the content column on purpose: the longer states then wrap
+    // to two lines instead of running edge to edge, which on the 240 px board
+    // is the difference between a message and a stripe.
+    lv_obj_set_width(pair_toast, L.scr_w - 4 * L.margin);
+    lv_obj_set_height(pair_toast, LV_SIZE_CONTENT);
+    lv_obj_align(pair_toast, LV_ALIGN_CENTER, 0, 0);
+    lv_obj_set_style_bg_color(pair_toast, COL_PANEL, 0);
+    lv_obj_set_style_bg_opa(pair_toast, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(pair_toast, L.margin / 2, 0);
+    lv_obj_set_style_border_width(pair_toast, 2, 0);
+    lv_obj_set_style_border_color(pair_toast, COL_ACCENT, 0);
+    lv_obj_set_style_pad_all(pair_toast, L.margin, 0);
+    lv_obj_clear_flag(pair_toast, LV_OBJ_FLAG_SCROLLABLE);
+
+    pair_toast_lbl = lv_label_create(pair_toast);
+    lv_label_set_long_mode(pair_toast_lbl, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(pair_toast_lbl, lv_pct(100));
+    lv_obj_set_style_text_align(pair_toast_lbl, LV_TEXT_ALIGN_CENTER, 0);
+    lv_obj_set_style_text_font(pair_toast_lbl, L.bt_device_font, 0);
+    lv_label_set_text(pair_toast_lbl, "");
+
+    lv_obj_add_flag(pair_toast, LV_OBJ_FLAG_HIDDEN);
+}
+
 // Idle "Zzz" screen — shown when the host is connected but no usage update has
 // landed recently (token expired, daemon down, host asleep…). Full-screen, like
 // the pairing hint, so we never render hours-old numbers as if they were live.
@@ -876,6 +928,10 @@ void ui_init(void) {
         lv_obj_del(battery_img);
         battery_img = nullptr;
     }
+
+    // Above the usage view and the splash, below the charge overlay — the
+    // pairing gesture can be started from either screen.
+    build_pair_toast(scr);
 
     // Last, so the charge overlay covers everything else when it plays.
     charge_anim_init(scr);
@@ -1093,6 +1149,46 @@ void ui_update_ble_status(ble_state_t state, const char* name, const char* mac) 
     // pair / idle / usage — picked from connection + data freshness.
     update_view_state();
 }
+
+// How long the two self-clearing states stay up. Neither has a release edge
+// coming to take it down: DONE fires on release, TOO_LONG while still held.
+#define PAIR_TOAST_MS 2000
+
+void ui_set_pair_state(pair_ui_t state) {
+    if (!pair_toast || state == pair_ui_state) return;
+    pair_ui_state = state;
+
+    if (state == PAIR_UI_NONE) {
+        pair_toast_dismiss(pair_toast_timer);
+        return;
+    }
+
+    const char* text;
+    lv_color_t  color;
+    switch (state) {
+    case PAIR_UI_ARMED:    text = "Release now to pair";          color = COL_ACCENT; break;
+    case PAIR_UI_TOO_LONG: text = "Release and retry";            color = COL_RED;    break;
+    case PAIR_UI_DONE:     text = "Pairing - ready to connect";   color = COL_GREEN;  break;
+    default:               text = "Keep holding";                 color = COL_DIM;    break;
+    }
+    lv_label_set_text(pair_toast_lbl, text);
+    lv_obj_set_style_text_color(pair_toast_lbl, color, 0);
+    lv_obj_set_style_border_color(pair_toast, color, 0);
+    lv_obj_clear_flag(pair_toast, LV_OBJ_FLAG_HIDDEN);
+    lv_obj_align(pair_toast, LV_ALIGN_CENTER, 0, 0);   // text length changed the height
+
+    if (state == PAIR_UI_DONE || state == PAIR_UI_TOO_LONG) {
+        if (!pair_toast_timer)
+            pair_toast_timer = lv_timer_create(pair_toast_dismiss, PAIR_TOAST_MS, nullptr);
+        lv_timer_set_period(pair_toast_timer, PAIR_TOAST_MS);
+        lv_timer_reset(pair_toast_timer);
+        lv_timer_resume(pair_toast_timer);
+    } else if (pair_toast_timer) {
+        lv_timer_pause(pair_toast_timer);
+    }
+}
+
+bool ui_pair_overlay_active(void) { return pair_ui_state != PAIR_UI_NONE; }
 
 void ui_update_battery(int percent, bool charging) {
     if (!battery_img) return;

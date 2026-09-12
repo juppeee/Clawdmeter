@@ -29,5 +29,17 @@ bool chime_init(const ChimeConfig& cfg);
 // or already playing.
 void chime_play(void);
 
+// Short UI cues for the hold-to-pair gesture. Synthesized on the fly instead
+// of embedded as PCM — two more clips would cost far more flash than the
+// oscillator costs code, and these want to be plain beeps, not bells.
+//   ARMED  — one blip the moment releasing would pair ("now")
+//   PAIRED — a rising two-tone confirming the bonds were cleared
+// Non-blocking and gated by the same busy flag as chime_play().
+enum chime_cue_t {
+    CHIME_CUE_PAIR_ARMED,
+    CHIME_CUE_PAIRED,
+};
+void chime_play_cue(chime_cue_t cue);
+
 // Currently a no-op (playback runs in its own task); kept for HAL symmetry.
 void chime_tick(void);

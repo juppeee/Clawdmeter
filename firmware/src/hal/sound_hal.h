@@ -12,3 +12,11 @@
 void sound_hal_init(void);
 void sound_hal_tick(void);
 void sound_hal_play_reset(void);
+
+// Feedback for the hold-to-pair gesture, which is otherwise blind: the user
+// holds a button for three seconds with nothing to go by. armed() fires the
+// moment releasing would pair, paired() once the bonds are actually cleared.
+// Boards with no speaker ignore both; the Knob-1.8 has no audio path out but
+// does have a haptic driver, so it answers with a buzz instead of a beep.
+void sound_hal_play_pair_armed(void);
+void sound_hal_play_paired(void);
