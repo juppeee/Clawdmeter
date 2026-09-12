@@ -785,6 +785,10 @@ static void build_pair_toast(lv_obj_t* parent) {
     lv_obj_set_style_border_color(pair_toast, COL_ACCENT, 0);
     lv_obj_set_style_pad_all(pair_toast, L.margin, 0);
     lv_obj_clear_flag(pair_toast, LV_OBJ_FLAG_SCROLLABLE);
+    // Transparent to touch, like the charge overlay: it sits above the screen
+    // that owns the gestures, and on the Knob-1.8 the screen *is* the keyboard
+    // — a lingering "Ready to connect" would otherwise swallow the next tap.
+    lv_obj_clear_flag(pair_toast, LV_OBJ_FLAG_CLICKABLE);
 
     pair_toast_lbl = lv_label_create(pair_toast);
     lv_label_set_long_mode(pair_toast_lbl, LV_LABEL_LONG_WRAP);
