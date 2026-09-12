@@ -255,6 +255,15 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             param_fix_at_ms  = millis() + 2000;
         }
         if (id == ZERO_ADDR) return;
+        // Ownership follows a completed bond, never a failed handshake. A host
+        // reconnecting with a key this board no longer has ends up here with
+        // bonded=0 enc=0, and the board used to write that peer into NVS as its
+        // owner anyway — seen on hardware, where a failed handshake left
+        // owner=00:1a:7d:… behind. An un-bonded peer has no identity to
+        // resolve, so getIdAddress() reports whatever it connected with, which
+        // need not be the address the eventual real bond arrives under; the
+        // board would then reject its own owner as a stranger.
+        if (!(info.isBonded() && info.isEncrypted())) return;
         if (!owner_set) {
             claim_owner(id);
         } else if (strcmp(id.c_str(), owner_addr) != 0) {
