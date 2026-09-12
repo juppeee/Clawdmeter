@@ -1154,42 +1154,45 @@ void ui_update_ble_status(ble_state_t state, const char* name, const char* mac) 
     update_view_state();
 }
 
-// How long the two self-clearing states stay up. Neither has a release edge
-// coming to take it down: DONE fires on release, TOO_LONG while still held.
+// How long the overlay outlives the last state report. One watchdog covers
+// every ending: the finger lifting mid-gesture (no release event is guaranteed
+// — LVGL can send PRESS_LOST instead), and DONE, which nothing else clears.
 #define PAIR_TOAST_MS 2000
 
 void ui_set_pair_state(pair_ui_t state) {
-    if (!pair_toast || state == pair_ui_state) return;
+    if (!pair_toast) return;
+    const bool changed = (state != pair_ui_state);
     pair_ui_state = state;
 
     if (state == PAIR_UI_NONE) {
-        pair_toast_dismiss(pair_toast_timer);
+        if (changed) pair_toast_dismiss(pair_toast_timer);
         return;
     }
 
-    const char* text;
-    lv_color_t  color;
-    switch (state) {
-    case PAIR_UI_ARMED:    text = "Release now to pair";          color = COL_ACCENT; break;
-    case PAIR_UI_TOO_LONG: text = "Release and retry";            color = COL_RED;    break;
-    case PAIR_UI_DONE:     text = "Pairing - ready to connect";   color = COL_GREEN;  break;
-    default:               text = "Keep holding";                 color = COL_DIM;    break;
+    if (changed) {
+        const char* text;
+        lv_color_t  color;
+        switch (state) {
+        case PAIR_UI_ARMED:    text = "Release now to pair";        color = COL_ACCENT; break;
+        case PAIR_UI_TOO_LONG: text = "Release and retry";          color = COL_RED;    break;
+        case PAIR_UI_NOT_YET:  text = "Not yet - link just dropped"; color = COL_DIM;   break;
+        case PAIR_UI_DONE:     text = "Pairing - ready to connect"; color = COL_GREEN;  break;
+        default:               text = "Keep holding";               color = COL_DIM;    break;
+        }
+        lv_label_set_text(pair_toast_lbl, text);
+        lv_obj_set_style_text_color(pair_toast_lbl, color, 0);
+        lv_obj_set_style_border_color(pair_toast, color, 0);
+        lv_obj_clear_flag(pair_toast, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_align(pair_toast, LV_ALIGN_CENTER, 0, 0);   // the text changed the height
     }
-    lv_label_set_text(pair_toast_lbl, text);
-    lv_obj_set_style_text_color(pair_toast_lbl, color, 0);
-    lv_obj_set_style_border_color(pair_toast, color, 0);
-    lv_obj_clear_flag(pair_toast, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_align(pair_toast, LV_ALIGN_CENTER, 0, 0);   // text length changed the height
 
-    if (state == PAIR_UI_DONE || state == PAIR_UI_TOO_LONG) {
-        if (!pair_toast_timer)
-            pair_toast_timer = lv_timer_create(pair_toast_dismiss, PAIR_TOAST_MS, nullptr);
-        lv_timer_set_period(pair_toast_timer, PAIR_TOAST_MS);
-        lv_timer_reset(pair_toast_timer);
-        lv_timer_resume(pair_toast_timer);
-    } else if (pair_toast_timer) {
-        lv_timer_pause(pair_toast_timer);
-    }
+    // Every call feeds the watchdog, so a gesture that keeps reporting keeps
+    // the overlay, and one that stops gets two seconds of reading time.
+    if (!pair_toast_timer)
+        pair_toast_timer = lv_timer_create(pair_toast_dismiss, PAIR_TOAST_MS, nullptr);
+    lv_timer_set_period(pair_toast_timer, PAIR_TOAST_MS);
+    lv_timer_reset(pair_toast_timer);
+    lv_timer_resume(pair_toast_timer);
 }
 
 bool ui_pair_overlay_active(void) { return pair_ui_state != PAIR_UI_NONE; }
