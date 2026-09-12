@@ -11,7 +11,8 @@
 //   reg 0x05 / 0x06: Y high (low nibble) + Y low
 // The CST816T reports in panel-native orientation on this kit — no axis swap
 // or mirror at rotation 0 (matches BambuHelper's hardware-tested config for
-// the same board, which applies no swap flags).
+// the same board, which applies no swap flags). With the picture turned a
+// quarter turn left (LCD_ROTATION_LEFT) the same quarter turn is applied here.
 
 static volatile bool     touch_data_ready = false;
 static volatile bool     touch_pressed = false;
@@ -36,8 +37,20 @@ static void touch_read_into_shared_state(void) {
         touch_pressed = false;
         return;
     }
-    touch_x = ((uint16_t)(xH & 0x0F) << 8) | xL;
-    touch_y = ((uint16_t)(yH & 0x0F) << 8) | yL;
+    uint16_t x = ((uint16_t)(xH & 0x0F) << 8) | xL;
+    uint16_t y = ((uint16_t)(yH & 0x0F) << 8) | yL;
+    if (x >= LCD_WIDTH)  x = LCD_WIDTH - 1;
+    if (y >= LCD_HEIGHT) y = LCD_HEIGHT - 1;
+#if LCD_ROTATION_LEFT
+    // Picture turned 90° left, so the reported point turns 90° right to land
+    // back in the coordinates the UI drew in: native top-left = screen
+    // bottom-left.
+    uint16_t nx = LCD_HEIGHT - 1 - y;
+    y = x;
+    x = nx;
+#endif
+    touch_x = x;
+    touch_y = y;
     touch_pressed = true;
 }
 

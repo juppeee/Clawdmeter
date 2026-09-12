@@ -14,6 +14,11 @@
 // ---- Display geometry ----
 #define LCD_WIDTH            240
 #define LCD_HEIGHT           240
+// Turned a quarter turn to the left (counter-clockwise) so the kit can stand on
+// its long edge. Done in the panel (MADCTL MY|MV = GFX rotation 3), so it costs
+// nothing per frame; touch.cpp rotates its coordinates to match. 0 = the
+// panel's native orientation.
+#define LCD_ROTATION_LEFT    1
 
 // ---- SPI display pins (ST7789, 4-wire SPI) ----
 #define LCD_CS               21
