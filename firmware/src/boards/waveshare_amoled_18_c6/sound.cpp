@@ -10,3 +10,5 @@
 void sound_hal_init(void) {}
 void sound_hal_tick(void) {}
 void sound_hal_play_reset(void) {}
+void sound_hal_play_pair_armed(void) {}
+void sound_hal_play_paired(void) {}

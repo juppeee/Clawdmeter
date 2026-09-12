@@ -3,16 +3,14 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-// Minimal CST816T reader — same FocalTech-style register layout as the
-// AMOLED-1.8 port's inline reader (regs 0x02..0x06), vendored to keep the
-// dependency tree copyleft-free:
+// Minimal CST816 reader — the same FocalTech-style register layout as the
+// AMOLED-1.8 and LCD-1.54 ports (regs 0x02..0x06):
 //   reg 0x02:        low nibble = active finger count
 //   reg 0x03 / 0x04: X high (low nibble) + X low
 //   reg 0x05 / 0x06: Y high (low nibble) + Y low
-// The CST816T reports in panel-native orientation on this kit — no axis swap
-// or mirror at rotation 0 (matches BambuHelper's hardware-tested config for
-// the same board, which applies no swap flags). With the picture turned a
-// quarter turn left (LCD_ROTATION_LEFT) the same quarter turn is applied here.
+// Waveshare's demo reports panel-native coordinates at rotation 0 — no swap
+// or mirror. With the panel turned 180° (LCD_ROTATION_180) both axes are
+// mirrored here to match.
 
 static volatile bool     touch_data_ready = false;
 static volatile bool     touch_pressed = false;
@@ -41,13 +39,9 @@ static void touch_read_into_shared_state(void) {
     uint16_t y = ((uint16_t)(yH & 0x0F) << 8) | yL;
     if (x >= LCD_WIDTH)  x = LCD_WIDTH - 1;
     if (y >= LCD_HEIGHT) y = LCD_HEIGHT - 1;
-#if LCD_ROTATION_LEFT
-    // Picture turned 90° left, so the reported point turns 90° right to land
-    // back in the coordinates the UI drew in: native top-left = screen
-    // bottom-left.
-    uint16_t nx = LCD_HEIGHT - 1 - y;
-    y = x;
-    x = nx;
+#if LCD_ROTATION_180
+    x = LCD_WIDTH  - 1 - x;
+    y = LCD_HEIGHT - 1 - y;
 #endif
     touch_x = x;
     touch_y = y;
@@ -55,15 +49,13 @@ static void touch_read_into_shared_state(void) {
 }
 
 void touch_hal_init(void) {
-    // Hardware reset — the CST816T needs a clean reset pulse before it
-    // responds on I2C (it powers up in a low-power state otherwise).
     pinMode(TP_RST, OUTPUT);
     digitalWrite(TP_RST, LOW);
     delay(10);
     digitalWrite(TP_RST, HIGH);
     delay(100);
 
-    // Verify the controller answers. CST816 chip-id lives at reg 0xA7.
+    // CST816 chip id lives at reg 0xA7.
     Wire.beginTransmission(CST816_ADDR);
     Wire.write(0xA7);
     if (Wire.endTransmission(false) == 0 &&
@@ -73,7 +65,7 @@ void touch_hal_init(void) {
         Serial.printf("Touch ID read failed (addr 0x%02X)\n", CST816_ADDR);
     }
 
-    // Disable the controller's auto-sleep — asleep it stops raising INT and
+    // Keep the controller out of auto-sleep — asleep it stops raising INT and
     // the first tap after idle would be swallowed. Reg 0xFE nonzero = stay on.
     Wire.beginTransmission(CST816_ADDR);
     Wire.write(0xFE);
@@ -82,7 +74,6 @@ void touch_hal_init(void) {
 
     pinMode(TP_INT, INPUT_PULLUP);
     attachInterrupt(TP_INT, touch_isr, FALLING);
-    Serial.println("Touch attached on INT pin");
 }
 
 void touch_hal_read(uint16_t* x, uint16_t* y, bool* pressed) {
@@ -90,9 +81,8 @@ void touch_hal_read(uint16_t* x, uint16_t* y, bool* pressed) {
         touch_data_ready = false;
         touch_read_into_shared_state();
     } else if (touch_pressed) {
-        // CST816 raises INT per report while a finger is down, but the release
-        // (finger-up) report can be missed if it lands between polls — re-read
-        // while we think we're pressed so a stuck "pressed" state clears.
+        // The finger-up report can land between polls; keep re-reading while
+        // pressed so a stuck "pressed" state clears.
         touch_read_into_shared_state();
     }
     *x = touch_x;

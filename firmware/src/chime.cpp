@@ -1,5 +1,6 @@
 #include "chime.h"
 #include <Arduino.h>
+#include <math.h>
 #include "ESP_I2S.h"
 #include "es8311.h"
 #include "bell_pcm.h"   // const uint8_t bell_pcm[] / bell_pcm_len — 44.1 kHz 16-bit stereo
@@ -60,6 +61,63 @@ void chime_play(void) {
     if (!ready || playing) return;
     playing = true;
     if (xTaskCreatePinnedToCore(chime_task, "chime", 4096, nullptr, 1, nullptr, 0) != pdPASS)
+        playing = false;   // couldn't spawn — stay silent rather than wedge the flag
+}
+
+// ---- Synthesized UI cues (see chime.h) ----
+
+struct cue_note { uint16_t freq_hz; uint16_t ms; };
+
+static const cue_note cue_armed[]  = { {880, 90} };
+static const cue_note cue_paired[] = { {660, 70}, {988, 130} };
+
+static const cue_note* cue_seq = nullptr;
+static uint8_t         cue_len = 0;
+
+#define CUE_AMPLITUDE 9000    // ~28% of full scale — audible, no amp strain
+#define CUE_EDGE_MS   4       // attack/release ramp; without it the amp clicks
+
+static void cue_task(void* arg) {
+    if (cfg.amp_enable) cfg.amp_enable(true);
+    delay(8);                                  // amp settle, same as the bell
+
+    static int16_t frames[256 * 2];            // stereo scratch, one cue at a time
+    const uint32_t edge = (uint32_t)cfg.sample_rate * CUE_EDGE_MS / 1000;
+
+    for (uint8_t n = 0; n < cue_len; n++) {
+        const uint32_t total = (uint32_t)cfg.sample_rate * cue_seq[n].ms / 1000;
+        const float    step  = 2.0f * (float)M_PI * cue_seq[n].freq_hz / cfg.sample_rate;
+        float          phase = 0.0f;
+        for (uint32_t done = 0; done < total; ) {
+            uint32_t chunk = total - done;
+            if (chunk > 256) chunk = 256;
+            for (uint32_t i = 0; i < chunk; i++) {
+                const uint32_t pos = done + i;
+                float env = 1.0f;
+                if (pos < edge)                env = (float)pos / (float)edge;
+                else if (total - pos < edge)   env = (float)(total - pos) / (float)edge;
+                const int16_t s = (int16_t)(sinf(phase) * CUE_AMPLITUDE * env);
+                phase += step;
+                frames[i * 2]     = s;
+                frames[i * 2 + 1] = s;
+            }
+            i2s.write((uint8_t*)frames, chunk * 4);   // 2 ch x 16 bit
+            done += chunk;
+        }
+    }
+
+    delay(20);
+    if (cfg.amp_enable) cfg.amp_enable(false);
+    playing = false;
+    vTaskDelete(nullptr);
+}
+
+void chime_play_cue(chime_cue_t cue) {
+    if (!ready || playing) return;
+    if (cue == CHIME_CUE_PAIRED) { cue_seq = cue_paired; cue_len = 2; }
+    else                         { cue_seq = cue_armed;  cue_len = 1; }
+    playing = true;
+    if (xTaskCreatePinnedToCore(cue_task, "chime_cue", 4096, nullptr, 1, nullptr, 0) != pdPASS)
         playing = false;   // couldn't spawn — stay silent rather than wedge the flag
 }
 
