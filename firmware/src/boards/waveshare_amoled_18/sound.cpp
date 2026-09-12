@@ -34,4 +34,7 @@ void sound_hal_init(void) {
 void sound_hal_play_reset(void) { chime_play(); }
 void sound_hal_tick(void)       { chime_tick(); }
 
+void sound_hal_play_pair_armed(void) { chime_play_cue(CHIME_CUE_PAIR_ARMED); }
+void sound_hal_play_paired(void)     { chime_play_cue(CHIME_CUE_PAIRED); }
+
 #endif  // BOARD_HAS_SOUND
