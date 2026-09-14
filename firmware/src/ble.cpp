@@ -4,7 +4,15 @@
 #include <NimBLEHIDDevice.h>
 #include <Preferences.h>
 
+// Advertised name. Every board used to announce itself as plain "Clawdmeter",
+// so a daemon bonded to one would find another and connect to it — seen on
+// hardware, where the daemon repeatedly grabbed a second board and dropped it
+// again. The last two bytes of the BLE MAC are appended at init to tell them
+// apart: "Clawdmeter 35F9". Keep the suffix short — the primary advertising
+// packet holds flags (3) + appearance (4) + HID UUID (4) + name (2 + length),
+// and 31 bytes is the ceiling; this lands at 28.
 #define DEVICE_NAME "Clawdmeter"
+#define DEVICE_NAME_MAX 24
 
 // Custom GATT UUIDs for data channel
 #define SERVICE_UUID        "4c41555a-4465-7669-6365-000000000001"
@@ -80,6 +88,7 @@ static char rx_buf[BLE_BUF_SIZE];
 static volatile bool data_ready = false;
 static volatile bool has_received_data = false;
 static char mac_str[18];
+static char dev_name[DEVICE_NAME_MAX] = DEVICE_NAME;   // MAC suffix added in ble_init
 
 // --- Single-owner lock -----------------------------------------------------
 //
@@ -159,14 +168,14 @@ static void configure_advertising() {
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     adv->reset();
     // Primary advertising packet (≤31 bytes):
-    //   flags (3) + appearance (4) + HID service 0x1812 (4) + name "Clawdmeter" (12)
-    //   = 23 bytes. macOS Bluetooth Settings only surfaces BLE-only devices
+    //   flags (3) + appearance (4) + HID service 0x1812 (4) + name (2 + 15)
+    //   = 28 bytes. macOS Bluetooth Settings only surfaces BLE-only devices
     //   that explicitly advertise the standard HID service UUID (0x1812) —
     //   without it the device is recognized internally but hidden from the
     //   GUI nearby-devices list.
     adv->setAppearance(HID_KEYBOARD);
     adv->addServiceUUID(NimBLEUUID((uint16_t)0x1812));  // BLE HID Service
-    adv->setName(DEVICE_NAME);
+    adv->setName(dev_name);
     // Scan response carries the 128-bit custom data-service UUID for active
     // scanners (the host daemon scans actively).
     NimBLEAdvertisementData scanResp;
@@ -342,6 +351,13 @@ void ble_init(void) {
         if (mac_str[i] >= 'a' && mac_str[i] <= 'f') mac_str[i] -= 32;
     }
 
+    // "AA:BB:CC:DD:EE:FF" -> "Clawdmeter EEFF". Has to happen after init(),
+    // which is what makes the address readable, so the GAP name is corrected
+    // here rather than passed in.
+    snprintf(dev_name, sizeof(dev_name), DEVICE_NAME " %c%c%c%c",
+             mac_str[12], mac_str[13], mac_str[15], mac_str[16]);
+    NimBLEDevice::setDeviceName(dev_name);
+
     server = NimBLEDevice::createServer();
     static ServerCallbacks serverCb;
     server->setCallbacks(&serverCb);
@@ -438,7 +454,7 @@ ble_state_t ble_get_state(void) {
 }
 
 const char* ble_get_device_name(void) {
-    return DEVICE_NAME;
+    return dev_name;
 }
 
 const char* ble_get_mac_address(void) {

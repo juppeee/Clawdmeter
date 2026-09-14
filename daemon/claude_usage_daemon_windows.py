@@ -330,7 +330,9 @@ def discover_bonded_address() -> str | None:
         return None
     command = (
         "Get-PnpDevice -Class Bluetooth -ErrorAction SilentlyContinue | "
-        f"Where-Object {{ $_.FriendlyName -eq '{DEVICE_NAME}' }} | "
+        # -like, not -eq: boards append the last two bytes of their MAC
+        # ("Clawdmeter 35F9") so several of them stay distinguishable.
+        f"Where-Object {{ $_.FriendlyName -like '{DEVICE_NAME}*' }} | "
         "Select-Object -ExpandProperty InstanceId"
     )
     try:

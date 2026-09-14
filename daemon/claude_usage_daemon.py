@@ -249,12 +249,14 @@ async def retrieve_connected_macos(skip_addr: str | None = None):
         if _ok(p):
             return _wrap(p)
 
-    # 2. Generic HID service — require an exact name match.
+    # 2. Generic HID service — require a name match. Prefix, not equality:
+    # boards append the last two bytes of their MAC ("Clawdmeter 35F9") so
+    # several of them in one room stay distinguishable.
     hid = cm.retrieveConnectedPeripheralsWithServices_(
         [CBUUID.UUIDWithString_("1812")]
     )
     for p in hid or []:
-        if _ok(p) and p.name() == DEVICE_NAME:
+        if _ok(p) and (p.name() or "").startswith(DEVICE_NAME):
             return _wrap(p)
 
     return None
@@ -637,7 +639,8 @@ def unpair_macos() -> bool:
     #   address: 28-84-85-55-5c-3d, ... name: "Clawdmeter", ...
     addr = None
     for line in out.splitlines():
-        if f'name: "{DEVICE_NAME}"' in line:
+        # Prefix, not the full quoted name: boards append their MAC suffix.
+        if f'name: "{DEVICE_NAME}' in line:
             m = re.search(r"address:\s*([0-9a-fA-F:-]+)", line)
             if m:
                 addr = m.group(1)
