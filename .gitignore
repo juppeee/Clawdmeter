@@ -24,3 +24,9 @@ __pycache__/
 
 # Local flash backups and dumps
 Original/
+
+# Packaged releases (daemon installer, prebuilt firmware + bundled esptool).
+# Build artifacts, and the firmware bundle is ~16 MB — keeping revisions of it
+# in history would cost every clone, forever. Attach them to a GitHub Release
+# instead. Rebuild: see the ZIP contents listed in each package's README.
+dist/
