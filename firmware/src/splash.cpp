@@ -193,6 +193,12 @@ static void render_frame(const uint8_t *cells, const uint16_t *palette) {
 }
 #endif
 
+#if !SPLASH_DIRECT_DRAW
+// PSRAM boards flush via LVGL's own canvas render, not the direct-draw path,
+// so there's no refresh pass to track — stub it out for the flush callback.
+void splash_note_refresh_done(void) {}
+#endif
+
 // ---- Mini creature: a small animated creature for embedding in other screens
 //      (e.g. the idle "sleeping" indicator). Self-contained — its own canvas and
 //      buffer, independent of the full-screen splash above. ----
