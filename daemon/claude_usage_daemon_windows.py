@@ -199,9 +199,21 @@ async def poll_api(token: str) -> dict | None:
         log(f"API HTTP {resp.status_code}: {resp.text[:200]}")
         raise AuthError(resp.status_code)
     if resp.status_code >= 400:
-        # Other 4xx/5xx (rate-limit, server error) — transient, not a token issue.
-        log(f"API HTTP {resp.status_code}: {resp.text[:200]}")
-        return None
+        # A 429 means the plan's limit is used up — which rejects this probe
+        # too. It still carries the rate-limit headers, though, and that is the
+        # one moment the device most needs them: dropping the response here
+        # left the display frozen on the last value and then flipped it to
+        # the idle "no data" screen, exactly when usage hit 100 %. So a 429
+        # WITH the headers is reported like any other reading. Everything
+        # else (5xx, a 429 without headers) is transient: skip this tick.
+        has_limits = bool(
+            resp.headers.get("anthropic-ratelimit-unified-5h-utilization")
+            or resp.headers.get("anthropic-ratelimit-unified-overage-utilization")
+        )
+        if resp.status_code != 429 or not has_limits:
+            log(f"API HTTP {resp.status_code}: {resp.text[:200]}")
+            return None
+        log("API HTTP 429: limit reached, reporting it from the response headers")
 
     def hdr(name: str, default: str = "0") -> str:
         return resp.headers.get(name, default)
@@ -217,8 +229,10 @@ async def poll_api(token: str) -> dict | None:
         return int(round(mins)) if mins > 0 else 0
 
     def pct(util: str) -> int:
+        # Clamped: at the limit the reported utilization can edge past 1.0,
+        # and "103 %" on a bar that ends at 100 only reads as a glitch.
         try:
-            return int(round(float(util) * 100))
+            return max(0, min(100, int(round(float(util) * 100))))
         except ValueError:
             return 0
 
