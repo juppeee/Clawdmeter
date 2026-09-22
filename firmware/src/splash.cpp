@@ -496,3 +496,7 @@ void splash_hide(void) {
 lv_obj_t* splash_get_root(void) {
     return splash_container;
 }
+
+#if !SPLASH_DIRECT_DRAW
+void splash_note_refresh_done(void) {}
+#endif
