@@ -43,6 +43,7 @@ existing AMOLED-1.8 port has a ~40-line FT3168 reader you can model on.
 |-------------------|----------------|
 | `input_hal_init`  | `pinMode()` for the physical button GPIOs. |
 | `input_hal_is_held` | Return true while the button is held. Active-low pull-up GPIOs are typical. Boards lacking a secondary button must return `false` for `INPUT_BTN_SECONDARY`. |
+| `input_hal_encoder_steps` | *Optional.* Detents turned on a rotary ring since the last call, positive = "next". Only boards with `caps.has_encoder` implement it; a weak default in `hal/input_hal_defaults.cpp` returns 0 for the rest. Count detents off the main loop (a timer or interrupt) — a long LVGL render would otherwise swallow them. Called from `loop()`, so it may touch the I2C bus (the Knob-1.8 fires a haptic click from here). |
 
 The PWR button is **not** here — it belongs to `power_hal` because on
 several boards (including all current reference ports) it's tied to the
@@ -75,7 +76,10 @@ Boards with no PMU and no PWR button can return zero/false from all five
 and `.height`. The current breakpoints are:
 
 - **`height >= 460`** → "large" layout, tuned for 480×480.
-- **otherwise** → "compact" layout, tuned for 368×448.
+- **`height >= 300`** → "compact" layout, tuned for 368×448.
+- **otherwise** → "small" layout, tuned for 240×240.
+- **`is_round`** → the round layout is applied on top of the size
+  breakpoint, tuned for 360×360: ring gauges, centred text, no corner logo.
 
 A new screen size lands on the closer breakpoint and renders correctly
 without pixel-perfect alignment. If you want polish, add another branch

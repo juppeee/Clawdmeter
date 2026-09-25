@@ -24,6 +24,19 @@ Keep the two in sync. The pattern in `caps.cpp` does this for you:
 | `BOARD_HAS_BATTERY`            | 0       | Whether PMU battery measurement is meaningful on this board. UI hides the battery indicator when false. |
 | `BOARD_HAS_IO_EXPANDER`        | 0       | Whether an IO expander gates display / touch reset lines. Doesn't directly gate any code path — but signals to the porter that `board_init()` must release the expander before `display_hal_init()`. |
 
+## Runtime-only fields
+
+These `BoardCaps` fields have no `BOARD_HAS_*` macro — they only change
+shared-code behaviour, never what a board compiles. Leave them out of
+`caps.cpp` and they default to false / nullptr.
+
+| Field               | What it changes |
+|---------------------|-----------------|
+| `has_encoder`       | The board has a rotary ring or knob and implements `input_hal_encoder_steps()`. `main.cpp` maps each detent to the PWR short press, in both directions: next/previous animation on the splash, brighter/darker on the usage view. |
+| `is_round`          | Circular panel. `compute_layout()` switches to the round layout: ring gauges instead of bar panels, no corner logo, everything kept inside the inscribed circle. |
+| `touch_keys`        | The board's keys can't be reached, so the touchscreen takes their jobs: hold = Space (voice-mode PTT) while a host is connected, double tap = Shift+Tab, hold 3–6 s + release while disconnected = pairing. A single tap still toggles screens, but only after the 300 ms double-tap window. |
+| `pair_key`          | How the pairing hint names the hold-to-pair control (`"hold <pair_key> for 3 seconds"`). `nullptr` means `"the power button"`. |
+
 ## Build-flag macros
 
 `BOARD_HAS_PSRAM` is set as a `-D` build flag in `platformio.ini` (not in `board.h`) on chips with external PSRAM wired up. Shared code (`main.cpp`, `splash.cpp`) and per-board display drivers use it to choose between `MALLOC_CAP_SPIRAM` (large buffers) and `MALLOC_CAP_INTERNAL` (small buffers, partial-render LVGL, splash canvas capped at ~80 KB, screenshot capture disabled). New ESP32-C6 / ESP32-C3 ports must leave this undefined.

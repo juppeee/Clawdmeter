@@ -201,6 +201,97 @@ static void check_serial_cmd() {
 // reset line). Called exactly once at the start of setup().
 extern "C" void board_init(void);
 
+// ---- Touch as keys (BoardCaps.touch_keys) ----
+// The same three jobs the buttons do elsewhere, driven by ui.cpp's gestures:
+//   double tap          → Shift+Tab, one keystroke
+//   hold                → Space held until release (voice-mode PTT) — only
+//                         while a host is connected, there's nobody to type to
+//                         otherwise
+//   hold 3-6 s, release → pairing, only once the link has been down for
+//                         TOUCH_PAIR_DOWN_MS (where the hold isn't Space).
+//                         Same window as the PWR gesture: 3 s to arm,
+//                         disarmed past 6 s.
+// The down-time guard matters: after a reflash or a radio hiccup the host
+// reconnects in bursts, and a talk-hold landing in one of the gaps would
+// otherwise wipe the bond — leaving the host retrying with a key the board no
+// longer has. Counting from boot too, so it also covers the first seconds
+// after a restart.
+#define TOUCH_PAIR_MIN_MS  3000
+#define TOUCH_PAIR_MAX_MS  6000
+#define TOUCH_PAIR_DOWN_MS 15000
+
+static bool     touch_space_down = false;
+static uint32_t ble_down_since_ms = 0;   // last time the link went down (boot = 0)
+
+static void touch_double_tap(void) {
+    ble_keyboard_press(0x2B, 0x02);  // HID Tab + LEFT_SHIFT
+    ble_keyboard_release();
+}
+
+static void touch_hold_start(void) {
+    if (ble_get_state() != BLE_STATE_CONNECTED) return;
+    ble_keyboard_press(0x2C, 0);     // HID Space, no mods
+    touch_space_down = true;
+}
+
+// Whether this hold could pair at all — the link has to be down, and down long
+// enough that a reconnect burst isn't mistaken for a dead bond.
+static bool touch_pair_eligible(void) {
+    return ble_get_state() != BLE_STATE_CONNECTED &&
+           millis() - ble_down_since_ms >= TOUCH_PAIR_DOWN_MS;
+}
+
+// Same feedback the PWR gesture gets in pair_tick(), driven off the live hold
+// instead of a button edge: on this board the gesture is a finger on the glass
+// with nothing else to go by.
+static void touch_hold_tick(uint32_t held_ms) {
+    static bool announced = false;
+    if (touch_space_down) return;          // that hold is push-to-talk, not pairing
+    if (!touch_pair_eligible()) {
+        // Say so rather than ignoring the hold in silence: refusing to pair
+        // while the link is merely mid-reconnect is deliberate, but from the
+        // outside it looks identical to a dead gesture.
+        ui_set_pair_state(PAIR_UI_NOT_YET);
+        return;
+    }
+    if (held_ms >= TOUCH_PAIR_MAX_MS) {
+        ui_set_pair_state(PAIR_UI_TOO_LONG);
+    } else if (held_ms >= TOUCH_PAIR_MIN_MS) {
+        if (!announced) { sound_hal_play_pair_armed(); announced = true; }
+        ui_set_pair_state(PAIR_UI_ARMED);
+    } else {
+        announced = false;
+        ui_set_pair_state(PAIR_UI_HOLDING);
+    }
+}
+
+static void touch_hold_end(uint32_t held_ms) {
+    if (touch_space_down) {
+        ble_keyboard_release();
+        touch_space_down = false;
+        return;
+    }
+    // Anything already on screen — "Release and retry", "Not yet" — stays for
+    // its two seconds; only a hold too short to have meant anything is wiped
+    // right away, since "Keep holding" after the finger is gone reads as a bug.
+    if (held_ms < TOUCH_PAIR_MIN_MS) {
+        ui_set_pair_state(PAIR_UI_NONE);
+        return;
+    }
+    if (held_ms >= TOUCH_PAIR_MAX_MS) return;
+    if (!touch_pair_eligible()) {
+        Serial.println("Pair: touch hold ignored — link not down long enough");
+        return;
+    }
+    Serial.println("Pair: touch held in window — clearing bonds, advertising");
+    ble_clear_bonds();
+    ui_set_pair_state(PAIR_UI_DONE);   // self-clears after a moment
+    sound_hal_play_paired();
+}
+
+static const UiTouchKeys touch_keys = {touch_double_tap, touch_hold_start,
+                                       touch_hold_tick, touch_hold_end};
+
 void setup() {
     Serial.begin(115200);
     delay(300);
@@ -243,6 +334,7 @@ void setup() {
     input_hal_init();
 
     ui_init();
+    if (board_caps().touch_keys) ui_set_touch_keys(&touch_keys);
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging());
     ui_show_screen(SCREEN_SPLASH);
@@ -273,6 +365,7 @@ static void pair_tick(void) {
         pair_state = PAIR_PENDING;
         pair_long_seen_ms = millis();
         (void)power_hal_pwr_released();  // drain any stale release edge
+        ui_set_pair_state(PAIR_UI_HOLDING);
         Serial.println("PWR long-press: hold to ~3s then release to pair");
         return;
     }
@@ -282,8 +375,11 @@ static void pair_tick(void) {
         if (pair_state == PAIR_ARMED) {
             Serial.println("Pair: released in window — clearing bonds, advertising");
             ble_clear_bonds();
+            ui_set_pair_state(PAIR_UI_DONE);      // self-clears after a moment
+            sound_hal_play_paired();
         } else {
             Serial.println("Pair: released too early — cancelled");
+            ui_set_pair_state(PAIR_UI_NONE);
         }
         pair_state = PAIR_IDLE;
         return;
@@ -292,11 +388,23 @@ static void pair_tick(void) {
     uint32_t held = millis() - pair_long_seen_ms;
     if (pair_state == PAIR_PENDING && held >= PAIR_ARM_AFTER_LONG_MS) {
         pair_state = PAIR_ARMED;
+        // The one moment that actually needs announcing: from here a release
+        // pairs. Screen and speaker both say so, because the finger is on the
+        // button and the eyes may not be on the panel.
+        ui_set_pair_state(PAIR_UI_ARMED);
+        sound_hal_play_pair_armed();
         Serial.println("Pair: armed — release to pair");
     } else if (pair_state == PAIR_ARMED && held >= PAIR_DISARM_AFTER_LONG_MS) {
         pair_state = PAIR_IDLE;  // power-off territory; don't pair
+        ui_set_pair_state(PAIR_UI_TOO_LONG);
         Serial.println("Pair: disarmed (holding toward power-off)");
+        return;
     }
+
+    // Feed the overlay's watchdog for as long as the gesture is live. Without
+    // this the button path would announce a state once and watch it time out
+    // mid-hold — the armed window alone is three seconds long.
+    ui_set_pair_state(pair_state == PAIR_ARMED ? PAIR_UI_ARMED : PAIR_UI_HOLDING);
 }
 
 void loop() {
@@ -362,6 +470,21 @@ void loop() {
             }
         }
 
+        // Rotary ring: the PWR short press in both directions — next/previous
+        // animation on the splash, brighter/darker on the usage view. The
+        // first turn from sleep only wakes, like a first button press.
+        if (board_caps().has_encoder) {
+            int steps = input_hal_encoder_steps();
+            if (steps != 0 && !idle_consume_wake_press()) {
+                const bool on_splash = ui_get_current_screen() == SCREEN_SPLASH;
+                const int  dir = steps > 0 ? 1 : -1;
+                for (int n = steps > 0 ? steps : -steps; n > 0; n--) {
+                    if (on_splash) dir > 0 ? splash_next() : splash_prev();
+                    else           brightness_step(dir);
+                }
+            }
+        }
+
         pair_tick();
     }
 
@@ -406,9 +529,15 @@ void loop() {
 
     ble_state_t bs = ble_get_state();
     if (bs != last_ble_state) {
+        if (last_ble_state == BLE_STATE_CONNECTED) ble_down_since_ms = millis();
         last_ble_state = bs;
         ui_update_ble_status(bs, ble_get_device_name(), ble_get_mac_address());
     }
+
+    // Polled rather than event-driven: this goes true on a failed handshake but
+    // false again by simply timing out, which no BLE event announces. The UI
+    // ignores repeats.
+    ui_set_pairing_rejected(ble_pairing_rejected());
 
     static int  last_pct      = -2;
     static bool last_charging = false;
