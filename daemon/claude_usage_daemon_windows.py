@@ -316,7 +316,7 @@ def _mac_from_pnp_instance_id(instance_id: str) -> str | None:
         BTHLE\\DEV_98A316A5D706\\7&B8081D1&0&98A316A5D706  ->  98:A3:16:A5:D7:06
 
     Returns None when no ``DEV_<12 hex>`` token is present. Pure — the
-    subprocess that produces the instance id lives in discover_bonded_address().
+    subprocess that produces the instance ids lives in discover_bonded_addresses().
     """
     m = re.search(r"DEV_([0-9A-Fa-f]{12})(?![0-9A-Fa-f])", instance_id)
     if not m:
@@ -325,23 +325,55 @@ def _mac_from_pnp_instance_id(instance_id: str) -> str | None:
     return ":".join(h[i:i + 2] for i in range(0, 12, 2))
 
 
-def discover_bonded_address() -> str | None:
-    """Return the BLE address of the bonded Clawdmeter, or None.
+def read_device_preference() -> str | None:
+    """Read the `device` option from the config file, or None.
+
+    Names which board this machine should drive when several are paired. Takes
+    either the suffix the board advertises ("F629", as in "Clawdmeter F629") or
+    a full address ("28:84:85:4B:F6:29"). Matching is on the hex digits alone,
+    so colons and case don't matter.
+    """
+    try:
+        if CONFIG_FILE.exists():
+            for line in CONFIG_FILE.read_text().splitlines():
+                line = line.split("#", 1)[0].strip()
+                if "=" not in line:
+                    continue
+                key, val = line.split("=", 1)
+                if key.strip().lower() == "device":
+                    val = re.sub(r"[^0-9A-Fa-f]", "", val).upper()
+                    if val:
+                        return val
+    except OSError:
+        pass
+    return None
+
+
+def discover_bonded_addresses() -> list[str]:
+    """Return every bonded Clawdmeter address known to this machine.
 
     A device that is paired AND connected to Windows stops advertising, so
     BleakScanner can't see it (the steady state once paired — see
     README-windows.md). WinRT can still connect to it directly by address, so
-    we recover that address from the OS:
+    we recover the addresses from the OS:
 
     1. CLAWDMETER_BLE_ADDRESS env override (skips discovery — testing / pinning).
     2. Windows PnP table, filtered to the device's FriendlyName.
 
-    Non-Windows or any failure returns None.
+    ALL matches are returned, not just the first. Boards advertise their own
+    name suffix now, so a desk can hold several — and taking the first row of
+    that list meant one powered-off board could keep the daemon retrying it
+    forever while a perfectly reachable one sat next to it. The caller walks
+    this list on failure. A `device` line in the config is honoured by sorting
+    its match to the front rather than by hiding the rest, so a typo degrades
+    into "wrong order" instead of "no device at all".
+
+    Non-Windows or any failure returns an empty list.
     """
     if override := os.environ.get("CLAWDMETER_BLE_ADDRESS"):
-        return override.strip().upper()
+        return [override.strip().upper()]
     if sys.platform != "win32":
-        return None
+        return []
     command = (
         "Get-PnpDevice -Class Bluetooth -ErrorAction SilentlyContinue | "
         # -like, not -eq: boards append the last two bytes of their MAC
@@ -359,25 +391,46 @@ def discover_bonded_address() -> str | None:
         )
     except (OSError, subprocess.SubprocessError) as e:
         log(f"Bonded-address lookup failed: {e}")
-        return None
+        return []
+    found: list[str] = []
     for line in result.stdout.splitlines():
-        if mac := _mac_from_pnp_instance_id(line):
-            return mac
-    return None
+        if (mac := _mac_from_pnp_instance_id(line)) and mac not in found:
+            found.append(mac)
+    if (want := read_device_preference()) and len(found) > 1:
+        # Endswith, so "F629" matches 28:84:85:4B:F6:29 — that suffix is what
+        # the board puts in its advertised name and what the user reads off it.
+        found.sort(key=lambda m: not m.replace(":", "").endswith(want))
+    return found
+
+
+# Which bonded device to try next. Advanced by the main loop after a failed
+# attempt, so an unreachable board is stepped over instead of retried forever;
+# reset on a successful session so the working one stays the default.
+_candidate_index = 0
+
+
+def rotate_candidate() -> None:
+    global _candidate_index
+    _candidate_index += 1
 
 
 async def acquire_target():
     """Return a connectable handle for the Clawdmeter, or None.
 
-    Targets only the device bonded to THIS machine (via the PnP table /
+    Targets only devices bonded to THIS machine (via the PnP table /
     CLAWDMETER_BLE_ADDRESS) — it never scans for a nearby device by name, so it
     can't grab a stranger's or the wrong nearby unit. The device must be paired
     with Windows once first (the documented setup). Returns a BLEDevice or None.
     """
-    address = discover_bonded_address()
-    if not address:
+    addresses = discover_bonded_addresses()
+    if not addresses:
         return None
-    log(f"Not advertising; connecting to bonded address {address}")
+    address = addresses[_candidate_index % len(addresses)]
+    if len(addresses) > 1:
+        log(f"Not advertising; connecting to bonded address {address} "
+            f"({(_candidate_index % len(addresses)) + 1} of {len(addresses)} paired)")
+    else:
+        log(f"Not advertising; connecting to bonded address {address}")
     # CRITICAL: hand BleakClient a BLEDevice, not the bare address string. WinRT's
     # connect() resolves a bare string via an advertisement scan (find_device_by_address)
     # — which always fails for a bonded device that has stopped advertising, the very
@@ -729,6 +782,10 @@ async def main(tray_state=None) -> None:
 
         ok = await connect_and_run(device, stop_event, tray_state)
         if not ok:
+            # Step to the next paired board. With one paired device this is a
+            # no-op; with several it stops an absent one from holding the
+            # daemon hostage while a reachable board waits beside it.
+            rotate_candidate()
             # Fast-reconnect regime: had/attempted a link that dropped — retry quickly
             if tray_state:
                 tray_state.set_scanning()
@@ -742,6 +799,9 @@ async def main(tray_state=None) -> None:
             # Successful session — reset reconnect counter to floor; search_backoff also reset
             reconnect_backoff = 1
             search_backoff = 1
+            # The rotation index is deliberately left alone: it already points
+            # at the board that just worked, so a dropped link reconnects to
+            # the same one instead of starting the walk over.
 
 
 if __name__ == "__main__":

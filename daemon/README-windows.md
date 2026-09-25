@@ -119,6 +119,15 @@ python daemon\claude_usage_daemon_windows.py
   see it. The daemon detects this and connects directly to the device's address (recovered from
   the Windows PnP table). The 8-second scan that precedes the fallback happens once per session.
   Set `CLAWDMETER_BLE_ADDRESS=AA:BB:CC:DD:EE:FF` to pin the address and skip PnP lookup.
+  Note that this override beats everything else, including the PnP table — so a stale value
+  keeps the daemon retrying a board you have long since unpaired, and the log will show it
+  dialling an address Windows no longer lists. Clear the variable to hand discovery back.
+- **Several boards paired with one PC?** Each advertises its own suffix (`Clawdmeter F629`),
+  and the daemon walks every paired board rather than fixing on the first row of the PnP
+  table: a failed connection steps to the next, wrapping around, so a board that is switched
+  off or out of range cannot hold the daemon hostage. A successful link stays put. To say
+  which one this machine should prefer, put its suffix (or full address) in the config:
+  `device = F629`. The others remain as fallbacks, so a typo only changes the order.
 - After `Connected`, the daemon polls the Anthropic API immediately and sends the first
   payload within a few seconds of connect (warm token path). With a valid, non-expired token
   the device should leave its waiting screen and show session + weekly percentages within

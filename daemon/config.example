@@ -30,3 +30,13 @@ chime = off
 #   12   = show the clock, forced 12-hour  (e.g. 6:28 PM)
 #   24   = show the clock, forced 24-hour  (e.g. 18:28)
 clock = off
+
+# Which board this machine should drive, when several are paired with it
+# (Windows only). Each board advertises its own suffix — "Clawdmeter F629" —
+# and that suffix, or the full address, is what goes here:
+#   device = F629
+#   device = 28:84:85:4B:F6:29
+# Unset (default) = whichever paired board answers first. The daemon tries the
+# named one first and falls back to the others if it does not respond, so a
+# board that is switched off or out of range never blocks the rest.
+# device =
