@@ -219,6 +219,7 @@ static lv_obj_t* lbl_anim;      // status line: connection state + whimsical idl
 
 // ---- Battery indicator (shared, on top) ----
 static lv_obj_t* battery_img;
+static lv_obj_t* lbl_batt_pct = nullptr;   // "85%" beside the icon (large layout only)
 static lv_obj_t* logo_img;
 static lv_image_dsc_t battery_dscs[5];  // empty, low, medium, full, charging
 
@@ -587,6 +588,13 @@ void ui_init(void) {
     if (!board_caps().has_battery) {
         lv_obj_del(battery_img);
         battery_img = nullptr;
+    } else if (L.scr_h >= 460) {
+        // Only the large layout has room between the title and the icon.
+        lbl_batt_pct = lv_label_create(scr);
+        lv_label_set_text(lbl_batt_pct, "");
+        lv_obj_set_style_text_font(lbl_batt_pct, &font_styrene_20, 0);
+        lv_obj_set_style_text_color(lbl_batt_pct, COL_DIM, 0);
+        lv_obj_align_to(lbl_batt_pct, battery_img, LV_ALIGN_OUT_LEFT_MID, -6, 0);
     }
 }
 
@@ -761,6 +769,10 @@ static void apply_battery_visibility(void) {
     if (!battery_img) return;
     if (current_screen == SCREEN_SPLASH) lv_obj_add_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
     else                                  lv_obj_clear_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
+    if (lbl_batt_pct) {
+        if (current_screen == SCREEN_SPLASH) lv_obj_add_flag(lbl_batt_pct, LV_OBJ_FLAG_HIDDEN);
+        else                                  lv_obj_clear_flag(lbl_batt_pct, LV_OBJ_FLAG_HIDDEN);
+    }
 }
 
 static void global_click_cb(lv_event_t* e) {
@@ -826,5 +838,10 @@ void ui_update_battery(int percent, bool charging) {
         idx = 3;
     }
     lv_image_set_src(battery_img, &battery_dscs[idx]);
+    if (lbl_batt_pct) {
+        if (percent >= 0) lv_label_set_text_fmt(lbl_batt_pct, "%d%%", percent);
+        else              lv_label_set_text(lbl_batt_pct, "");
+        lv_obj_align_to(lbl_batt_pct, battery_img, LV_ALIGN_OUT_LEFT_MID, -6, 0);
+    }
     apply_battery_visibility();
 }
