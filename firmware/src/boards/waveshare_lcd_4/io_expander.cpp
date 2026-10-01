@@ -149,10 +149,12 @@ void io_expander_init(void) {
 void io_expander_set_brightness(uint8_t level) {
     if (!expander_addr) return;
     if (is_ch32) {
-        // Duty 0..255, higher = brighter (Waveshare's ioexpander demo).
+        // The register is inverted: higher = DIMMER (seen on a V4.0 board —
+        // the "dimmed" on-battery level came out brighter than full on USB).
+        // Callers pass 0..255 with 255 = full brightness, so flip it here.
         static int last = -1;
         if (level == last) return;   // fades call this every 20 ms
-        if (iox_write(CH32_REG_PWM, level)) last = level;
+        if (iox_write(CH32_REG_PWM, 255 - level)) last = level;
         return;
     }
     // TCA revision: BL_EN is on/off only.

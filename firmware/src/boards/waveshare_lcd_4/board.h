@@ -65,7 +65,7 @@
 #define IO_EXPANDER_ADDR     0x24
 #define CH32_REG_DIRECTION   0x02  // 1 = output
 #define CH32_REG_OUTPUT      0x03
-#define CH32_REG_PWM         0x05  // backlight PWM duty 0..255, higher = brighter
+#define CH32_REG_PWM         0x05  // backlight PWM 0..255, inverted: higher = dimmer
 #define CH32_REG_ADC         0x06  // battery ADC, 2 bytes little-endian, 10-bit
 #define CH32_ADC_REF_V       3.3f
 #define CH32_BAT_DIVIDER     3.0f  // VBAT = ADC volts × 3 (Waveshare WS_CH32_IO)
