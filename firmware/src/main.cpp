@@ -113,6 +113,10 @@ static bool parse_json(const char* json, UsageData* out) {
     strlcpy(out->status, doc["st"] | "unknown", sizeof(out->status));
     // as<bool>, not `| false`: daemons send 1, and `|` only accepts a JSON bool.
     out->chime = doc["c"].as<bool>();   // absent (old daemon / chime off) → stay silent
+    out->beep = doc["b"].as<bool>();
+    strlcpy(out->alert_msg, doc["m"] | "", sizeof(out->alert_msg));
+    strlcpy(out->alert_proj, doc["p"] | "", sizeof(out->alert_proj));
+    out->alert_clear = doc["x"].as<bool>();
     const char* acct = doc["acct"] | "pro";
     out->enterprise = (strcmp(acct, "ent") == 0);
     out->time_pct = doc["tp"] | 0;
@@ -384,6 +388,15 @@ void loop() {
                 Serial.println("session reset detected — chime");
                 sound_hal_play_reset();
             }
+            // Claude Code hook fired on the host. Not gated on `chime`: the daemon
+            // only sets `b` when that hook ran.
+            if (usage.beep) {
+                Serial.println("attention — chime");
+                sound_hal_play_reset();
+                idle_note_activity();
+            }
+            if (usage.alert_msg[0]) ui_show_alert(usage.alert_proj, usage.alert_msg);
+            if (usage.alert_clear) ui_hide_alert();
             if (g_after != g_before) {
                 Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
                     g_before, g_after, usage.session_pct);

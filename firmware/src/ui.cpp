@@ -540,6 +540,55 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_align(lbl_anim, LV_ALIGN_BOTTOM_MID, 0, L.anim_y);
 }
 
+// ---- Attention card over splash and usage. A child of the screen, not
+// lv_layer_top, so the screenshot snapshot includes it.
+static const uint32_t ALERT_TIMEOUT_MS = 120000;
+static lv_obj_t*   alert_backdrop;
+static lv_obj_t*   lbl_alert_proj;
+static lv_obj_t*   lbl_alert_msg;
+static lv_timer_t* alert_timer;
+
+static void alert_dismiss_cb(lv_event_t* e) { (void)e; ui_hide_alert(); }
+static void alert_timer_cb(lv_timer_t* t)   { (void)t; ui_hide_alert(); }
+
+static void build_alert(lv_obj_t* scr) {
+    alert_backdrop = lv_obj_create(scr);
+    lv_obj_remove_style_all(alert_backdrop);
+    lv_obj_set_size(alert_backdrop, L.scr_w, L.scr_h);
+    lv_obj_set_style_bg_color(alert_backdrop, COL_BG, 0);
+    lv_obj_set_style_bg_opa(alert_backdrop, LV_OPA_70, 0);
+    lv_obj_add_flag(alert_backdrop, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_clear_flag(alert_backdrop, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_add_event_cb(alert_backdrop, alert_dismiss_cb, LV_EVENT_CLICKED, NULL);
+
+    // Same color as the usage panels, so the accent border marks it.
+    lv_obj_t* card = make_panel(alert_backdrop, 0, 0, L.content_w, LV_SIZE_CONTENT);
+    lv_obj_set_style_border_color(card, COL_ACCENT, 0);
+    lv_obj_set_style_border_width(card, 2, 0);
+    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
+    lv_obj_set_style_pad_row(card, L.panel_pad_y, 0);
+    lv_obj_center(card);
+
+    lbl_alert_proj = make_pill(card, "");
+
+    lbl_alert_msg = lv_label_create(card);
+    lv_label_set_long_mode(lbl_alert_msg, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(lbl_alert_msg, lv_pct(100));
+    lv_obj_set_style_text_font(lbl_alert_msg, L.reset_font, 0);
+    lv_obj_set_style_text_color(lbl_alert_msg, COL_TEXT, 0);
+
+    lv_obj_t* hint = lv_label_create(card);
+    lv_label_set_text(hint, "Tap to dismiss");
+    lv_obj_set_width(hint, lv_pct(100));
+    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_RIGHT, 0);
+    lv_obj_set_style_text_font(hint, L.pace_font, 0);
+    lv_obj_set_style_text_color(hint, COL_DIM, 0);
+
+    lv_obj_add_flag(alert_backdrop, LV_OBJ_FLAG_HIDDEN);
+    alert_timer = lv_timer_create(alert_timer_cb, ALERT_TIMEOUT_MS, NULL);
+    lv_timer_pause(alert_timer);
+}
+
 // ======== Public API ========
 
 void ui_init(void) {
@@ -588,6 +637,8 @@ void ui_init(void) {
         lv_obj_del(battery_img);
         battery_img = nullptr;
     }
+
+    build_alert(scr);
 }
 
 void ui_update(const UsageData* data) {
@@ -827,4 +878,20 @@ void ui_update_battery(int percent, bool charging) {
     }
     lv_image_set_src(battery_img, &battery_dscs[idx]);
     apply_battery_visibility();
+}
+
+void ui_show_alert(const char* project, const char* message) {
+    lv_label_set_text(lbl_alert_proj, project);
+    if (project[0]) lv_obj_clear_flag(lbl_alert_proj, LV_OBJ_FLAG_HIDDEN);
+    else            lv_obj_add_flag(lbl_alert_proj, LV_OBJ_FLAG_HIDDEN);
+    lv_label_set_text(lbl_alert_msg, message);
+    lv_obj_move_foreground(alert_backdrop);
+    lv_obj_clear_flag(alert_backdrop, LV_OBJ_FLAG_HIDDEN);
+    lv_timer_reset(alert_timer);
+    lv_timer_resume(alert_timer);
+}
+
+void ui_hide_alert(void) {
+    lv_obj_add_flag(alert_backdrop, LV_OBJ_FLAG_HIDDEN);
+    lv_timer_pause(alert_timer);
 }

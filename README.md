@@ -85,6 +85,34 @@ launchctl unload ~/Library/LaunchAgents/com.user.claude-usage-daemon.plist  # st
 launchctl load -w ~/Library/LaunchAgents/com.user.claude-usage-daemon.plist # start
 ```
 
+### Attention alerts (optional)
+
+The device can beep and show a card when a Claude Code session is waiting on you: a permission prompt, a question, or the idle prompt after a reply. Add these hooks to `~/.claude/settings.json` (merge them into any hook arrays you already have) and point the path at your checkout. The script needs `jq`, which recent macOS ships as `/usr/bin/jq`; otherwise run `brew install jq`.
+
+```json
+{
+  "hooks": {
+    "Notification": [
+      { "matcher": "permission_prompt|idle_prompt|elicitation_dialog",
+        "hooks": [{ "type": "command", "command": "/path/to/Clawdmeter/daemon/attention-hook.sh alert" }] }
+    ],
+    "PreToolUse": [
+      { "matcher": "AskUserQuestion",
+        "hooks": [{ "type": "command", "command": "/path/to/Clawdmeter/daemon/attention-hook.sh alert" }] }
+    ],
+    "UserPromptSubmit": [
+      { "hooks": [{ "type": "command", "command": "/path/to/Clawdmeter/daemon/attention-hook.sh clear" }] }
+    ],
+    "PostToolUse": [
+      { "matcher": "*",
+        "hooks": [{ "type": "command", "command": "/path/to/Clawdmeter/daemon/attention-hook.sh clear" }] }
+    ]
+  }
+}
+```
+
+The card shows the project folder and the message. It closes when you tap it, after 2 minutes, or when that session moves on (you answer, approve a tool, or send a prompt). It shows up about 5 seconds after Claude Code raises the notification, because the daemon checks once per tick. For now only the macOS daemon handles these alerts.
+
 ## Linux installation
 
 ### Flash the firmware
@@ -233,6 +261,8 @@ JSON payload format (written to RX):
 ```
 
 Fields: `s` = session %, `sr` = session reset (minutes), `w` = weekly %, `wr` = weekly reset (minutes), `st` = status, `ok` = success flag.
+
+Optional attention fields are only sent as part of a full payload, because the firmware treats every write as a complete update: `b` = beep once, `m` = card message (ASCII), `p` = project shown on the card, `x` = hide the card.
 
 ## Development
 
