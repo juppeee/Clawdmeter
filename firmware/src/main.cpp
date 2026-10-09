@@ -392,9 +392,12 @@ void loop() {
             if (usage.beep) {
                 Serial.println("attention — chime");
                 sound_hal_play_reset();
-                idle_note_activity();
             }
-            if (usage.alert_msg[0]) ui_show_alert(usage.alert_msg);
+            if (usage.alert_msg[0]) {
+                Serial.println("attention — mascot");
+                idle_note_activity();
+                ui_show_alert(usage.alert_msg);
+            }
             if (usage.alert_clear) ui_hide_alert();
             if (g_after != g_before) {
                 Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",

@@ -219,7 +219,7 @@ When a Claude Code session is waiting on you (a permission prompt, a question, o
 }
 ```
 
-Clawd walks back to his corner when you tap the screen, after 2 minutes, or when that session moves on (you answer, approve a tool, or send a prompt). He shows up about 5 seconds after Claude Code raises the notification, because the daemon checks once per tick. For now only the macOS daemon handles these alerts.
+Clawd walks back to his corner when you tap the screen, after 2 minutes, or when that session moves on (you answer, approve a tool, or send a prompt). He shows up about 5 seconds after Claude Code raises the notification, because the daemon checks once per tick. To hear a beep as well, set `beep = on` in `~/.config/claude-usage-monitor/config` (the installers ask). For now only the macOS daemon handles these alerts.
 
 ## How it works
 

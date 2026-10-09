@@ -323,8 +323,8 @@ async def discover_target(skip_addr: str | None = None):
     return address
 
 
-def read_chime_setting() -> str:
-    """Read the `chime` option from the config file. One of: off|on.
+def read_onoff_setting(name: str) -> str:
+    """Read an off|on option from the config file.
 
     Defaults to "off" (the device stays silent) so existing setups are
     unaffected until the user opts in.
@@ -336,13 +336,18 @@ def read_chime_setting() -> str:
                 if "=" not in line:
                     continue
                 key, val = line.split("=", 1)
-                if key.strip().lower() == "chime":
+                if key.strip().lower() == name:
                     val = val.strip().lower()
                     if val in ("off", "on"):
                         return val
     except OSError:
         pass
     return "off"
+
+
+def read_chime_setting() -> str:
+    """Read the `chime` option (session-reset chime). One of: off|on."""
+    return read_onoff_setting("chime")
 
 
 def read_clock_setting() -> str:
@@ -860,7 +865,8 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
                 payload, dead = await poll_active()
                 extra = {}
                 if alert_unsent:
-                    extra["b"] = 1
+                    if read_onoff_setting("beep") == "on":
+                        extra["b"] = 1
                     if alert["m"]:
                         extra["m"] = alert["m"]
                 if clear_unsent:
