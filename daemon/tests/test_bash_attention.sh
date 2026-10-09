@@ -51,4 +51,14 @@ CLEAR_UNSENT=0
 check_attention
 check "stale: ignored"                    "$ALERT_SID/$ALERT_UNSENT" "/0"
 
+# mtimes in ns: the clear comes 0.5 s after the alert, inside the same second.
+setmtime() { python3 -c 'import os,sys; os.utime(sys.argv[1], ns=(int(sys.argv[2]),)*2)' "$@"; }
+sec=$(date +%s)
+printf '{"m":"quick","s":"q"}' > "$TMP/attention"; setmtime "$TMP/attention" "${sec}100000000"
+check_attention
+touch "$TMP/clear-q"; setmtime "$TMP/clear-q" "${sec}600000000"
+CLEAR_UNSENT=0 ALERT_UNSENT=0
+check_attention
+check "clear: same second, later"         "$ALERT_SID/$CLEAR_UNSENT" "/1"
+
 exit $fail

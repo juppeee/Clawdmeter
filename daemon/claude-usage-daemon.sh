@@ -194,7 +194,7 @@ check_attention() {
     local f="$ATTN_DIR/attention" now ts parsed sid msg c
     now=$(date +%s)
     if [ -f "$f" ]; then
-        ts=$(date -r "$f" +%s 2>/dev/null || echo 0)
+        ts=$(date -r "$f" +%s%N 2>/dev/null || echo 0)   # ns: a clear can land in the same second
         # Fonts on the device are ASCII only: fold accents, collapse whitespace.
         parsed=$(python3 - "$f" <<'PYEOF'
 import json, sys, unicodedata
@@ -216,14 +216,14 @@ PYEOF
         msg=${parsed#*$'\t'}
         # Skip a stale file (written while the device was away) and a second
         # alert from a session still waiting (AskUserQuestion notifies twice).
-        if (( now - ts < 60 )) && { [ -z "$sid" ] || [ "$sid" != "$ALERT_SID" ]; }; then
+        if (( now - ts / 1000000000 < 60 )) && { [ -z "$sid" ] || [ "$sid" != "$ALERT_SID" ]; }; then
             ALERT_SID=$sid ALERT_TS=$ts ALERT_MSG=$msg ALERT_UNSENT=1 CLEAR_UNSENT=0
         fi
     fi
     for c in "$ATTN_DIR"/clear-*; do
         [ -e "$c" ] || continue
         sid=${c##*/clear-}
-        ts=$(date -r "$c" +%s 2>/dev/null || echo 0)
+        ts=$(date -r "$c" +%s%N 2>/dev/null || echo 0)
         rm -f "$c"
         # Only the alerting session, and only a clear newer than its alert, so
         # another busy session can't end it.
