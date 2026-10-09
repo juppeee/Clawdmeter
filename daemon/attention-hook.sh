@@ -10,8 +10,8 @@ mkdir -p "$D" || exit 0
 case "$1" in
   alert)
     jq -c '{m: (.message // .tool_input.questions[0].question // ""),
-            s: .session_id}' > "$D/attention.tmp" \
-      && mv "$D/attention.tmp" "$D/attention" ;;
+            s: .session_id}' > "$D/attention.$$" \
+      && mv "$D/attention.$$" "$D/attention" ;;
   clear)
     s=$(jq -r '.session_id // empty') && [ -n "$s" ] && touch "$D/clear-$s" ;;
 esac
