@@ -17,9 +17,9 @@ def test_attention_flag(tmp_path):
         assert d.take_attention_flag()["m"] == ""   # bare touch still beeps
         assert not flag.exists()                    # consumed
 
-        flag.write_text(json.dumps({"m": "Você  aprova\na ação?", "p": "proj", "s": "abc"}))
+        flag.write_text(json.dumps({"m": "Você  aprova\na ação?", "s": "abc"}))
         alert = d.take_attention_flag()
-        assert (alert["m"], alert["p"], alert["s"]) == ("Voce aprova a acao?", "proj", "abc")
+        assert (alert["m"], alert["s"]) == ("Voce aprova a acao?", "abc")
         assert d.to_ascii("x" * 200, 120) == "x" * 117 + "..."
 
         flag.touch()
@@ -37,7 +37,7 @@ def test_clears(tmp_path):
 
 
 def test_encode_payload_fits():
-    base = {"s": 4, "ok": True, "b": 1, "p": "proj"}
+    base = {"s": 4, "ok": True, "b": 1}
     short = d.encode_payload({**base, "m": "hi"}, 180)
     assert json.loads(short)["m"] == "hi"
 
@@ -45,5 +45,5 @@ def test_encode_payload_fits():
     assert len(long) <= 120
     assert json.loads(long)["m"].endswith("...")
 
-    tiny = d.encode_payload({**base, "m": "x" * 200}, 30)
-    assert "m" not in json.loads(tiny) and "p" not in json.loads(tiny)
+    tiny = d.encode_payload({**base, "m": "x" * 200}, 26)
+    assert "m" not in json.loads(tiny)

@@ -540,53 +540,28 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_align(lbl_anim, LV_ALIGN_BOTTOM_MID, 0, L.anim_y);
 }
 
-// ---- Attention card over splash and usage. A child of the screen, not
-// lv_layer_top, so the screenshot snapshot includes it.
+// ---- Attention: the mascot walk-on (splash_mascot_attention) plus the
+// message on the status line. Ends on a tap, after 2 minutes, or ui_hide_alert().
 static const uint32_t ALERT_TIMEOUT_MS = 120000;
-static lv_obj_t*   alert_backdrop;
-static lv_obj_t*   lbl_alert_proj;
-static lv_obj_t*   lbl_alert_msg;
+static bool        alert_active = false;
 static lv_timer_t* alert_timer;
 
-static void alert_dismiss_cb(lv_event_t* e) { (void)e; ui_hide_alert(); }
-static void alert_timer_cb(lv_timer_t* t)   { (void)t; ui_hide_alert(); }
+static void alert_timer_cb(lv_timer_t* t) { (void)t; ui_hide_alert(); }
 
-static void build_alert(lv_obj_t* scr) {
-    alert_backdrop = lv_obj_create(scr);
-    lv_obj_remove_style_all(alert_backdrop);
-    lv_obj_set_size(alert_backdrop, L.scr_w, L.scr_h);
-    lv_obj_set_style_bg_color(alert_backdrop, COL_BG, 0);
-    lv_obj_set_style_bg_opa(alert_backdrop, LV_OPA_70, 0);
-    lv_obj_add_flag(alert_backdrop, LV_OBJ_FLAG_CLICKABLE);
-    lv_obj_clear_flag(alert_backdrop, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(alert_backdrop, alert_dismiss_cb, LV_EVENT_CLICKED, NULL);
+// Registered on the input device, so it sees every tap. A tap that dismisses
+// does nothing else.
+static void alert_tap_cb(lv_event_t* e) {
+    if (!alert_active) return;
+    ui_hide_alert();
+    lv_indev_stop_processing((lv_indev_t*)lv_event_get_user_data(e));
+}
 
-    // Same color as the usage panels, so the accent border marks it.
-    lv_obj_t* card = make_panel(alert_backdrop, 0, 0, L.content_w, LV_SIZE_CONTENT);
-    lv_obj_set_style_border_color(card, COL_ACCENT, 0);
-    lv_obj_set_style_border_width(card, 2, 0);
-    lv_obj_set_flex_flow(card, LV_FLEX_FLOW_COLUMN);
-    lv_obj_set_style_pad_row(card, L.panel_pad_y, 0);
-    lv_obj_center(card);
-
-    lbl_alert_proj = make_pill(card, "");
-
-    lbl_alert_msg = lv_label_create(card);
-    lv_label_set_long_mode(lbl_alert_msg, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(lbl_alert_msg, lv_pct(100));
-    lv_obj_set_style_text_font(lbl_alert_msg, L.reset_font, 0);
-    lv_obj_set_style_text_color(lbl_alert_msg, COL_TEXT, 0);
-
-    lv_obj_t* hint = lv_label_create(card);
-    lv_label_set_text(hint, "Tap to dismiss");
-    lv_obj_set_width(hint, lv_pct(100));
-    lv_obj_set_style_text_align(hint, LV_TEXT_ALIGN_RIGHT, 0);
-    lv_obj_set_style_text_font(hint, L.pace_font, 0);
-    lv_obj_set_style_text_color(hint, COL_DIM, 0);
-
-    lv_obj_add_flag(alert_backdrop, LV_OBJ_FLAG_HIDDEN);
+static void init_alert(void) {
     alert_timer = lv_timer_create(alert_timer_cb, ALERT_TIMEOUT_MS, NULL);
     lv_timer_pause(alert_timer);
+    lv_indev_t* indev = lv_indev_get_next(NULL);
+    if (indev) lv_indev_add_event_cb(indev, alert_tap_cb, LV_EVENT_CLICKED, indev);
+    lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
 }
 
 // ======== Public API ========
@@ -638,7 +613,7 @@ void ui_init(void) {
         battery_img = nullptr;
     }
 
-    build_alert(scr);
+    init_alert();
 }
 
 void ui_update(const UsageData* data) {
@@ -777,6 +752,8 @@ void ui_tick_anim(void) {
         }
     }
 
+    if (alert_active) return;          // the status line holds the alert message
+
     if (now - anim_msg_start >= ANIM_MSG_MS) {
         anim_msg_idx = (anim_msg_idx + 1) % ANIM_MSG_COUNT;
         anim_msg_start = now;
@@ -880,18 +857,22 @@ void ui_update_battery(int percent, bool charging) {
     apply_battery_visibility();
 }
 
-void ui_show_alert(const char* project, const char* message) {
-    lv_label_set_text(lbl_alert_proj, project);
-    if (project[0]) lv_obj_clear_flag(lbl_alert_proj, LV_OBJ_FLAG_HIDDEN);
-    else            lv_obj_add_flag(lbl_alert_proj, LV_OBJ_FLAG_HIDDEN);
-    lv_label_set_text(lbl_alert_msg, message);
-    lv_obj_move_foreground(alert_backdrop);
-    lv_obj_clear_flag(alert_backdrop, LV_OBJ_FLAG_HIDDEN);
+void ui_show_alert(const char* message) {
+    alert_active = true;
+    if (current_screen == SCREEN_SPLASH) ui_show_screen(SCREEN_USAGE);
+    splash_mascot_attention(true);
+    lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_SCROLL_CIRCULAR);
+    lv_obj_set_width(lbl_anim, L.content_w);
+    lv_label_set_text(lbl_anim, message);
     lv_timer_reset(alert_timer);
     lv_timer_resume(alert_timer);
 }
 
 void ui_hide_alert(void) {
-    lv_obj_add_flag(alert_backdrop, LV_OBJ_FLAG_HIDDEN);
+    if (!alert_active) return;
+    alert_active = false;
+    splash_mascot_attention(false);
+    lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_WRAP);
+    lv_obj_set_width(lbl_anim, LV_SIZE_CONTENT);
     lv_timer_pause(alert_timer);
 }

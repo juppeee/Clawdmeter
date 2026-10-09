@@ -40,9 +40,9 @@ KEYCHAIN_SERVICE = "Claude Code-credentials"
 DEFAULT_CONFIG_DIR = Path.home() / ".claude"
 SAVED_ADDR_FILE = Path.home() / ".config" / "claude-usage-monitor" / "ble-address"
 CONFIG_FILE = Path.home() / ".config" / "claude-usage-monitor" / "config"
-# Written by Claude Code hooks: `attention` holds {"m", "p", "s"} (message,
-# project, session id) when a session needs the user, and `clear-<session id>`
-# is touched when that session moves on.
+# Written by Claude Code hooks: `attention` holds {"m", "s"} (message, session
+# id) when a session needs the user, and `clear-<session id>` is touched when
+# that session moves on.
 ATTENTION_DIR = Path.home() / ".config" / "claude-usage-monitor"
 ATTENTION_FLAG = ATTENTION_DIR / "attention"
 ATTENTION_MAX_AGE = 60
@@ -626,7 +626,6 @@ def take_attention_flag() -> dict | None:
         data = {}
     return {
         "m": to_ascii(str(data.get("m") or ""), 120),
-        "p": to_ascii(str(data.get("p") or ""), 32),
         "s": str(data.get("s") or ""),
         "t": mtime,
     }
@@ -646,7 +645,7 @@ def take_clears() -> dict[str, float]:
 
 def encode_payload(payload: dict, limit: int) -> bytes:
     """JSON-encode for one write-without-response of at most `limit` bytes.
-    Shortens the alert message, then drops the card fields, until it fits."""
+    Shortens the alert message, then drops it, until it fits."""
     data = json.dumps(payload, separators=(",", ":")).encode()
     msg = payload.get("m", "")
     while len(data) > limit and msg:
@@ -654,7 +653,7 @@ def encode_payload(payload: dict, limit: int) -> bytes:
         payload = {**payload, "m": msg + "..." if msg else ""}
         data = json.dumps(payload, separators=(",", ":")).encode()
     if len(data) > limit:
-        payload = {k: v for k, v in payload.items() if k not in ("m", "p")}
+        payload = {k: v for k, v in payload.items() if k != "m"}
         data = json.dumps(payload, separators=(",", ":")).encode()
     return data
 
@@ -863,7 +862,7 @@ async def connect_and_run(target, stop_event: asyncio.Event) -> bool:
                 if alert_unsent:
                     extra["b"] = 1
                     if alert["m"]:
-                        extra.update(m=alert["m"], p=alert["p"])
+                        extra["m"] = alert["m"]
                 if clear_unsent:
                     extra["x"] = 1
                 if payload is not None:
