@@ -220,7 +220,7 @@ static lv_obj_t* lbl_anim;      // status line: connection state + whimsical idl
 // ---- Battery indicator (shared, on top) ----
 static lv_obj_t* battery_img;
 static lv_obj_t* logo_img;
-static lv_image_dsc_t battery_dscs[5];  // empty, low, medium, full, charging
+static lv_image_dsc_t battery_dscs[6];  // empty, low, medium, full, charging, USB-C (no battery)
 
 // ---- Live-data freshness → which usage sub-view to show ----
 // usage panels when data is flowing, an idle "Zzz" screen when the host is
@@ -377,6 +377,7 @@ static void init_battery_icons(void) {
         init_icon_dsc_rgb565a8(&battery_dscs[2], ICON_BATTERY_MEDIUM_SMALL_W, ICON_BATTERY_MEDIUM_SMALL_H, icon_battery_medium_small_data);
         init_icon_dsc_rgb565a8(&battery_dscs[3], ICON_BATTERY_FULL_SMALL_W, ICON_BATTERY_FULL_SMALL_H, icon_battery_full_small_data);
         init_icon_dsc_rgb565a8(&battery_dscs[4], ICON_BATTERY_CHARGING_SMALL_W, ICON_BATTERY_CHARGING_SMALL_H, icon_battery_charging_small_data);
+        init_icon_dsc_rgb565a8(&battery_dscs[5], ICON_USB_C_SMALL_W, ICON_USB_C_SMALL_H, icon_usb_c_small_data);
         return;
     }
     init_icon_dsc_rgb565a8(&battery_dscs[0], ICON_BATTERY_W, ICON_BATTERY_H, icon_battery_data);
@@ -384,6 +385,7 @@ static void init_battery_icons(void) {
     init_icon_dsc_rgb565a8(&battery_dscs[2], ICON_BATTERY_MEDIUM_W, ICON_BATTERY_MEDIUM_H, icon_battery_medium_data);
     init_icon_dsc_rgb565a8(&battery_dscs[3], ICON_BATTERY_FULL_W, ICON_BATTERY_FULL_H, icon_battery_full_data);
     init_icon_dsc_rgb565a8(&battery_dscs[4], ICON_BATTERY_CHARGING_W, ICON_BATTERY_CHARGING_H, icon_battery_charging_data);
+    init_icon_dsc_rgb565a8(&battery_dscs[5], ICON_USB_C_W, ICON_USB_C_H, icon_usb_c_data);
 }
 
 // ======== Usage Screen ========
@@ -837,10 +839,12 @@ void ui_update_ble_status(ble_state_t state, const char* name, const char* mac) 
     update_view_state();
 }
 
-void ui_update_battery(int percent, bool charging) {
+void ui_update_battery(int percent, bool charging, bool usb_power) {
     if (!battery_img) return;
     int idx;
-    if (charging) {
+    if (percent < 0 && usb_power) {
+        idx = 5;   // no battery, running on USB: show the USB-C plug, not an empty battery
+    } else if (charging) {
         idx = 4;
     } else if (percent < 0) {
         idx = 0;

@@ -234,7 +234,7 @@ void setup() {
 
     ui_init();
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
-    ui_update_battery(power_hal_battery_pct(), power_hal_is_charging());
+    ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
     ui_show_screen(SCREEN_SPLASH);
 
     Serial.printf("Dashboard ready (%s, %dx%d), waiting for data on BLE...\n",
@@ -364,13 +364,16 @@ void loop() {
 
     static int  last_pct      = -2;
     static bool last_charging = false;
+    static bool last_vbus     = false;
     int  pct      = power_hal_battery_pct();
     bool charging = power_hal_is_charging();
-    if (pct != last_pct || charging != last_charging) {
+    bool vbus     = power_hal_is_vbus_in();
+    if (pct != last_pct || charging != last_charging || vbus != last_vbus) {
         if (pct != last_pct) ble_set_battery_level(pct);
         last_pct = pct;
         last_charging = charging;
-        ui_update_battery(pct, charging);
+        last_vbus = vbus;
+        ui_update_battery(pct, charging, vbus);
     }
 
     check_serial_cmd();
