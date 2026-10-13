@@ -52,7 +52,7 @@ pub enum Page {
     /// Claude Code hooks.
     Hooks,
     /// Start at login, polling, files, quit.
-    Background,
+    Settings,
     /// The first-run setup wizard.
     Setup,
 }
@@ -60,19 +60,19 @@ pub enum Page {
 impl Page {
     /// Pages in sidebar order (setup is reached from the sidebar footer).
     pub const SIDEBAR: [Page; 6] =
-        [Page::Overview, Page::Device, Page::Flash, Page::Accounts, Page::Hooks, Page::Background];
+        [Page::Overview, Page::Device, Page::Flash, Page::Accounts, Page::Hooks, Page::Settings];
 
     /// Parse a page name. Older window and tab names still work:
-    /// `status` is the overview, `settings` and `alerts` the device page,
-    /// `flasher` the flash page.
+    /// `status` is the overview, `alerts` the device page, `flasher` the
+    /// flash page, `background` the settings page.
     pub fn parse(s: &str) -> Option<Self> {
         Some(match s.to_ascii_lowercase().as_str() {
             "overview" | "status" => Page::Overview,
-            "device" | "settings" | "alerts" => Page::Device,
+            "device" | "alerts" => Page::Device,
             "flash" | "flasher" => Page::Flash,
             "accounts" => Page::Accounts,
             "hooks" => Page::Hooks,
-            "background" => Page::Background,
+            "settings" | "background" => Page::Settings,
             "setup" => Page::Setup,
             _ => return None,
         })
@@ -86,7 +86,7 @@ impl Page {
             Page::Flash => "flash",
             Page::Accounts => "accounts",
             Page::Hooks => "hooks",
-            Page::Background => "background",
+            Page::Settings => "settings",
             Page::Setup => "setup",
         }
     }
@@ -99,7 +99,7 @@ impl Page {
             Page::Flash => "Flash",
             Page::Accounts => "Accounts",
             Page::Hooks => "Hooks",
-            Page::Background => "Background",
+            Page::Settings => "Settings",
             Page::Setup => "Setup",
         }
     }
@@ -140,7 +140,8 @@ mod tests {
         for p in Page::SIDEBAR.into_iter().chain([Page::Setup]) {
             assert_eq!(Page::parse(p.as_str()), Some(p));
         }
-        assert_eq!(Page::parse("settings"), Some(Page::Device));
+        assert_eq!(Page::parse("background"), Some(Page::Settings));
+        assert_eq!(Page::parse("alerts"), Some(Page::Device));
         assert_eq!(Page::parse("flasher"), Some(Page::Flash));
         assert_eq!(Page::parse("status"), Some(Page::Overview));
         assert_eq!(Page::parse("nowhere"), None);

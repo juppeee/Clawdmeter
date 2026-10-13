@@ -3,7 +3,7 @@
 //! `settings.json` ([`install`]).
 //!
 //! The hook writes the files the daemon follows, under the state dir
-//! (`~/.config/claude-usage-monitor`):
+//! (`~/.config/clawdmeter`, `%LOCALAPPDATA%\Clawdmeter` on Windows):
 //!
 //! * `alert` writes `attention` (`{"m": message, "s": session id}`, one line);
 //! * `clear` touches `clear-<session id>`;
@@ -366,10 +366,11 @@ mod tests {
                 .unwrap();
             child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
             child.wait().unwrap();
-            let state_b = b.join("home/.config/claude-usage-monitor");
+            // The script hardcodes the pre-rename state dir.
+            let state_a = clawdmeter_core::paths::legacy_state_dir(&home_a);
+            let state_b = b.join("state");
             run(Mode::parse(&args(mode)), input, &state_b, 1_700_000_000);
-            let snapshot = |root: &Path| -> Vec<(String, String)> {
-                let d = root.join("home/.config/claude-usage-monitor");
+            let snapshot = |d: &Path| -> Vec<(String, String)> {
                 let mut out: Vec<(String, String)> = fs::read_dir(&d)
                     .map(|rd| {
                         rd.flatten()
@@ -397,7 +398,7 @@ mod tests {
                 out.sort();
                 out
             };
-            assert_eq!(snapshot(&a), snapshot(&b), "mode {mode:?} input {input}");
+            assert_eq!(snapshot(&state_a), snapshot(&state_b), "mode {mode:?} input {input}");
             let _ = fs::remove_dir_all(&a);
             let _ = fs::remove_dir_all(&b);
         }

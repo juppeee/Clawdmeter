@@ -215,21 +215,24 @@ Rust workspace (edition 2021, MSRV 1.88 for the library crates, 1.90 for `clawdm
 - `crates/clawdmeter-flash` — release `manifest.json` download, board matching by chip + flash size, espflash writes.
 - `crates/clawdmeter-app` — the `clawdmeter` binary: tray (`tray/`, ksni on Linux), the app window (`ui/`), `daemon.rs` (drives the engine on its own thread: 0.5 s tick, config re-read 5 s), `hooks/` (`clawdmeter hook alert|clear|event` + the settings.json installer), `ipc.rs` (single-instance lock, status file, command queues, window lock), `onboarding.rs` (`onboarding_done` in the config), `boards.rs` (names, buy links, illustrations).
 
-**One window, one process.** GPUI 0.2.2 ends its event loop when the last window closes on Linux/Windows, so the tray process never runs GPUI: the window is a `clawdmeter --window [PAGE]` child. `ui/app.rs` is its root: a sidebar (Overview, Device, Flash, Accounts, Hooks, Background) or the setup wizard (`ui/setup.rs`) filling the window. Pages are `crate::Page` (`Page::parse` also takes the old `settings`/`flasher`/`status`/`alerts` names). Only one window process runs (`<state>/window.lock`); the tray, or a second `--window` launch, appends `show <page>` to `<state>/window-commands` and the window switches page and raises itself. Child views ask for another page by emitting `ui::Navigate`. The flasher (`ui/flasher.rs`) only touches USB while it's on screen (`set_active`), the Device page only probes while shown, and the sidebar locks while a board is being written, so nothing competes for the serial port. The wizard reuses the flasher (`FlashMode::Setup`: no step header, up-to-date boards can skip) and the Hooks page (`SettingsView::show(Page::Hooks, embedded)`). First run = no `onboarding_done` and no cached BLE address; the tray opens the window on `setup` then.
+**One window, one process.** GPUI 0.2.2 ends its event loop when the last window closes on Linux/Windows, so the tray process never runs GPUI: the window is a `clawdmeter --window [PAGE]` child. `ui/app.rs` is its root: a sidebar (Overview, Device, Flash, Accounts, Hooks, Settings) or the setup wizard (`ui/setup.rs`) filling the window. Pages are `crate::Page` (`Page::parse` also takes the old `background`/`flasher`/`status`/`alerts` names). Only one window process runs (`<state>/window.lock`); the tray, or a second `--window` launch, appends `show <page>` to `<state>/window-commands` and the window switches page and raises itself. Child views ask for another page by emitting `ui::Navigate`. The flasher (`ui/flasher.rs`) only touches USB while it's on screen (`set_active`), the Device page only probes while shown, and the sidebar locks while a board is being written, so nothing competes for the serial port. The wizard reuses the flasher (`FlashMode::Setup`: no step header, up-to-date boards can skip) and the Hooks page (`SettingsView::show(Page::Hooks, embedded)`). First run = no `onboarding_done` and no cached BLE address; the tray opens the window on `setup` then.
 
 Board art: `crates/clawdmeter-app/assets/boards/<env>.svg`, original 3/4-view drawings (flat colours, Clawd + meters on screen), bundled by `ui::Assets` and drawn with `img("boards/<env>.svg")`. Use `img()`, not `svg()`: `svg()` renders a monochrome mask; `img()` with an embedded path goes through resvg in full colour. A new board needs an SVG, a `BOARDS` row (product name, buy link) and an `ASSETS` entry in `ui/mod.rs`; `boards::tests` checks all three.
 
 **UI work without hardware:** `cargo run -p clawdmeter-app --example demo -- --page device` (also `--setup welcome|board|flash|pair|hooks|done`, `--board none|fresh|current|old`, `--flash-to identify|firmware|flash|done`, `--status off`, `--hooks-preview`, `--shop`) opens the window with a fake board, a fake live status and a local release. Point `HOME`/`XDG_CACHE_HOME` at a scratch dir; it writes there. Screenshots: run it under X11 (`env -u WAYLAND_DISPLAY DISPLAY=:0`), find the client window with `xwininfo -root -tree | grep '"Clawdmeter": ("clawdmeter"'` and `import -window <id> out.png`. The set in `desktop/docs/screenshots/` is made this way with `HOME=/tmp/home` so no personal paths show. GPUI gotcha: don't `observe_window_appearance` on X11 (0.2.2 redraws inside the portal callback and panics); the root polls the appearance instead.
 
-Run modes: no args = tray app (logs to `~/.config/claude-usage-monitor/daemon.log`);
+Run modes: no args = tray app (logs to `<state>/daemon.log`);
 `--daemon` headless; `--once` (poll + print payload, no BLE); `--window
 [PAGE] [--manifest PATH]`; `--ports`; `--info PORT`; `hook MODE [event]`. Env:
 `CLAWDMETER_LOG`, `CLAWDMETER_NO_TRAY`, `POLL_INTERVAL`, `CLAUDE_CONFIG_DIR`
 (default account), `CLAWDMETER_BLE_ADDRESS`.
 
-State lives in `~/.config/claude-usage-monitor/` on every OS (`events.log`,
-`attention`, `clear-<sid>`, `ble-address`, `daemon.log`); config is
-`config` there (Windows: `%LOCALAPPDATA%\Clawdmeter\config`). Keys:
+State lives in one dir, `~/.config/clawdmeter/` (Windows:
+`%LOCALAPPDATA%\Clawdmeter\`): `config`, `events.log`, `attention`,
+`clear-<sid>`, `ble-address`, `daemon.log`, app state/locks. Every start
+moves a pre-rename `~/.config/claude-usage-monitor/` over once
+(`paths::migrate_legacy`; that name survives only there and in legacy-hook
+tests). Config keys:
 `config_dirs`, `poll_interval`, `heartbeat_interval`, `chime`, `beep`,
 `clock`, `claude_path`, `release_repo`, `update_check`, `onboarding_done`.
 

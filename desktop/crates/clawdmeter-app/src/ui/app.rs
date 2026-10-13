@@ -280,10 +280,10 @@ mod tests {
         click(cx, "nav-hooks");
         view.read_with(cx, |v, _| assert_eq!(v.page(), Page::Hooks));
 
-        ipc::send_window_command(&paths, Page::Background).unwrap();
+        ipc::send_window_command(&paths, Page::Settings).unwrap();
         cx.executor().advance_clock(REFRESH * 2);
         cx.run_until_parked();
-        view.read_with(cx, |v, _| assert_eq!(v.page(), Page::Background));
+        view.read_with(cx, |v, _| assert_eq!(v.page(), Page::Settings));
 
         click(cx, "run-setup");
         view.read_with(cx, |v, _| assert_eq!(v.page(), Page::Setup));

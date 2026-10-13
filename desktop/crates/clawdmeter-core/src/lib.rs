@@ -2,7 +2,7 @@
 //!
 //! Nothing in here talks to Bluetooth or draws a window. The modules:
 //!
-//! * [`paths`], [`config`]: the shared `~/.config/claude-usage-monitor` files.
+//! * [`paths`], [`config`]: the shared state dir (`~/.config/clawdmeter`) and its files.
 //! * [`usage`]: run and parse `claude --output-format json -p /usage`.
 //! * [`events`]: the hook events log (fast clock) and the activity tracker.
 //! * [`attention`]: the attention hook's alert / clear files (written by

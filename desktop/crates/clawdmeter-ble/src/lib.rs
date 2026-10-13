@@ -7,9 +7,9 @@
 //! name scan by default, so a stranger's unit in range is never picked; a
 //! filtered scan is available for first-time setup (`allow_scan`).
 //!
-//! The chosen device's address is cached in
-//! `~/.config/claude-usage-monitor/ble-address`; a failed connect drops the
-//! cache so the next attempt re-derives it.
+//! The chosen device's address is cached in `ble-address` in the state dir
+//! (`~/.config/clawdmeter`); a failed connect drops the cache so the next
+//! attempt re-derives it.
 //!
 //! Per-OS recovery carried over from the legacy daemons:
 //!

@@ -25,7 +25,7 @@ window on desktops without a tray).
 OPTIONS:
     --daemon          Run headless: poll usage, follow hooks, drive the device over BLE
     --window [PAGE]   Open the app window on a page: overview (default), device,
-                      flash, accounts, hooks, background or setup
+                      flash, accounts, hooks, settings or setup
       [--manifest P]  flash page: use a local release manifest.json instead of GitHub
     --once            Poll /usage for every account once, print the payload, exit (no BLE)
     --ports           List attached Espressif USB ports
@@ -61,13 +61,17 @@ fn main() {
         std::process::exit(clawdmeter_app::hooks::main(&args[1..]));
     }
     let paths = Paths::for_user();
+    // Before the logger opens daemon.log, so the old log moves over too.
+    let migration = clawdmeter_core::paths::migrate_legacy(&paths);
     if args.is_empty() {
         logger::init_with_file(&paths.state_dir.join("daemon.log"));
+        log_migration(&paths, migration);
         warn_if_legacy_daemon(&paths);
         std::process::exit(tray::run(paths));
     }
     attach_console();
     logger::init();
+    log_migration(&paths, migration);
     let code = match args[0].as_str() {
         "--daemon" => run_daemon(paths),
         "--window" => {
@@ -76,7 +80,7 @@ fn main() {
             let name = opt("--tab").or_else(|| args.get(1).filter(|a| !a.starts_with("--")).cloned());
             match name.as_deref().map(Page::parse) {
                 Some(None) => {
-                    eprintln!("--window takes one of: overview, device, flash, accounts, hooks, background, setup");
+                    eprintln!("--window takes one of: overview, device, flash, accounts, hooks, settings, setup");
                     2
                 }
                 page => ui::run(page.flatten(), paths, ui::WindowArgs { manifest: opt("--manifest").map(Into::into) }),
@@ -125,13 +129,34 @@ fn main() {
     std::process::exit(code);
 }
 
+fn log_migration(paths: &Paths, m: std::io::Result<Option<clawdmeter_core::paths::Migration>>) {
+    let old = clawdmeter_core::paths::legacy_state_dir(&paths.home);
+    match m {
+        Ok(None) => {}
+        Ok(Some(m)) => {
+            if !m.moved.is_empty() {
+                log::info!("moved {} from {} to {}", m.moved.join(", "), old.display(), paths.state_dir.display());
+            }
+            if !m.kept.is_empty() {
+                log::info!(
+                    "left {} in {} ({} has its own)",
+                    m.kept.join(", "),
+                    old.display(),
+                    paths.state_dir.display()
+                );
+            }
+        }
+        Err(e) => log::warn!("could not move files from {} to {}: {e}", old.display(), paths.state_dir.display()),
+    }
+}
+
 /// The bash / Python daemon this app replaces would fight it for the device.
-/// The Background page turns it off (`autostart::disable_legacy`).
+/// The Settings page turns it off (`autostart::disable_legacy`).
 fn warn_if_legacy_daemon(paths: &Paths) {
     if let Some(e) = clawdmeter_core::autostart::legacy_entry(&paths.home) {
         log::warn!(
             "the old Clawdmeter daemon is still set to start at login ({}); it will fight this app for the \
-             device. Turn it off on the app's Background page",
+             device. Turn it off on the app's Settings page",
             e.describe()
         );
     }

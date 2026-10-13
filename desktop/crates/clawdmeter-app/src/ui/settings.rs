@@ -1,4 +1,4 @@
-//! The settings pages (spec §03): Device, Accounts, Hooks and Background,
+//! The settings pages (spec §03): Device, Accounts, Hooks and Settings,
 //! one view behind four sidebar entries. The setup wizard borrows the Hooks
 //! page.
 //!
@@ -131,7 +131,7 @@ impl SettingsView {
     /// Put `page` on screen (`embedded`: inside the setup wizard). Other
     /// pages hide this view.
     pub fn show(&mut self, page: Page, embedded: bool, cx: &mut Context<Self>) {
-        self.visible = matches!(page, Page::Device | Page::Accounts | Page::Hooks | Page::Background);
+        self.visible = matches!(page, Page::Device | Page::Accounts | Page::Hooks | Page::Settings);
         if !self.visible {
             return;
         }
@@ -860,11 +860,11 @@ impl SettingsView {
         pane
     }
 
-    fn background_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+    fn settings_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
         let me = cx.entity().downgrade();
         let on = self.autostart_on;
         let home = self.paths.home.clone();
-        let mut pane = div().flex().flex_col().gap(px(6.)).child(heading(t, "Background")).child(field(
+        let mut pane = div().flex().flex_col().gap(px(6.)).child(heading(t, "Settings")).child(field(
             t,
             "Start at login",
             "Starts Clawdmeter in the tray when you log in.",
@@ -1012,7 +1012,7 @@ impl Render for SettingsView {
         let mut pane = match self.page {
             Page::Accounts => self.accounts_pane(&t, cx),
             Page::Hooks => self.hooks_pane(&t, cx),
-            Page::Background => self.background_pane(&t, cx),
+            Page::Settings => self.settings_pane(&t, cx),
             _ => self.device_pane(&t, cx),
         };
         if let Some(e) = self.config_error.clone().or_else(|| self.notice.as_ref().map(|(_, m)| m.clone())) {
@@ -1055,7 +1055,7 @@ mod tests {
         assert!(text.starts_with("# mine\n"), "comments kept: {text}");
         assert!(text.contains("chime = on"), "{text}");
 
-        view.update(cx, |v, cx| v.show(Page::Background, false, cx));
+        view.update(cx, |v, cx| v.show(Page::Settings, false, cx));
         click(cx, "poll-2"); // Every 5 min
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(text.contains("poll_interval = 300"), "{text}");
