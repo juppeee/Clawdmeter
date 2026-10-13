@@ -1,0 +1,310 @@
+//! Attention alerts from `daemon/attention-hook.sh`, consumed exactly like the
+//! bash and macOS daemons do.
+//!
+//! The hook writes `<state>/attention` (`{"m": message, "s": session id}`)
+//! when a session needs the user and touches `<state>/clear-<session id>` when
+//! that session moves on. Each tick the daemon consumes both:
+//!
+//! * an alert file older than 60 s is dropped (written while the device was
+//!   away), a bare `touch` still alerts with no message;
+//! * a second alert from the session already alerting is ignored
+//!   (AskUserQuestion notifies twice);
+//! * a clear only ends the alert when it names the alerting session and is
+//!   newer than the alert (nanosecond mtimes: both can land in one second).
+
+use std::collections::HashMap;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{Duration, SystemTime};
+
+use unicode_normalization::UnicodeNormalization;
+
+/// Alerts older than this when first seen are ignored.
+pub const ATTENTION_MAX_AGE: Duration = Duration::from_secs(60);
+/// Device fonts are ASCII and the status line holds this many characters.
+pub const MESSAGE_LIMIT: usize = 120;
+
+/// One alert read from the attention file.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Alert {
+    /// ASCII-folded message (may be empty).
+    pub message: String,
+    /// Claude Code session id (may be empty).
+    pub session: String,
+    /// The file's mtime.
+    pub at: SystemTime,
+}
+
+/// Fold to ASCII (drop accents), collapse whitespace, cap at `limit` chars
+/// with a `...` suffix. Mirrors `to_ascii()` in the Python daemon.
+pub fn to_ascii(text: &str, limit: usize) -> String {
+    let folded: String = text.nfkd().filter(char::is_ascii).collect();
+    let collapsed = folded.split_whitespace().collect::<Vec<_>>().join(" ");
+    if collapsed.len() <= limit {
+        collapsed
+    } else {
+        let mut cut = collapsed[..limit.saturating_sub(3)].trim_end().to_owned();
+        cut.push_str("...");
+        cut
+    }
+}
+
+/// Reads and consumes the hook's files in one directory.
+#[derive(Debug, Clone)]
+pub struct AttentionInbox {
+    dir: PathBuf,
+}
+
+impl AttentionInbox {
+    /// Inbox over the daemon state dir.
+    pub fn new(dir: impl Into<PathBuf>) -> Self {
+        AttentionInbox { dir: dir.into() }
+    }
+
+    fn flag(&self) -> PathBuf {
+        self.dir.join("attention")
+    }
+
+    /// Consume the attention file. `None` when absent or stale.
+    pub fn take_alert(&self, now: SystemTime) -> Option<Alert> {
+        let path = self.flag();
+        let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+        let raw = fs::read_to_string(&path).unwrap_or_default();
+        let _ = fs::remove_file(&path);
+        if now.duration_since(mtime).unwrap_or_default() >= ATTENTION_MAX_AGE {
+            return None;
+        }
+        let v: serde_json::Value = serde_json::from_str(&raw).unwrap_or(serde_json::Value::Null);
+        let field = |k: &str| match v.get(k) {
+            Some(serde_json::Value::String(s)) => s.clone(),
+            Some(serde_json::Value::Null) | None => String::new(),
+            Some(other) => other.to_string(),
+        };
+        Some(Alert { message: to_ascii(&field("m"), MESSAGE_LIMIT), session: field("s"), at: mtime })
+    }
+
+    /// Consume every `clear-<sid>` file: `{sid: mtime}`.
+    pub fn take_clears(&self) -> HashMap<String, SystemTime> {
+        let mut out = HashMap::new();
+        let Ok(rd) = fs::read_dir(&self.dir) else { return out };
+        for entry in rd.flatten() {
+            let name = entry.file_name();
+            let Some(sid) = name.to_str().and_then(|n| n.strip_prefix("clear-")) else { continue };
+            let mtime = entry.metadata().and_then(|m| m.modified()).unwrap_or(SystemTime::UNIX_EPOCH);
+            if fs::remove_file(entry.path()).is_ok() {
+                out.insert(sid.to_owned(), mtime);
+            }
+        }
+        out
+    }
+
+    /// Drop leftovers (on connect, like the old daemons).
+    pub fn reset(&self) {
+        let _ = fs::remove_file(self.flag());
+        let _ = self.take_clears();
+    }
+
+    /// The directory this inbox reads.
+    pub fn dir(&self) -> &Path {
+        &self.dir
+    }
+}
+
+/// What the next payload must say about attention.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AttentionState {
+    /// The alert on (or headed to) the screen, kept to match its clear.
+    pub alert: Option<Alert>,
+    /// The alert hasn't been sent yet.
+    pub alert_unsent: bool,
+    /// A clear for a shown alert hasn't been sent yet.
+    pub clear_unsent: bool,
+}
+
+/// Fields to merge into the next payload.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AttentionFields {
+    /// `b`: beep (only when the user opted in).
+    pub beep: bool,
+    /// `m`: message for the status line.
+    pub message: Option<String>,
+    /// `x`: end the alert.
+    pub clear: bool,
+}
+
+impl AttentionState {
+    /// Fold one tick's files into the state.
+    pub fn ingest(&mut self, new_alert: Option<Alert>, clears: &HashMap<String, SystemTime>) {
+        if let Some(a) = new_alert {
+            let repeat = self.alert.as_ref().is_some_and(|cur| !cur.session.is_empty() && cur.session == a.session);
+            if !repeat {
+                self.alert = Some(a);
+                self.alert_unsent = true;
+                self.clear_unsent = false;
+            }
+        }
+        if let Some(cur) = &self.alert {
+            if let Some(t) = clears.get(&cur.session) {
+                if !cur.session.is_empty() && *t > cur.at {
+                    // Never shown: nothing to clear on the device.
+                    self.clear_unsent = !self.alert_unsent;
+                    self.alert = None;
+                    self.alert_unsent = false;
+                }
+            }
+        }
+    }
+
+    /// Something attention-related is waiting to be sent.
+    pub fn pending(&self) -> bool {
+        self.alert_unsent || self.clear_unsent
+    }
+
+    /// An alert is currently up (sent or not).
+    pub fn active(&self) -> bool {
+        self.alert.is_some()
+    }
+
+    /// The fields for the next payload; `beep_on` is the `beep` setting.
+    pub fn fields(&self, beep_on: bool) -> AttentionFields {
+        let mut f = AttentionFields::default();
+        if self.alert_unsent {
+            f.beep = beep_on;
+            f.message = self.alert.as_ref().map(|a| a.message.clone()).filter(|m| !m.is_empty());
+        }
+        f.clear = self.clear_unsent;
+        f
+    }
+
+    /// The payload carrying [`AttentionState::fields`] was written.
+    pub fn mark_sent(&mut self) {
+        self.alert_unsent = false;
+        self.clear_unsent = false;
+    }
+
+    /// Forget everything (new connection).
+    pub fn reset(&mut self) {
+        *self = AttentionState::default();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs::File;
+
+    fn tmpdir(tag: &str) -> PathBuf {
+        let d = std::env::temp_dir().join(format!("cm-attn-{tag}-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&d);
+        fs::create_dir_all(&d).unwrap();
+        d
+    }
+
+    fn set_mtime(p: &Path, t: SystemTime) {
+        File::options().write(true).open(p).unwrap().set_modified(t).unwrap();
+    }
+
+    // Ported from daemon/tests/test_attention.py::test_attention_flag.
+    #[test]
+    fn attention_flag() {
+        let d = tmpdir("flag");
+        let inbox = AttentionInbox::new(&d);
+        let now = SystemTime::now();
+        assert!(inbox.take_alert(now).is_none());
+
+        File::create(d.join("attention")).unwrap();
+        assert_eq!(inbox.take_alert(SystemTime::now()).unwrap().message, "");
+        assert!(!d.join("attention").exists());
+
+        fs::write(d.join("attention"), r#"{"m": "Você  aprova\na ação?", "s": "abc"}"#).unwrap();
+        let a = inbox.take_alert(SystemTime::now()).unwrap();
+        assert_eq!((a.message.as_str(), a.session.as_str()), ("Voce aprova a acao?", "abc"));
+        assert_eq!(to_ascii(&"x".repeat(200), 120), "x".repeat(117) + "...");
+
+        File::create(d.join("attention")).unwrap();
+        set_mtime(&d.join("attention"), SystemTime::now() - ATTENTION_MAX_AGE - Duration::from_secs(1));
+        assert!(inbox.take_alert(SystemTime::now()).is_none());
+        assert!(!d.join("attention").exists());
+
+        fs::write(d.join("attention"), "not json").unwrap();
+        assert_eq!(inbox.take_alert(SystemTime::now()).unwrap().session, "");
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    // Ported from test_attention.py::test_clears.
+    #[test]
+    fn clears() {
+        let d = tmpdir("clears");
+        let inbox = AttentionInbox::new(&d);
+        File::create(d.join("clear-abc")).unwrap();
+        File::create(d.join("unrelated")).unwrap();
+        let c = inbox.take_clears();
+        assert_eq!(c.keys().collect::<Vec<_>>(), vec!["abc"]);
+        assert!(inbox.take_clears().is_empty());
+        assert!(d.join("unrelated").exists());
+        let _ = fs::remove_dir_all(&d);
+    }
+
+    fn alert(sid: &str, msg: &str, at: SystemTime) -> Alert {
+        Alert { message: msg.into(), session: sid.into(), at }
+    }
+
+    // Ported from daemon/tests/test_bash_attention.sh.
+    #[test]
+    fn session_matching_like_bash() {
+        let t0 = SystemTime::now();
+        let none = HashMap::new();
+        let mut st = AttentionState::default();
+
+        st.ingest(Some(alert("abc", "Voce aprova a acao?", t0)), &none);
+        assert!(st.alert_unsent);
+        assert_eq!(
+            st.fields(false),
+            AttentionFields { beep: false, message: Some("Voce aprova a acao?".into()), clear: false }
+        );
+        assert!(st.fields(true).beep);
+        st.mark_sent();
+
+        // Repeat from the same session is ignored.
+        st.ingest(Some(alert("abc", "Claude needs your permission", t0)), &none);
+        assert!(!st.alert_unsent);
+        assert_eq!(st.alert.as_ref().unwrap().message, "Voce aprova a acao?");
+
+        // Clear for another session is ignored.
+        let other: HashMap<_, _> = [("other".to_owned(), t0 + Duration::from_secs(2))].into();
+        st.ingest(None, &other);
+        assert!(st.alert.is_some() && !st.clear_unsent);
+
+        // Clear for the alerting session, newer: hide.
+        let same: HashMap<_, _> = [("abc".to_owned(), t0 + Duration::from_secs(2))].into();
+        st.ingest(None, &same);
+        assert!(st.alert.is_none() && st.clear_unsent);
+        assert_eq!(st.fields(true), AttentionFields { beep: false, message: None, clear: true });
+        st.mark_sent();
+
+        // Same second, later by 0.5 s: still clears.
+        let t1 = SystemTime::UNIX_EPOCH + Duration::from_nanos(1_760_000_000_100_000_000);
+        st.ingest(Some(alert("q", "quick", t1)), &none);
+        st.mark_sent();
+        let q: HashMap<_, _> = [("q".to_owned(), t1 + Duration::from_millis(500))].into();
+        st.ingest(None, &q);
+        assert!(st.alert.is_none() && st.clear_unsent);
+
+        // An older clear doesn't end a newer alert.
+        st.mark_sent();
+        st.ingest(Some(alert("z", "", t1)), &none);
+        let old: HashMap<_, _> = [("z".to_owned(), t1 - Duration::from_secs(1))].into();
+        st.ingest(None, &old);
+        assert!(st.alert.is_some());
+    }
+
+    #[test]
+    fn clear_before_send_sends_nothing() {
+        let t0 = SystemTime::now();
+        let mut st = AttentionState::default();
+        st.ingest(Some(alert("s", "hi", t0)), &HashMap::new());
+        let c: HashMap<_, _> = [("s".to_owned(), t0 + Duration::from_secs(1))].into();
+        st.ingest(None, &c);
+        assert!(!st.pending(), "never shown, nothing to clear");
+    }
+}
