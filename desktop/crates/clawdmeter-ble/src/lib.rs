@@ -27,8 +27,19 @@
 //! * Everywhere: writes that keep failing on a link that still reports
 //!   itself connected (a half-open "zombie" link) make
 //!   [`DeviceLink::is_connected`] report false, so the caller reconnects.
+//!
+//! Reconnect timing is [`Reconnect`] (backoff capped at
+//! [`reconnect::BACKOFF_CAP`]), cut short by [`spawn_watcher`]'s wakeups when
+//! the OS sees the device come back (BlueZ auto-reconnecting the bonded
+//! device, or an advertisement during a scan).
 
 #![warn(missing_docs)]
+
+pub mod reconnect;
+mod watch;
+
+pub use reconnect::Reconnect;
+pub use watch::{should_wake, spawn_watcher, Sighting, Wake, Wakeups};
 
 use std::fs;
 use std::io;
@@ -212,7 +223,7 @@ pub struct Candidate {
     pub has_service: bool,
 }
 
-async fn describe(p: Peripheral) -> Candidate {
+pub(crate) async fn describe(p: Peripheral) -> Candidate {
     let props = p.properties().await.ok().flatten();
     let name = props.as_ref().and_then(|pr| pr.local_name.clone());
     let has_service = props.as_ref().is_some_and(|pr| pr.services.contains(&SERVICE_UUID))

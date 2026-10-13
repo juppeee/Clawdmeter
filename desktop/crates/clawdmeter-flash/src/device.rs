@@ -57,6 +57,14 @@ pub enum DeviceError {
     Flash(String),
     /// The port isn't a USB port we can describe to espflash.
     NotUsb(String),
+    /// The image was written, but after the restart the board didn't come
+    /// back answering `info` as the expected firmware.
+    NotConfirmed {
+        /// The env that was flashed.
+        expected: String,
+        /// What answered instead (`None`: nothing did).
+        found: Option<FirmwareInfo>,
+    },
 }
 
 impl std::fmt::Display for DeviceError {
@@ -84,6 +92,16 @@ impl std::fmt::Display for DeviceError {
             DeviceError::Serial(e) => write!(f, "Couldn't talk to the board ({e})."),
             DeviceError::Flash(e) => write!(f, "Flashing stopped ({e}). Unplug the board, plug it back in and retry."),
             DeviceError::NotUsb(p) => write!(f, "{p} isn't a USB serial port."),
+            DeviceError::NotConfirmed { found: None, .. } => write!(
+                f,
+                "The firmware was written, but the board didn't answer after restarting. Unplug it and plug it \
+                 back in; if it still doesn't come up, flash it again."
+            ),
+            DeviceError::NotConfirmed { expected, found: Some(info) } => write!(
+                f,
+                "The board restarted, but it reports {} firmware instead of {expected}. Flash it again.",
+                info.env
+            ),
         }
     }
 }
@@ -309,18 +327,17 @@ fn usb_info(port: &str) -> Result<UsbPortInfo, DeviceError> {
         .ok_or_else(|| DeviceError::NotUsb(port.to_owned()))
 }
 
-fn connect(port: &str) -> Result<Flasher, DeviceError> {
+fn connect(port: &str, after: ResetAfterOperation) -> Result<Flasher, DeviceError> {
     let info = usb_info(port)?;
     let serial = serialport::new(port, 115_200).open_native().map_err(|e| DeviceError::from_open(port, e))?;
-    let conn =
-        Connection::new(serial, info, ResetAfterOperation::HardReset, ResetBeforeOperation::DefaultReset, 115_200);
+    let conn = Connection::new(serial, info, after, ResetBeforeOperation::DefaultReset, 115_200);
     Flasher::connect(conn, true, true, false, None, None).map_err(|e| DeviceError::NoBootloader(e.to_string()))
 }
 
 /// Probe 2: enter the ROM bootloader, read chip and flash size, reset back
 /// into the app.
 pub fn probe_chip(port: &str) -> Result<ChipInfo, DeviceError> {
-    let mut f = connect(port)?;
+    let mut f = connect(port, ResetAfterOperation::HardReset)?;
     let di = f.device_info().map_err(|e| DeviceError::NoBootloader(e.to_string()))?;
     let out = ChipInfo {
         chip: chip_id(di.chip),
@@ -465,24 +482,44 @@ pub fn write_segments(len: usize, preserved: &[Range<usize>]) -> Vec<Range<usize
     out
 }
 
-/// Write a merged image from 0x0 and reset into it, skipping the NVS
-/// partitions ([`preserved_ranges`]) so pairings and settings survive. The
-/// caller verified the image's sha256 against the manifest
-/// ([`crate::release::verify`]); the chip is checked against `expected_chip`.
+/// How long the new firmware gets to boot and answer `info` after the reset.
+pub const BOOT_CONFIRM_TIMEOUT: Duration = Duration::from_secs(20);
+
+/// Write a merged image from 0x0, restart into it, and wait for it to answer
+/// `info` (see [`flash_and_confirm`]).
 pub fn flash_merged(
     port: &str,
     image: &[u8],
-    expected_chip: &BoardImage,
-    mut progress: impl FnMut(FlashProgress),
+    board: &BoardImage,
+    progress: impl FnMut(FlashProgress),
 ) -> Result<(), DeviceError> {
-    let mut f = connect(port)?;
+    flash_and_confirm(port, image, board, progress).map(|_| ())
+}
+
+/// Write a merged image from 0x0, skipping the NVS partitions
+/// ([`preserved_ranges`]) so pairings and settings survive, restart the chip
+/// once ([`restart_into_app`]), then wait for the port to come back and the
+/// new firmware to answer `info` as `board.env`
+/// ([`DeviceError::NotConfirmed`] if it doesn't). The caller verified the
+/// image's sha256 against the manifest ([`crate::release::verify`]); the chip
+/// is checked against `board`.
+pub fn flash_and_confirm(
+    port: &str,
+    image: &[u8],
+    board: &BoardImage,
+    mut progress: impl FnMut(FlashProgress),
+) -> Result<FirmwareInfo, DeviceError> {
+    let serial_number = usb_info(port)?.serial_number;
+    // NoResetNoStub: espflash's own end-of-write reset is skipped, so the
+    // chip is reset exactly once, by `restart_into_app`.
+    let mut f = connect(port, ResetAfterOperation::NoResetNoStub)?;
     let got = chip_id(f.chip());
-    if got != expected_chip.chip_id() {
+    if got != board.chip_id() {
         let _ = f.connection().reset();
-        return Err(DeviceError::WrongChip { found: got, expected: expected_chip.chip_id() });
+        return Err(DeviceError::WrongChip { found: got, expected: board.chip_id() });
     }
-    // One write session for every segment: espflash reboots the chip when a
-    // session ends, so a second session would find no bootloader.
+    // One write session for every segment: the chip is reset when it ends,
+    // so a second session would find no bootloader.
     let ranges = write_segments(image.len(), &preserved_ranges(image));
     let total = ranges.iter().map(|r| r.len()).sum();
     let mut base = 0;
@@ -499,10 +536,80 @@ pub fn flash_merged(
     let mut cb = Progress { report: &mut progress, segments: table, current: (0, 0), units: 1 };
     f.write_bins_to_flash(&segments, &mut cb).map_err(|e| DeviceError::Flash(e.to_string()))?;
     progress(FlashProgress::Done);
-    // With the stub loader the host does the reboot.
-    let chip = f.chip();
-    f.connection().reset_after(true, chip).map_err(|e| DeviceError::Flash(e.to_string()))?;
-    Ok(())
+    restart_into_app(&mut f)?;
+    // Close the port so the restarted board's USB device is free to
+    // re-enumerate (and nothing holds the old node open).
+    drop(f);
+    let info = wait_for_firmware(port, serial_number.as_deref(), BOOT_CONFIRM_TIMEOUT);
+    match info {
+        Some(i) if i.env == board.env => Ok(i),
+        found => Err(DeviceError::NotConfirmed { expected: board.env.clone(), found }),
+    }
+}
+
+/// `RTC_CNTL_OPTION1_REG` on the ESP32-S3 and its `FORCE_DOWNLOAD_BOOT` bit.
+const S3_RTC_CNTL_OPTION1: u32 = 0x6000_812C;
+const S3_FORCE_DOWNLOAD_BOOT: u32 = 0x1;
+
+/// Leave the flasher stub and boot the new app, with a single reset.
+///
+/// The reset is the USB-Serial-JTAG hard reset: an RTS pulse with DTR low,
+/// which the chip's USB-Serial-JTAG controller turns into a chip-wide
+/// digital reset (reset reason `USB_UART_CHIP_RESET`). That is esptool's
+/// default `--after hard-reset` for both the S3 and the C6 on this port and
+/// is how the board recovers when it is reset by hand. It reinitializes the
+/// whole digital system, the Bluetooth controller and modem included; the
+/// app redoes PHY/RF calibration on boot.
+///
+/// Not the RTC watchdog reset (`--after watchdog-reset`): esptool only uses
+/// it on the S3 for USB-OTG, espflash doesn't support it on the C6, and
+/// esptool notes it can make the C6's USB-Serial-JTAG port disappear.
+///
+/// Exactly once matters: `Flasher::write_bins_to_flash` with the default
+/// `ResetAfterOperation::HardReset` already pulses RTS when the write ends;
+/// a second `reset_after` right after it lands a reset ~200 ms into the new
+/// firmware's first boot.
+///
+/// On the S3, `FORCE_DOWNLOAD_BOOT` is cleared first, as esptool's
+/// `ESP32S3ROM.hard_reset` does, so the reset can't fall back into the ROM
+/// downloader (espressif/arduino-esp32#6762).
+fn restart_into_app(f: &mut Flasher) -> Result<(), DeviceError> {
+    if f.chip() == Chip::Esp32s3 {
+        if let Err(e) = f.connection().write_reg(S3_RTC_CNTL_OPTION1, 0, Some(S3_FORCE_DOWNLOAD_BOOT)) {
+            log::debug!("could not clear FORCE_DOWNLOAD_BOOT: {e}");
+        }
+    }
+    f.connection().reset().map_err(|e| DeviceError::Flash(e.to_string()))
+}
+
+/// Where the board is now: the port with its USB serial number (the chip
+/// MAC on USB-Serial-JTAG) if it re-enumerated elsewhere, else the old path
+/// if it's back.
+pub fn locate_port(ports: &[EspPort], path: &str, serial_number: Option<&str>) -> Option<String> {
+    serial_number
+        .and_then(|sn| ports.iter().find(|p| p.serial_number.as_deref() == Some(sn)))
+        .or_else(|| ports.iter().find(|p| p.path == path))
+        .map(|p| p.path.clone())
+}
+
+/// Wait for a board that was just reset to show up again and answer `info`.
+/// `None` if it doesn't within `timeout`.
+pub fn wait_for_firmware(path: &str, serial_number: Option<&str>, timeout: Duration) -> Option<FirmwareInfo> {
+    let deadline = Instant::now() + timeout;
+    // Give the reset and the USB re-enumeration a head start.
+    std::thread::sleep(Duration::from_millis(500));
+    while Instant::now() < deadline {
+        if let Some(p) = locate_port(&list_ports(), path, serial_number) {
+            match probe_info(&p, Duration::from_millis(1500)) {
+                Ok(Some(info)) => return Some(info),
+                Ok(None) => {}
+                // Still enumerating, or briefly held by ModemManager & co.
+                Err(e) => log::debug!("waiting for {p}: {e}"),
+            }
+        }
+        std::thread::sleep(Duration::from_millis(400));
+    }
+    None
 }
 
 #[cfg(test)]
@@ -568,6 +675,36 @@ mod tests {
         assert!(parse_info_output("{\"ready\":true}\n").is_none());
         assert!(parse_info_output("garbage {\"env\":").is_none());
         assert_eq!(parse_info_output("x {\"env\":\"a\",\"ver\":\"1\",\"rev\":2}").unwrap().rev, "2");
+    }
+
+    #[test]
+    fn port_found_again_after_reset() {
+        let port = |path: &str, sn: &str| EspPort {
+            path: path.into(),
+            vid: ESPRESSIF_VID,
+            pid: USB_JTAG_PID,
+            serial_number: Some(sn.into()),
+        };
+        let ports = [port("/dev/ttyACM0", "AA:AA"), port("/dev/ttyACM1", "BB:BB")];
+        assert_eq!(locate_port(&ports, "/dev/ttyACM0", Some("BB:BB")).as_deref(), Some("/dev/ttyACM1"));
+        assert_eq!(locate_port(&ports, "/dev/ttyACM0", None).as_deref(), Some("/dev/ttyACM0"));
+        assert_eq!(locate_port(&ports, "/dev/ttyACM0", Some("CC:CC")).as_deref(), Some("/dev/ttyACM0"));
+        assert_eq!(locate_port(&ports[1..], "/dev/ttyACM0", Some("CC:CC")), None);
+        assert_eq!(locate_port(&[], "/dev/ttyACM0", Some("AA:AA")), None);
+    }
+
+    #[test]
+    fn unconfirmed_flash_copy() {
+        let e = DeviceError::NotConfirmed { expected: "waveshare_amoled_216".into(), found: None };
+        assert!(e.to_string().starts_with("The firmware was written, but the board didn't answer"));
+        let info = FirmwareInfo {
+            env: "waveshare_amoled_18".into(),
+            ver: "1.0".into(),
+            rev: String::new(),
+            link: String::new(),
+        };
+        let e = DeviceError::NotConfirmed { expected: "waveshare_amoled_216".into(), found: Some(info) };
+        assert!(e.to_string().contains("waveshare_amoled_18 firmware instead of waveshare_amoled_216"));
     }
 
     #[test]

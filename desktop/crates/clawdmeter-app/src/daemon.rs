@@ -8,7 +8,9 @@
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use clawdmeter_ble::{AddressCache, DeviceLink, LinkError, LinkOptions, RefreshRequests, MAX_WRITE};
+use clawdmeter_ble::{
+    should_wake, AddressCache, DeviceLink, LinkError, LinkOptions, Reconnect, RefreshRequests, Sighting, MAX_WRITE,
+};
 use clawdmeter_core::attention::AttentionInbox;
 use clawdmeter_core::events::EventTail;
 use clawdmeter_core::usage::{self, UsageError, UsageReading};
@@ -22,8 +24,6 @@ const TICK: Duration = Duration::from_millis(500);
 const SETTINGS_EVERY: i64 = 5;
 /// Connection check interval (s).
 const LINK_CHECK_EVERY: i64 = 5;
-/// Reconnect backoff cap (s), as in the bash daemon.
-const BACKOFF_CAP: u64 = 60;
 
 /// Requests from the UI.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -155,8 +155,8 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     let mut connecting: Option<JoinHandle<ConnectResult>> = None;
     let mut polling: Option<JoinHandle<PollResults>> = None;
     let mut link_state = LinkState::Starting;
-    let mut next_connect = 0i64;
-    let mut backoff = 1u64;
+    let mut reconnect = Reconnect::default();
+    let mut wakeups = clawdmeter_ble::spawn_watcher();
     let mut last_settings = unix_now();
     let mut last_link_check = unix_now();
     let mut last_write_at = None;
@@ -183,8 +183,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     }
                     refresh = None;
                     link_state = LinkState::Searching;
-                    next_connect = now;
-                    backoff = 1;
+                    reconnect.retry_in(now, 0);
                 }
                 Ok(Command::SetBeepMuted(m)) => {
                     beep_muted = m;
@@ -266,7 +265,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     link_state = LinkState::Connected { key: l.key().to_owned(), name: l.name().map(str::to_owned) };
                     link = Some(l);
                     refresh = Some(rx);
-                    backoff = 1;
+                    reconnect.connected();
                     inbox.reset();
                     engine.on_connected();
                 }
@@ -275,16 +274,30 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                         LinkError::NoAdapter(s) => LinkState::NoAdapter(s.clone()),
                         _ => LinkState::Searching,
                     };
-                    if !matches!(e, LinkError::NotFound) || backoff == 1 {
-                        log::info!("{e}; retrying in {backoff}s");
+                    let wait = reconnect.failed(now);
+                    if !matches!(e, LinkError::NotFound) || wait == 1 {
+                        log::info!("{e}; retrying in {wait}s");
                     }
-                    next_connect = now + backoff as i64;
-                    backoff = (backoff * 2).min(BACKOFF_CAP);
                 }
                 Err(e) => log::error!("connect task failed: {e}"),
             }
         }
-        if link.is_none() && connecting.is_none() && now >= next_connect {
+        // The OS saw the device come back (BlueZ reconnected the bonded
+        // device, or a scan saw it advertise): don't sit out the wait.
+        while let Ok(w) = wakeups.try_recv() {
+            if link.is_some() || !should_wake(&w, cache.load().as_deref()) {
+                continue;
+            }
+            if connecting.is_none() && !reconnect.due(now) {
+                let how = match w.sighting {
+                    Sighting::Connected => "connected at the OS level",
+                    Sighting::Advertising => "advertising",
+                };
+                log::info!("device {} {how}; reconnecting now", w.key);
+            }
+            reconnect.wake(now, connecting.is_some());
+        }
+        if link.is_none() && connecting.is_none() && reconnect.due(now) {
             if link_state == LinkState::Starting {
                 link_state = LinkState::Connecting;
             }
@@ -302,7 +315,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     link = None;
                     refresh = None;
                     link_state = LinkState::Searching;
-                    next_connect = now + 2;
+                    reconnect.retry_in(now, 2);
                 }
             }
         }
@@ -332,7 +345,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                             link = None;
                             refresh = None;
                             link_state = LinkState::Searching;
-                            next_connect = now + 2;
+                            reconnect.retry_in(now, 2);
                         }
                     }
                 }

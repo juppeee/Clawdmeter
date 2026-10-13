@@ -4,7 +4,9 @@
 //!     cargo run -p clawdmeter-flash --example flash_local -- <dist-dir> <env> <port>
 //!
 //! `<dist-dir>` holds `manifest.json` and the merged images
-//! (`tools/ci/merge_firmware.py` + `make_manifest.py` produce it).
+//! (`tools/ci/merge_firmware.py` + `make_manifest.py` produce it). After the
+//! write the board is reset once and must come back answering `info` as
+//! `<env>`; the reported version is printed.
 
 use std::path::PathBuf;
 use std::{env, fs, process};
@@ -34,7 +36,7 @@ fn run(dist: PathBuf, env_name: &str, port: &str) -> Result<(), Box<dyn std::err
 
     let mut total = 0;
     let mut last_pct = usize::MAX;
-    device::flash_merged(port, &image, board, |p| match p {
+    let info = device::flash_and_confirm(port, &image, board, |p| match p {
         FlashProgress::Start { total: t } => total = t.max(1),
         FlashProgress::Write { done } => {
             let pct = done * 100 / total.max(1);
@@ -44,7 +46,11 @@ fn run(dist: PathBuf, env_name: &str, port: &str) -> Result<(), Box<dyn std::err
             }
         }
         FlashProgress::Verify => println!("  verifying"),
-        FlashProgress::Done => println!("  done, resetting"),
+        FlashProgress::Done => println!("  done, resetting; waiting for the board to answer `info`"),
     })?;
+    println!("running: {} {} (rev {:?}, link {:?})", info.env, info.ver, info.rev, info.link);
+    if info.ver.trim_start_matches('v') != manifest.version.trim_start_matches('v') {
+        println!("warning: the board reports version {}, the manifest says {}", info.ver, manifest.version);
+    }
     Ok(())
 }
