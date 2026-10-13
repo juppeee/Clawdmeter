@@ -30,6 +30,9 @@ gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "
 [target.'cfg(target_os = "linux")'.dependencies]
 tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
 dbus = "0.9"
+# Already in the tree through gpui: asks the compositor whether it draws
+# window frames (xdg-decoration) before the window opens.
+wayland-client = "0.31"
 
 [target.'cfg(target_os = "windows")'.dependencies]
 tray-icon = { version = "0.26", default-features = false }

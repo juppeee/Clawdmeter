@@ -11,8 +11,8 @@ use super::flasher::FlasherView;
 use super::overview::OverviewView;
 use super::settings::SettingsView;
 use super::setup::{SetupEvent, SetupView};
-use super::theme::{Theme, R_S};
-use super::widgets::clawd;
+use super::theme::{Theme, R_ITEM, R_PILL};
+use super::widgets::icon;
 use super::{chrome, Navigate, REFRESH};
 use crate::{ipc, Page};
 
@@ -132,94 +132,153 @@ impl AppView {
         cx.notify();
     }
 
+    fn nav_item(
+        &self,
+        t: &Theme,
+        page: Page,
+        badge: Option<SharedString>,
+        locked: bool,
+        cx: &mut Context<Self>,
+    ) -> impl IntoElement {
+        let on = page == self.page;
+        let enabled = on || !locked;
+        let text = t.text;
+        div()
+            .id(page.as_str())
+            .group(page.as_str())
+            .debug_selector(move || format!("nav-{}", page.as_str()))
+            .flex()
+            .items_center()
+            .gap(px(10.))
+            .h(px(32.))
+            .px(px(10.))
+            .rounded(px(R_ITEM))
+            .text_color(match (on, enabled) {
+                (true, _) => t.text,
+                (false, true) => t.dim,
+                (false, false) => t.mute,
+            })
+            .when(on, |d| d.bg(t.selected))
+            .when(enabled && !on, |d| {
+                d.cursor_pointer()
+                    .hover(|s| s.bg(t.hover).text_color(t.text))
+                    .on_click(cx.listener(move |v, _, _, cx| v.go(page, cx)))
+            })
+            .child(
+                icon(
+                    page_icon(page),
+                    16.,
+                    match (on, enabled) {
+                        (true, _) => t.text,
+                        (false, true) => t.dim,
+                        (false, false) => t.mute,
+                    },
+                )
+                .group_hover(page.as_str(), move |s| s.text_color(text)),
+            )
+            .child(div().flex_1().child(page.label()))
+            .when_some(badge, |d, b| {
+                d.child(
+                    div()
+                        .min_w(px(18.))
+                        .px(px(5.))
+                        .rounded(px(R_PILL))
+                        .bg(t.selected)
+                        .text_color(t.text)
+                        .text_size(px(11.))
+                        .flex()
+                        .justify_center()
+                        .child(b),
+                )
+            })
+    }
+
     fn sidebar(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         let pending_hooks = self.settings.read(cx).pending_hooks();
         let update = self.overview.read(cx).update_available();
         let locked = self.flasher.read(cx).flashing();
-        let mut nav = div()
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .w(px(184.))
-            .flex_shrink_0()
-            .px(px(12.))
-            .pt(px(16.))
-            .pb(px(12.))
-            .bg(t.bg)
-            .border_r_1()
-            .border_color(t.line)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(10.))
-                    .px(px(10.))
-                    .pb(px(16.))
-                    .child(clawd(1.25))
-                    .child(div().font_family(super::theme::FONT_DISPLAY).text_size(px(17.)).child("Clawdmeter")),
-            );
-        for page in Page::SIDEBAR {
-            let on = page == self.page;
-            let enabled = on || !locked;
-            let badge: Option<SharedString> = match page {
+        let badge = |page: Page| -> Option<SharedString> {
+            match page {
                 Page::Hooks if pending_hooks > 0 => Some(pending_hooks.to_string().into()),
                 Page::Flash if update => Some("1".into()),
                 _ => None,
-            };
-            nav = nav.child(
-                div()
-                    .id(page.as_str())
-                    .debug_selector(move || format!("nav-{}", page.as_str()))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .px(px(10.))
-                    .py(px(7.))
-                    .rounded(px(R_S))
-                    .text_color(match (on, enabled) {
-                        (true, _) => t.text,
-                        (false, true) => t.dim,
-                        (false, false) => t.mute,
-                    })
-                    .when(on, |d| d.bg(t.panel))
-                    .when(enabled && !on, |d| {
-                        d.cursor_pointer()
-                            .hover(|s| s.bg(t.panel).text_color(t.text))
-                            .on_click(cx.listener(move |v, _, _, cx| v.go(page, cx)))
-                    })
-                    .child(page.label())
-                    .when_some(badge, |d, b| {
-                        d.child(
-                            div()
-                                .px(px(7.))
-                                .rounded(px(999.))
-                                .bg(t.accent)
-                                .text_color(t.accent_ink)
-                                .text_size(px(11.))
-                                .child(b),
-                        )
-                    }),
-            );
+            }
+        };
+        let group = || div().flex().flex_col().gap(px(1.));
+        let mut main = group();
+        for page in [Page::Overview, Page::Device, Page::Flash] {
+            main = main.child(self.nav_item(t, page, badge(page), locked, cx));
         }
-        nav.child(div().flex_1()).child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(4.))
-                .px(px(10.))
-                .child(
+        let mut claude = group().child(
+            div().px(px(10.)).pt(px(18.)).pb(px(6.)).text_size(px(12.5)).text_color(t.mute).child("Claude Code"),
+        );
+        for page in [Page::Accounts, Page::Hooks] {
+            claude = claude.child(self.nav_item(t, page, badge(page), locked, cx));
+        }
+        let setup = div()
+            .id("run-setup")
+            .debug_selector(|| "run-setup".into())
+            .text_color(if locked { t.mute } else { t.dim })
+            .when(!locked, |d| {
+                d.cursor_pointer()
+                    .hover(|s| s.text_color(t.text))
+                    .on_click(cx.listener(|v, _, _, cx| v.go(Page::Setup, cx)))
+            })
+            .child("Run setup again");
+        let footer = div()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .px(px(10.))
+            .pt(px(12.))
+            .text_size(px(12.))
+            .text_color(t.mute)
+            .child(div().flex().child(setup))
+            .child(
+                div().flex().gap(px(4.)).whitespace_nowrap().child("Created by").child(
                     div()
-                        .id("run-setup")
-                        .debug_selector(|| "run-setup".into())
-                        .text_size(px(12.5))
+                        .id("credit")
+                        .debug_selector(|| "credit".into())
                         .text_color(t.dim)
                         .cursor_pointer()
-                        .hover(|s| s.text_color(t.text))
-                        .on_click(cx.listener(|v, _, _, cx| v.go(Page::Setup, cx)))
-                        .child("Run setup again"),
-                )
-                .child(div().text_size(px(12.)).text_color(t.mute).child(format!("Version {}", crate::version()))),
-        )
+                        .hover(|s| s.text_color(t.text).underline())
+                        .on_click(|_, _, cx| cx.open_url(CREDIT_URL))
+                        .child("@HermannBjorgvin"),
+                ),
+            )
+            .child(format!("Version {}", crate::version()));
+        div()
+            .flex()
+            .flex_col()
+            .w(px(216.))
+            .flex_shrink_0()
+            .px(px(8.))
+            .pt(px(12.))
+            .pb(px(14.))
+            .bg(t.bg)
+            .border_r_1()
+            .border_color(t.line)
+            .child(main)
+            .child(claude)
+            .child(div().flex_1())
+            .child(self.nav_item(t, Page::Settings, None, locked, cx))
+            .child(footer)
+    }
+}
+
+/// The author's profile, linked from the sidebar footer.
+const CREDIT_URL: &str = "https://x.com/HermannBjorgvin";
+
+/// The sidebar icon for a page.
+fn page_icon(page: Page) -> &'static str {
+    match page {
+        Page::Overview => "gauge",
+        Page::Device => "tablet",
+        Page::Flash => "zap",
+        Page::Accounts => "users",
+        Page::Hooks => "webhook",
+        Page::Settings => "settings",
+        Page::Setup => "rotate-ccw",
     }
 }
 

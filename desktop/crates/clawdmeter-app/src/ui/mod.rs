@@ -3,6 +3,7 @@
 //! closes; see [`crate::ipc`] for how it talks to the tray process.
 
 pub mod app;
+pub mod decorations;
 pub mod flasher;
 pub mod overview;
 pub mod settings;
@@ -17,7 +18,7 @@ use clawdmeter_core::{unix_now, Paths};
 use gpui::{
     canvas, div, point, prelude::*, px, size, App, Application, AssetSource, Bounds, CursorStyle, Decorations,
     HitboxBehavior, MouseButton, Pixels, Point, ResizeEdge, SharedString, Size, TitlebarOptions, Window, WindowBounds,
-    WindowDecorations, WindowOptions,
+    WindowOptions,
 };
 
 use crate::ipc::{self, AppCommand, StatusSnapshot};
@@ -38,24 +39,31 @@ pub const REFRESH: Duration = Duration::from_millis(500);
 const SIZE: (f32, f32) = (880., 640.);
 const MIN_SIZE: (f32, f32) = (720., 540.);
 
-/// Images bundled into the binary, served to `img()` by path. SVGs go
-/// through GPUI's resvg path, which renders them in full colour.
+/// Images bundled into the binary, served by path. Board art goes through
+/// `img()` (GPUI's resvg path, full colour); the Lucide icons through
+/// `svg()`, which draws them as a mask in the text colour.
 pub struct Assets;
 
-macro_rules! board_art {
-    ($($env:literal),* $(,)?) => {
-        &[$((concat!("boards/", $env, ".svg"), include_bytes!(concat!("../../assets/boards/", $env, ".svg")))),*]
+macro_rules! bundled {
+    ($($dir:literal: [$($name:literal),* $(,)?]),* $(,)?) => {
+        &[$($((
+            concat!($dir, "/", $name, ".svg"),
+            include_bytes!(concat!("../../assets/", $dir, "/", $name, ".svg")),
+        ),)*)*]
     };
 }
 
-const ASSETS: &[(&str, &[u8])] = board_art![
-    "waveshare_amoled_216",
-    "waveshare_amoled_216_c6",
-    "waveshare_amoled_18",
-    "waveshare_amoled_18_c6",
-    "waveshare_amoled_206",
-    "waveshare_lcd_154",
-    "waveshare_lcd_4",
+const ASSETS: &[(&str, &[u8])] = bundled![
+    "boards": [
+        "waveshare_amoled_216",
+        "waveshare_amoled_216_c6",
+        "waveshare_amoled_18",
+        "waveshare_amoled_18_c6",
+        "waveshare_amoled_206",
+        "waveshare_lcd_154",
+        "waveshare_lcd_4",
+    ],
+    "icons": ["gauge", "tablet", "zap", "users", "webhook", "settings", "rotate-ccw", "refresh-cw", "x", "chevron-right", "chevron-down"],
 ];
 
 impl Assets {
@@ -134,15 +142,7 @@ pub fn open(build: impl FnOnce(&mut Window, &mut gpui::Context<app::AppView>) ->
             app_id: Some("clawdmeter".into()),
             is_resizable: true,
             window_min_size: Some(size(px(MIN_SIZE.0), px(MIN_SIZE.1))),
-            // On Linux the app draws its own title bar, as Zed does: GNOME on
-            // Wayland draws none, yet gpui 0.2.2 still records a request for
-            // server decorations there, so asking for them leaves the window
-            // with no title bar at all.
-            window_decorations: Some(if cfg!(target_os = "linux") {
-                WindowDecorations::Client
-            } else {
-                WindowDecorations::Server
-            }),
+            window_decorations: Some(decorations::wanted()),
             ..Default::default()
         };
         if let Err(e) = cx.open_window(options, move |w, cx| cx.new(|cx| build(w, cx))) {
@@ -182,11 +182,20 @@ fn resize_cursor(edge: ResizeEdge) -> CursorStyle {
     }
 }
 
-/// The window frame: the system's title bar when the compositor draws one,
-/// otherwise (GNOME on Wayland) a minimal one of our own with a close button
-/// and resize edges.
+/// Height of our own header bar (Adwaita's).
+const HEADER_H: f32 = 46.;
+
+/// The window frame: nothing of ours when the platform draws a title bar,
+/// otherwise (GNOME on Wayland, see [`decorations`]) a header bar in the
+/// Adwaita style (centred title, round close button, double-click to
+/// maximize, right-click for the window menu) plus resize edges.
 pub fn chrome(t: &Theme, window: &Window, body: impl IntoElement) -> impl IntoElement {
     let client = matches!(window.window_decorations(), Decorations::Client { .. });
+    let wash = |a: f32| {
+        let mut c: gpui::Hsla = t.text.into();
+        c.a = a;
+        c
+    };
     div()
         .id("frame")
         .relative()
@@ -201,13 +210,13 @@ pub fn chrome(t: &Theme, window: &Window, body: impl IntoElement) -> impl IntoEl
             d.child(
                 div()
                     .id("titlebar")
+                    .relative()
                     .flex()
                     .flex_shrink_0()
                     .items_center()
-                    .justify_between()
-                    .h(px(38.))
-                    .pl(px(16.))
-                    .pr(px(6.))
+                    .justify_end()
+                    .h(px(HEADER_H))
+                    .px(px(11.))
                     .border_b_1()
                     .border_color(t.line)
                     .bg(t.bg)
@@ -221,19 +230,36 @@ pub fn chrome(t: &Theme, window: &Window, body: impl IntoElement) -> impl IntoEl
                             window.start_window_move();
                         }
                     })
-                    .child(div().text_size(px(13.)).text_color(t.dim).child("Clawdmeter"))
+                    .on_mouse_down(MouseButton::Left, |e, window, _| {
+                        if e.click_count == 2 {
+                            window.zoom_window();
+                        }
+                    })
+                    .on_mouse_down(MouseButton::Right, |e, window, _| window.show_window_menu(e.position))
+                    .child(
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .font_weight(gpui::FontWeight::BOLD)
+                            .text_size(px(14.))
+                            .child("Clawdmeter"),
+                    )
                     .child(
                         div()
                             .id("close")
                             .flex()
                             .items_center()
                             .justify_center()
-                            .size(px(28.))
-                            .rounded(px(theme::R_S))
+                            .size(px(24.))
+                            .rounded(px(theme::R_PILL))
+                            .bg(wash(0.1))
                             .cursor_pointer()
-                            .text_color(t.dim)
-                            .hover(|s| s.bg(t.panel))
-                            .child("✕")
+                            .hover(|s| s.bg(wash(0.15)))
+                            .active(|s| s.bg(wash(0.3)))
+                            .child(widgets::icon("x", 16., t.text))
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(|_, window, _| window.remove_window()),
                     ),

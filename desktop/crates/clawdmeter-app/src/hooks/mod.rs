@@ -371,7 +371,7 @@ mod tests {
             let state_b = b.join("state");
             run(Mode::parse(&args(mode)), input, &state_b, 1_700_000_000);
             let snapshot = |d: &Path| -> Vec<(String, String)> {
-                let mut out: Vec<(String, String)> = fs::read_dir(&d)
+                let mut out: Vec<(String, String)> = fs::read_dir(d)
                     .map(|rd| {
                         rd.flatten()
                             .map(|e| e.file_name().to_string_lossy().into_owned())

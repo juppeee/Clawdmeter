@@ -18,7 +18,7 @@ use gpui::{div, img, prelude::*, px, Context, EventEmitter, PathPromptOptions, S
 
 use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_M, R_S};
 use super::widgets::{
-    button, caption, card, field, heading, notice, para, pill, segmented, subheading, toggle, ButtonKind, Tone,
+    button, caption, card, field, heading, icon, notice, para, pill, segmented, subheading, toggle, ButtonKind, Tone,
 };
 use super::{command, live_status, not_running_text, run_blocking, Navigate, REFRESH};
 use crate::diff::{line_diff, with_context, DiffLine};
@@ -84,6 +84,8 @@ pub struct SettingsView {
     /// The old daemon's login entry (systemd unit, LaunchAgent or Run value).
     legacy: Option<autostart::LegacyEntry>,
     notice: Option<(Tone, String)>,
+    /// The Settings page's Advanced section is open.
+    advanced: bool,
     ticks: u32,
 }
 
@@ -121,6 +123,7 @@ impl SettingsView {
             autostart_on: false,
             legacy: None,
             notice: None,
+            advanced: false,
             ticks: 0,
         };
         v.reload();
@@ -929,44 +932,6 @@ impl SettingsView {
                 });
             }),
         ));
-        let hb = self.settings.heartbeat_interval;
-        let me = cx.entity().downgrade();
-        pane = pane.child(field(
-            t,
-            "Keep-alive",
-            "Resends the last numbers so the device doesn't mark them stale between checks.",
-            segmented(t, "hb", &[(60u64, "60 s"), (30u64, "30 s")], &hb, true, move |n, _, cx| {
-                let _ = me.update(cx, |v, cx| {
-                    v.save(|s, _| s.heartbeat_interval = n);
-                    cx.notify();
-                });
-            }),
-        ));
-        let claude = self.snap.as_ref().and_then(|s| s.claude.clone());
-        pane = pane.child(field(
-            t,
-            "Claude Code CLI",
-            match &claude {
-                Some(c) => format!("Using {}", tilde(c, &self.paths.home)),
-                None if self.snap.is_some() => "Not found. Set claude_path in the config file.".into(),
-                None => "Shown while Clawdmeter is running.".into(),
-            },
-            div(),
-        ));
-        let log = self.paths.state_dir.join("daemon.log");
-        pane = pane.child(field(
-            t,
-            "Log file",
-            tilde(&log.display().to_string(), &self.paths.home),
-            button(t, "open-log", "Open", ButtonKind::Small, log.exists(), move |_, _, cx| cx.open_with_system(&log)),
-        ));
-        let cfgp = self.paths.config_file.clone();
-        pane = pane.child(field(
-            t,
-            "Config file",
-            tilde(&cfgp.display().to_string(), &self.paths.home),
-            button(t, "open-cfg", "Open", ButtonKind::Small, cfgp.exists(), move |_, _, cx| cx.open_with_system(&cfgp)),
-        ));
         let p = self.paths.clone();
         pane = pane.child(field(
             t,
@@ -995,6 +960,66 @@ impl SettingsView {
                     });
                 }),
             ));
+        }
+        // Rarely needed: where things live and which CLI runs.
+        let open = self.advanced;
+        let text = t.text;
+        pane = pane.child(
+            div()
+                .id("advanced")
+                .group("advanced")
+                .debug_selector(|| "advanced".into())
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .pt(px(14.))
+                .pb(px(4.))
+                .text_size(px(14.))
+                .text_color(t.dim)
+                .cursor_pointer()
+                .hover(|s| s.text_color(t.text))
+                .on_click(cx.listener(|v, _, _, cx| {
+                    v.advanced = !v.advanced;
+                    cx.notify();
+                }))
+                .child(
+                    icon(if open { "chevron-down" } else { "chevron-right" }, 16., t.dim)
+                        .group_hover("advanced", move |s| s.text_color(text)),
+                )
+                .child("Advanced"),
+        );
+        if open {
+            let mut advanced = div().flex().flex_col();
+            let claude = self.snap.as_ref().and_then(|s| s.claude.clone());
+            advanced = advanced.child(field(
+                t,
+                "Claude Code CLI",
+                match &claude {
+                    Some(c) => format!("Using {}", tilde(c, &self.paths.home)),
+                    None if self.snap.is_some() => "Not found. Set claude_path in the config file.".into(),
+                    None => "Shown while Clawdmeter is running.".into(),
+                },
+                div(),
+            ));
+            let log = self.paths.state_dir.join("daemon.log");
+            advanced = advanced.child(field(
+                t,
+                "Log file",
+                tilde(&log.display().to_string(), &self.paths.home),
+                button(t, "open-log", "Open", ButtonKind::Small, log.exists(), move |_, _, cx| {
+                    cx.open_with_system(&log)
+                }),
+            ));
+            let cfgp = self.paths.config_file.clone();
+            advanced = advanced.child(field(
+                t,
+                "Config file",
+                tilde(&cfgp.display().to_string(), &self.paths.home),
+                button(t, "open-cfg", "Open", ButtonKind::Small, cfgp.exists(), move |_, _, cx| {
+                    cx.open_with_system(&cfgp)
+                }),
+            ));
+            pane = pane.child(advanced);
         }
         pane
     }

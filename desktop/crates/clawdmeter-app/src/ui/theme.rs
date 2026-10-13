@@ -1,6 +1,7 @@
-//! Design tokens (spec §01). Every colour maps to a `THEME_*` constant in
-//! `firmware/src/theme.h`, except the desktop-only surface, hairline, mute,
-//! warning and focus colours. Light and dark follow the OS appearance.
+//! Design tokens. The neutrals are the desktop's own, quiet greys in the
+//! family of the Claude desktop app; the accent and the usage colours are
+//! the device's (`THEME_*` in `firmware/src/theme.h`). Clawd orange is for
+//! Clawd and primary actions only. Light and dark follow the OS appearance.
 
 use gpui::{rgb, Rgba, WindowAppearance};
 
@@ -13,6 +14,8 @@ pub const FONT_MONO: &str = "DejaVu Sans Mono";
 
 /// Radius for inputs.
 pub const R_S: f32 = 6.0;
+/// Radius for buttons and list rows (sidebar items, menu rows).
+pub const R_ITEM: f32 = 8.0;
 /// Radius for panels (the device's zone radius).
 pub const R_M: f32 = 12.0;
 /// Radius for the window chrome.
@@ -23,21 +26,25 @@ pub const R_PILL: f32 = 999.0;
 /// Resolved colour tokens.
 #[derive(Debug, Clone, Copy)]
 pub struct Theme {
-    /// `--bg`: THEME_BG (true black on dark).
+    /// Sidebar, title bar and inset wells (logs, diffs).
     pub bg: Rgba,
-    /// `--surface`: window background (desktop).
+    /// The page background.
     pub surface: Rgba,
-    /// `--panel`: THEME_PANEL.
+    /// Cards.
     pub panel: Rgba,
-    /// `--line`: hairlines (desktop).
+    /// Row hover.
+    pub hover: Rgba,
+    /// Selected row, quiet button fill.
+    pub selected: Rgba,
+    /// Hairlines.
     pub line: Rgba,
-    /// `--track`: THEME_BAR_BG.
+    /// Bar and switch tracks.
     pub track: Rgba,
-    /// `--text`: THEME_TEXT.
+    /// Body text.
     pub text: Rgba,
-    /// `--dim`: THEME_DIM.
+    /// Secondary text, icons.
     pub dim: Rgba,
-    /// `--mute`: tertiary text (desktop).
+    /// Tertiary text (help, captions).
     pub mute: Rgba,
     /// `--accent`: THEME_ACCENT, Clawd and primary actions.
     pub accent: Rgba,
@@ -56,17 +63,19 @@ pub struct Theme {
 }
 
 impl Theme {
-    /// The dark tokens (the device's own palette).
+    /// The dark tokens.
     pub fn dark() -> Self {
         Theme {
-            bg: rgb(0x000000),
-            surface: rgb(0x121211),
-            panel: rgb(0x1f1f1e),
-            line: rgb(0x34332f),
-            track: rgb(0x2a2a28),
-            text: rgb(0xfaf9f5),
-            dim: rgb(0xb0aea5),
-            mute: rgb(0x8a887f),
+            bg: rgb(0x111111),
+            surface: rgb(0x171717),
+            panel: rgb(0x1f1f1f),
+            hover: rgb(0x232323),
+            selected: rgb(0x2e2e2e),
+            line: rgb(0x2a2a2a),
+            track: rgb(0x2c2c2c),
+            text: rgb(0xececec),
+            dim: rgb(0xb4b4b4),
+            mute: rgb(0x8a8a8a),
             accent: rgb(0xd97757),
             accent_ink: rgb(0x141413),
             ok: rgb(0x788c5d),
@@ -80,14 +89,16 @@ impl Theme {
     /// The light tokens.
     pub fn light() -> Self {
         Theme {
-            bg: rgb(0xfaf9f5),
-            surface: rgb(0xffffff),
-            panel: rgb(0xf0eee6),
-            line: rgb(0xdcd9ce),
-            track: rgb(0xe3e0d6),
-            text: rgb(0x141413),
-            dim: rgb(0x5e5d59),
-            mute: rgb(0x7a7870),
+            bg: rgb(0xf4f4f3),
+            surface: rgb(0xfcfcfc),
+            panel: rgb(0xf2f2f1),
+            hover: rgb(0xe9e9e8),
+            selected: rgb(0xe1e1df),
+            line: rgb(0xe3e3e1),
+            track: rgb(0xe4e4e2),
+            text: rgb(0x1a1a1a),
+            dim: rgb(0x525252),
+            mute: rgb(0x737373),
             accent: rgb(0xc6613f),
             accent_ink: rgb(0xffffff),
             ok: rgb(0x5f7348),

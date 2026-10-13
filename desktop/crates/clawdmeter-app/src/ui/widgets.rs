@@ -1,12 +1,14 @@
 //! The handful of controls the window needs, drawn with the design tokens:
-//! buttons, pills, toggles, segmented choices, setting rows, and Clawd.
+//! buttons, pills, toggles, segmented choices, setting rows, icons and Clawd.
+
+use std::time::Duration;
 
 use gpui::{
-    canvas, div, fill, point, prelude::*, px, rgb, size, App, Bounds, ClickEvent, ElementId, Hsla, Rgba, SharedString,
-    Window,
+    canvas, div, fill, percentage, point, prelude::*, px, rgb, size, svg, Animation, AnimationExt as _, App, Bounds,
+    ClickEvent, ElementId, Hsla, Rgba, SharedString, Svg, Transformation, Window,
 };
 
-use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_M, R_PILL, R_S};
+use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_ITEM, R_M, R_PILL, R_S};
 use crate::art::{cell_rgb, idle_cell, IDLE_H, IDLE_W};
 
 type Handler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -23,7 +25,7 @@ pub enum ButtonKind {
     Small,
 }
 
-/// A pill-shaped button. Disabled buttons are flat and grey whatever their
+/// A rounded button. Disabled buttons are flat and grey whatever their
 /// kind, so a disabled primary never reads as a dimmed-but-clickable one.
 pub fn button(
     t: &Theme,
@@ -40,7 +42,7 @@ pub fn button(
     };
     let hover_bg = match kind {
         ButtonKind::Primary => t.focus,
-        _ => t.panel,
+        _ => t.hover,
     };
     let (pad_x, h, size) = if kind == ButtonKind::Small { (12., 28., 13.) } else { (16., 34., 14.) };
     let id: ElementId = id.into();
@@ -54,7 +56,7 @@ pub fn button(
         .justify_center()
         .h(px(h))
         .px(px(pad_x))
-        .rounded(px(R_PILL))
+        .rounded(px(R_ITEM))
         .border_1()
         .border_color(border)
         .bg(bg)
@@ -91,23 +93,72 @@ pub fn menu_row(
         .gap(px(12.))
         .h(px(34.))
         .px(px(10.))
-        .rounded(px(R_S))
+        .rounded(px(R_ITEM))
         .text_size(px(14.))
         .text_color(if enabled { t.text } else { t.mute })
         .child(label.into())
         .when_some(hint, |d, h| d.child(div().text_size(px(12.5)).text_color(t.mute).child(h)));
     if enabled {
         let handler: Handler = Box::new(on_click);
-        el.cursor_pointer().hover(|s| s.bg(t.panel)).on_click(move |e, w, cx| handler(e, w, cx))
+        el.cursor_pointer().hover(|s| s.bg(t.hover)).on_click(move |e, w, cx| handler(e, w, cx))
     } else {
         el
     }
 }
 
-/// A message box: tone-coloured edge and dot, body text in the normal
-/// colour so it stays readable, optional actions underneath.
+/// A bundled monochrome icon (`assets/icons/<name>.svg`, Lucide) at `size`
+/// px in `color`. GPUI paints an `svg()` only in its own text colour (it
+/// doesn't inherit one), so hover changes go through `group_hover`.
+pub fn icon(name: &str, size: f32, color: impl Into<Hsla>) -> Svg {
+    svg().path(SharedString::from(format!("icons/{name}.svg"))).flex_shrink_0().size(px(size)).text_color(color)
+}
+
+/// A square icon-only button (page actions). `spinning` turns the glyph
+/// while something runs.
+pub fn icon_button(
+    t: &Theme,
+    id: &'static str,
+    name: &str,
+    enabled: bool,
+    spinning: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let text = t.text;
+    let glyph = icon(name, 16., if enabled { t.dim } else { t.mute }).group_hover(id, move |s| s.text_color(text));
+    let glyph = if spinning {
+        glyph
+            .with_animation("spin", Animation::new(Duration::from_millis(900)).repeat(), |g, d| {
+                g.with_transformation(Transformation::rotate(percentage(d)))
+            })
+            .into_any_element()
+    } else {
+        glyph.into_any_element()
+    };
+    let el = div()
+        .id(id)
+        .group(id)
+        .debug_selector(move || id.to_owned())
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .size(px(30.))
+        .rounded(px(R_ITEM))
+        .child(glyph);
+    if enabled {
+        let handler: Handler = Box::new(on_click);
+        el.cursor_pointer().hover(|s| s.bg(t.hover)).on_click(move |e, w, cx| handler(e, w, cx))
+    } else {
+        el
+    }
+}
+
+/// A message box: a tone-coloured dot, body text in the normal colour so it
+/// stays readable, optional actions underneath. Problems (warn, bad) tint
+/// the box too; everything else stays neutral.
 pub fn notice(t: &Theme, tone: Tone, text: impl Into<SharedString>) -> gpui::Div {
     let c = tone_color(t, tone);
+    let loud = matches!(tone, Tone::Warn | Tone::Bad);
     div()
         .flex()
         .flex_col()
@@ -115,9 +166,9 @@ pub fn notice(t: &Theme, tone: Tone, text: impl Into<SharedString>) -> gpui::Div
         .px(px(14.))
         .py(px(12.))
         .rounded(px(R_M))
-        .bg(tint(c, 0.08))
+        .bg(if loud { tint(c, 0.08) } else { t.panel.into() })
         .border_1()
-        .border_color(tint(c, 0.45))
+        .border_color(if loud { tint(c, 0.45) } else { t.line.into() })
         .child(div().flex().items_start().gap(px(10.)).child(div().mt(px(6.)).child(dot(t, tone))).child(
             div().flex_1().min_w_0().text_size(px(13.)).line_height(px(19.)).text_color(t.text).child(text.into()),
         ))
@@ -247,7 +298,15 @@ pub fn segmented<V: Clone + PartialEq + 'static>(
     on_select: impl Fn(V, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
     let on_select = std::rc::Rc::new(on_select);
-    let mut row = div().flex().flex_shrink_0().p(px(2.)).gap(px(2.)).rounded(px(R_S + 2.)).bg(t.track);
+    let mut row = div()
+        .flex()
+        .flex_shrink_0()
+        .p(px(2.))
+        .gap(px(2.))
+        .rounded(px(R_ITEM))
+        .bg(t.panel)
+        .border_1()
+        .border_color(t.line);
     for (i, (value, label)) in options.iter().enumerate() {
         let on = value == selected;
         let v = value.clone();
@@ -265,7 +324,7 @@ pub fn segmented<V: Clone + PartialEq + 'static>(
                 (true, true) => t.text,
                 (true, false) => t.dim,
             })
-            .when(on, |d| d.bg(if enabled { t.surface } else { t.panel }))
+            .when(on, |d| d.bg(if enabled { t.selected } else { t.hover }))
             .child(SharedString::from(label.to_string()));
         if enabled && !on {
             seg = seg.cursor_pointer().hover(|s| s.text_color(t.text)).on_click(move |_, w, cx| cb(v.clone(), w, cx));

@@ -7,8 +7,12 @@
 //! HOME=/tmp/cm XDG_CACHE_HOME=/tmp/cm/.cache \
 //!   cargo run -p clawdmeter-app --example demo -- [--page PAGE] [--status connected|off]
 //!   [--board none|fresh|current|old] [--setup welcome|board|flash|pair|hooks|done] [--hooks-preview]
-//!   [--flash-to identify|firmware|flash|done] [--shop]
+//!   [--flash-to identify|firmware|flash|done] [--shop] [--accounts retrying] [--refresh wait|checking]
 //! ```
+//!
+//! `--accounts retrying` adds a second account that is being rate-limited;
+//! `--refresh` shows the Overview's refresh button waiting out the
+//! per-account gap, or mid-check.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -103,10 +107,26 @@ fn release(paths: &Paths) -> std::path::PathBuf {
     dir.join("manifest.json")
 }
 
-fn fake_status(paths: &Paths) {
+fn fake_status(paths: &Paths, retrying: bool, refresh: Option<String>) {
     let paths = paths.clone();
+    let work = paths.home.join(".claude-work");
+    if retrying {
+        std::fs::create_dir_all(&work).unwrap();
+        std::fs::write(&paths.config_file, "config_dirs = ~/.claude, ~/.claude-work\n").unwrap();
+    }
+    let started = unix_now();
     std::thread::spawn(move || loop {
         let now = unix_now();
+        let errors = if retrying {
+            vec![ipc::AccountError {
+                dir: work.display().to_string(),
+                message: "Claude Code's usage service is rate-limiting this account. Trying again in about 10 minutes."
+                    .into(),
+                retrying: true,
+            }]
+        } else {
+            vec![]
+        };
         let snap = StatusSnapshot {
             updated_at: now,
             link: "connected".into(),
@@ -122,6 +142,9 @@ fn fake_status(paths: &Paths) {
             latest_firmware: Some(VERSION.into()),
             device_firmware: Some("1.8.2".into()),
             tray: "Connected".into(),
+            errors,
+            refresh_at: (refresh.as_deref() == Some("wait")).then_some(started + 100),
+            polling: refresh.as_deref() == Some("checking"),
             ..Default::default()
         };
         let _ = ipc::write_status(&paths, &snap);
@@ -135,7 +158,7 @@ fn main() {
     std::fs::create_dir_all(paths.home.join(".claude")).unwrap();
     std::fs::create_dir_all(&paths.state_dir).unwrap();
     if arg(&args, "--status").as_deref() != Some("off") {
-        fake_status(&paths);
+        fake_status(&paths, arg(&args, "--accounts").as_deref() == Some("retrying"), arg(&args, "--refresh"));
         let _ = ipc::save_firmware_record(&paths, &FirmwareRecord { env: ENV.into(), ver: "1.8.2".into() });
     } else {
         let _ = std::fs::remove_file(ipc::status_file(&paths));
