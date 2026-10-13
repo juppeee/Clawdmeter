@@ -311,9 +311,11 @@ static lv_color_t pct_color(float pct) {
     return COL_GREEN;
 }
 
-static void format_reset_time(int mins, char* buf, size_t len) {
+// `none`: what a missing reset time means (-1 in the payload): the session
+// window hasn't started, the weekly one is unknown.
+static void format_reset_time(int mins, char* buf, size_t len, const char* none) {
     if (mins < 0) {
-        snprintf(buf, len, "---");
+        snprintf(buf, len, "%s", none);
     } else if (mins < 60) {
         snprintf(buf, len, "Resets in %dm", mins);
     } else if (mins < 1440) {
@@ -680,7 +682,7 @@ void ui_update(const UsageData* data) {
                         LV_ALIGN_OUT_RIGHT_TOP, 4, 12);
     } else {
         lv_label_set_text_fmt(lbl_session_pct, "%d%%", s_pct);
-        format_reset_time(data->session_reset_mins, buf, sizeof(buf));
+        format_reset_time(data->session_reset_mins, buf, sizeof(buf), "Not started");
         lv_label_set_text(lbl_session_reset, buf);
     }
 
@@ -704,7 +706,7 @@ void ui_update(const UsageData* data) {
         lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", w_pct);
         lv_bar_set_value(bar_weekly, w_pct, LV_ANIM_ON);
         lv_obj_set_style_bg_color(bar_weekly, pct_color(data->weekly_pct), LV_PART_INDICATOR);
-        format_reset_time(data->weekly_reset_mins, buf, sizeof(buf));
+        format_reset_time(data->weekly_reset_mins, buf, sizeof(buf), "---");
         lv_label_set_text(lbl_weekly_reset, buf);
     }
 }
