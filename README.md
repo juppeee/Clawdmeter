@@ -19,13 +19,46 @@ installed and signed in to an account that reports usage limits.
 
 ### 1. Install the desktop app
 
-Download your OS archive from the [latest release](https://github.com/HermannBjorgvin/Clawdmeter/releases/latest).
+Download the installer for your OS from the [latest release](https://github.com/HermannBjorgvin/Clawdmeter/releases/latest).
+None of them are signed, so your OS will warn once.
 
-| OS | Install |
-| --- | --- |
-| Linux | Unpack `clawdmeter-<version>-linux-x86_64.tar.gz` and put `clawdmeter` on your `PATH`, such as `~/.local/bin`. Bluetooth requires BlueZ and a D-Bus session. The tray needs a StatusNotifierItem host; GNOME needs the AppIndicator extension. |
-| macOS | Unpack `clawdmeter-<version>-macos-universal.tar.gz` and move `Clawdmeter.app` to `/Applications`. The app is not notarized. On first launch, right-click and choose **Open**, then allow Bluetooth access. |
-| Windows | Unpack `clawdmeter-<version>-windows-x86_64.zip` into a permanent folder and run `clawdmeter.exe`. SmartScreen may flag the unsigned app on first launch. |
+| OS | File | Install |
+| --- | --- | --- |
+| macOS | `clawdmeter-<version>-macos-universal.dmg` | Open it and drag **Clawdmeter** to **Applications**. The first launch is blocked: open **System Settings → Privacy & Security**, click **Open Anyway**, then allow Bluetooth access. |
+| Windows | `clawdmeter-<version>-windows-x86_64.msi` | Run it. If SmartScreen stops it, click **More info → Run anyway**. Installs for your user only (no admin) with a Start Menu entry; newer versions upgrade in place. |
+| Debian, Ubuntu | `clawdmeter_<version>_amd64.deb` | `sudo apt install ./clawdmeter_<version>_amd64.deb` |
+| Other Linux | `clawdmeter-<version>-x86_64.AppImage` | `chmod +x clawdmeter-*.AppImage` and run it. Keep it in one place: the Claude Code hooks point at the file. |
+| NixOS, Nix | — | `nix run github:HermannBjorgvin/Clawdmeter`, or see [Nix](#nix). |
+
+Portable archives (`.tar.gz` for Linux and macOS, `.zip` for Windows) are on
+the same release if you'd rather not install anything.
+
+On Linux, Bluetooth needs BlueZ and a D-Bus session, and GPUI needs working
+Vulkan drivers. The tray needs a StatusNotifierItem host; GNOME needs the
+AppIndicator extension.
+
+#### Nix
+
+The flake builds the app for `x86_64-linux` and `aarch64-linux`. To keep it
+installed on NixOS or with home-manager, add the flake as an input and the
+package to your packages:
+
+```nix
+# flake.nix
+inputs.clawdmeter.url = "github:HermannBjorgvin/Clawdmeter";
+
+# NixOS module
+environment.systemPackages = [ inputs.clawdmeter.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+# or home-manager
+home.packages = [ inputs.clawdmeter.packages.${pkgs.stdenv.hostPlatform.system}.default ];
+```
+
+Vulkan comes from the system (`hardware.graphics.enable = true`) and
+Bluetooth from `hardware.bluetooth.enable = true`. The app writes its own
+`/nix/store` path into the Claude Code hooks and the autostart entry, so
+reinstall the hooks from the **Hooks** page and toggle **Start at login** after
+an upgrade. `nix develop` gives a shell with Rust, PlatformIO and the Linux
+libraries.
 
 Launch Clawdmeter to open setup. The app stays in the tray or macOS menu
 bar. Without a tray, it uses a window; closing that window quits the app.
