@@ -120,8 +120,7 @@ fn fake_status(paths: &Paths, retrying: bool, refresh: Option<String>) {
         let errors = if retrying {
             vec![ipc::AccountError {
                 dir: work.display().to_string(),
-                message: "Claude Code's usage service is rate-limiting this account. Trying again in about 10 minutes."
-                    .into(),
+                message: "Usage requests are temporarily limited. Trying again in about 10 minutes.".into(),
                 retrying: true,
             }]
         } else {

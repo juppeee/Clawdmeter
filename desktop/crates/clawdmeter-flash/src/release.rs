@@ -73,18 +73,21 @@ impl ReleaseError {
 impl std::fmt::Display for ReleaseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ReleaseError::NoRelease => write!(f, "No firmware has been published yet."),
-            ReleaseError::Offline(_) => write!(f, "Couldn't reach GitHub. Check your internet connection and try again."),
-            ReleaseError::RateLimited => {
-                write!(f, "GitHub is limiting requests from this network right now. Try again in a few minutes.")
+            ReleaseError::NoRelease => write!(f, "No firmware release was found."),
+            ReleaseError::Offline(_) => {
+                write!(f, "Couldn't reach GitHub. Check your internet connection and try again.")
             }
-            ReleaseError::Http(_) => write!(f, "GitHub didn't answer properly. Try again in a minute."),
-            ReleaseError::Manifest(_) => write!(f, "This release's manifest.json is damaged or from a newer app."),
+            ReleaseError::RateLimited => {
+                write!(f, "GitHub is limiting requests from this network. Try again later.")
+            }
+            ReleaseError::Http(_) => write!(f, "Couldn't read the release response from GitHub. Try again later."),
+            ReleaseError::Manifest(_) => {
+                write!(f, "Couldn't read this release's manifest.json. Check that the app supports this release.")
+            }
             ReleaseError::MissingAsset(n) => write!(f, "This release is missing {n}."),
-            ReleaseError::HashMismatch { file, .. } => write!(
-                f,
-                "{file} doesn't match its checksum, so it wasn't used. Try again; if it keeps happening, the release is broken."
-            ),
+            ReleaseError::HashMismatch { file, .. } => {
+                write!(f, "Checksum mismatch for {file}. Download it again before flashing.")
+            }
             ReleaseError::Io(e) => match e.kind() {
                 io::ErrorKind::PermissionDenied => write!(f, "No permission to read or write that file."),
                 io::ErrorKind::NotFound => write!(f, "File not found."),
@@ -305,7 +308,7 @@ mod tests {
         let latest = latest_url("o/r");
         assert_eq!(
             ReleaseError::from_ureq(&latest, ureq::Error::StatusCode(404)).to_string(),
-            "No firmware has been published yet."
+            "No firmware release was found."
         );
         assert!(matches!(
             ReleaseError::from_ureq("https://x/a.bin", ureq::Error::StatusCode(404)),
@@ -317,7 +320,7 @@ mod tests {
         assert!(!off.to_string().contains("http"), "no URL dumps in the message");
         assert!(off.detail().unwrap().contains(&latest), "but the log keeps it");
         let bad = ReleaseError::HashMismatch { file: "a.bin".into(), expected: "aa".into(), actual: "bb".into() };
-        assert!(bad.to_string().starts_with("a.bin doesn't match its checksum"));
+        assert!(bad.to_string().starts_with("Checksum mismatch for a.bin."));
     }
 
     #[test]

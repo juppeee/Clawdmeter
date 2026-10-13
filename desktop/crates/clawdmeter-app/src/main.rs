@@ -19,11 +19,11 @@ clawdmeter - Claude Code usage on your desk
 USAGE:
     clawdmeter [OPTIONS]
 
-With no options, runs the tray app: the daemon plus a tray icon (or the app
+With no options, runs the tray app: usage updates plus a tray icon (or the app
 window on desktops without a tray).
 
 OPTIONS:
-    --daemon          Run headless: poll usage, follow hooks, drive the device over BLE
+    --daemon          Run headless: poll usage, follow hooks, send updates over Bluetooth LE
     --window [PAGE]   Open the app window on a page: overview (default), device,
                       flash, accounts, hooks, settings or setup
       [--manifest P]  flash page: use a local release manifest.json instead of GitHub
@@ -96,7 +96,7 @@ fn main() {
                     0
                 }
                 Ok(None) => {
-                    eprintln!("no reply (not running Clawdmeter firmware, or too old for `info`)");
+                    eprintln!("No firmware reply. Check USB and whether the board supports the info command.");
                     1
                 }
                 Err(e) => {
@@ -130,8 +130,8 @@ fn main() {
 fn warn_if_legacy_daemon(paths: &Paths) {
     if let Some(e) = clawdmeter_core::autostart::legacy_entry(&paths.home) {
         log::warn!(
-            "the old Clawdmeter daemon is still set to start at login ({}); it will fight this app for the \
-             device. Turn it off on the app's Settings page",
+            "A legacy Clawdmeter service is enabled ({}). Disable it in Settings so only one process connects to the \
+             device.",
             e.describe()
         );
     }

@@ -21,6 +21,10 @@ pub struct BoardInfo {
     pub summary: &'static str,
     /// SoC.
     pub chip: &'static str,
+    /// Has a PWR button the firmware reads (hold 3 s, release: clear the
+    /// pairing). The LCD-4's KEY/PWR is a hardware reset; it clears the
+    /// pairing with a 5 s hold on the screen while the pairing hint shows.
+    pub pwr_button: bool,
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
@@ -34,6 +38,7 @@ pub const BOARDS: [BoardInfo; 7] = [
         buy_url: "https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=149786",
         summary: "480×480 · 3 buttons",
         chip: "ESP32-S3",
+        pwr_button: true,
     },
     BoardInfo {
         env: "waveshare_amoled_18",
@@ -44,6 +49,7 @@ pub const BOARDS: [BoardInfo; 7] = [
         buy_url: "https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=149786",
         summary: "368×448 · 2 buttons",
         chip: "ESP32-S3",
+        pwr_button: true,
     },
     BoardInfo {
         env: "waveshare_amoled_206",
@@ -54,6 +60,7 @@ pub const BOARDS: [BoardInfo; 7] = [
         buy_url: "https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm?&aff_id=149786",
         summary: "410×502 · watch",
         chip: "ESP32-S3",
+        pwr_button: true,
     },
     BoardInfo {
         env: "waveshare_lcd_154",
@@ -64,6 +71,7 @@ pub const BOARDS: [BoardInfo; 7] = [
         buy_url: "https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33869&aff_id=149786",
         summary: "240×240 · SPI TFT",
         chip: "ESP32-S3",
+        pwr_button: true,
     },
     BoardInfo {
         env: "waveshare_lcd_4",
@@ -74,6 +82,7 @@ pub const BOARDS: [BoardInfo; 7] = [
         buy_url: "https://www.waveshare.com/esp32-s3-touch-lcd-4.htm",
         summary: "480×480 · RGB TFT",
         chip: "ESP32-S3",
+        pwr_button: false,
     },
     BoardInfo {
         env: "waveshare_amoled_216_c6",
@@ -84,6 +93,7 @@ pub const BOARDS: [BoardInfo; 7] = [
         buy_url: "https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm?&aff_id=149786",
         summary: "480×480 · ESP32-C6",
         chip: "ESP32-C6",
+        pwr_button: true,
     },
     BoardInfo {
         env: "waveshare_amoled_18_c6",
@@ -94,6 +104,7 @@ pub const BOARDS: [BoardInfo; 7] = [
         buy_url: "https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm?&aff_id=149786",
         summary: "368×448 · ESP32-C6",
         chip: "ESP32-C6",
+        pwr_button: true,
     },
 ];
 

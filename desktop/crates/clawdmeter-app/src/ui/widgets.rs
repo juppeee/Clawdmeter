@@ -4,11 +4,11 @@
 use std::time::Duration;
 
 use gpui::{
-    canvas, div, fill, percentage, point, prelude::*, px, rgb, size, svg, Animation, AnimationExt as _, App, Bounds,
-    ClickEvent, ElementId, Hsla, Rgba, SharedString, Svg, Transformation, Window,
+    canvas, div, fill, percentage, point, prelude::*, px, rgb, size, svg, Animation, AnimationExt as _, AnyView, App,
+    Bounds, ClickEvent, ElementId, Hsla, Rgba, SharedString, Svg, Transformation, Window,
 };
 
-use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_ITEM, R_M, R_PILL, R_S};
+use super::theme::{Theme, FONT_BODY, FONT_DISPLAY, FONT_MONO, R_ITEM, R_M, R_PILL, R_S};
 use crate::art::{cell_rgb, idle_cell, IDLE_H, IDLE_W};
 
 type Handler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -113,12 +113,38 @@ pub fn icon(name: &str, size: f32, color: impl Into<Hsla>) -> Svg {
     svg().path(SharedString::from(format!("icons/{name}.svg"))).flex_shrink_0().size(px(size)).text_color(color)
 }
 
-/// A square icon-only button (page actions). `spinning` turns the glyph
-/// while something runs.
+/// A hover tooltip: one short line.
+struct Tip(SharedString);
+
+impl Render for Tip {
+    fn render(&mut self, window: &mut Window, _: &mut gpui::Context<Self>) -> impl IntoElement {
+        let t = Theme::for_appearance(window.appearance());
+        div()
+            .px(px(8.))
+            .py(px(4.))
+            .rounded(px(R_S))
+            .bg(t.panel)
+            .border_1()
+            .border_color(t.line)
+            .font_family(FONT_BODY)
+            .text_size(px(12.5))
+            .text_color(t.text)
+            .child(self.0.clone())
+    }
+}
+
+/// A tooltip builder for `.tooltip(…)`: names an icon-only control.
+pub fn tooltip(text: &'static str) -> impl Fn(&mut Window, &mut App) -> AnyView + 'static {
+    move |_, cx| cx.new(|_| Tip(text.into())).into()
+}
+
+/// A square icon-only button (page actions) named by `label` in its
+/// tooltip. `spinning` turns the glyph while something runs.
 pub fn icon_button(
     t: &Theme,
     id: &'static str,
     name: &str,
+    label: &'static str,
     enabled: bool,
     spinning: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
@@ -144,6 +170,7 @@ pub fn icon_button(
         .justify_center()
         .size(px(30.))
         .rounded(px(R_ITEM))
+        .tooltip(tooltip(label))
         .child(glyph);
     if enabled {
         let handler: Handler = Box::new(on_click);

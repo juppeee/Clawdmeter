@@ -116,6 +116,9 @@ pub struct StatusSnapshot {
     /// The shown account is being polled.
     #[serde(default)]
     pub polling: bool,
+    /// No tray icon: the window is the app, and closing it quits.
+    #[serde(default)]
+    pub windowed: bool,
 }
 
 impl StatusSnapshot {
@@ -164,6 +167,7 @@ impl StatusSnapshot {
             tray: format!("{:?}", tray_state(s, now)),
             refresh_at: e.refresh_at,
             polling: e.polling,
+            windowed: false,
         }
     }
 

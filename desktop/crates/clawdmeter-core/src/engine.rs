@@ -740,8 +740,7 @@ mod tests {
             st.errors,
             vec![AccountError {
                 dir: a.clone(),
-                message: "Claude Code's usage service is rate-limiting this account. Trying again in about 10 minutes."
-                    .into(),
+                message: "No usage data was returned. Trying again in about 10 minutes.".into(),
                 retrying: true,
             }]
         );

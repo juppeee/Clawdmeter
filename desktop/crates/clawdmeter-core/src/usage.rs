@@ -201,14 +201,15 @@ impl UsageError {
             None => "Retrying.".to_owned(),
         };
         match self {
-            UsageError::Spawn(_) => "Couldn't run the claude command. Is Claude Code installed?".into(),
-            UsageError::Timeout => format!("Claude Code took too long to answer. {again}"),
-            UsageError::BadOutput(_) => format!("Claude Code answered with something unexpected. {again}"),
-            UsageError::NotLoggedIn(_) => "Not logged in. Run claude in a terminal and log in.".into(),
-            UsageError::NotSubscription => "Not on a Claude subscription, so there are no limits to show.".into(),
-            UsageError::NoUsageLines(_) | UsageError::RateLimited { .. } => {
-                format!("Claude Code's usage service is rate-limiting this account. {again}")
+            UsageError::Spawn(_) => {
+                "Couldn't run Claude Code. Check its installation and the claude_path setting.".into()
             }
+            UsageError::Timeout => format!("Claude Code took too long to answer. {again}"),
+            UsageError::BadOutput(_) => format!("Couldn't read Claude Code's usage response. {again}"),
+            UsageError::NotLoggedIn(_) => "Sign in to Claude Code for this account folder.".into(),
+            UsageError::NotSubscription => "This account doesn't report subscription usage limits.".into(),
+            UsageError::NoUsageLines(_) => format!("No usage data was returned. {again}"),
+            UsageError::RateLimited { .. } => format!("Usage requests are temporarily limited. {again}"),
         }
     }
 }
@@ -908,15 +909,12 @@ mod tests {
     #[test]
     fn user_messages_name_the_wait() {
         let rl = UsageError::NoUsageLines("".into());
-        assert_eq!(
-            rl.user_message(Some(590)),
-            "Claude Code's usage service is rate-limiting this account. Trying again in about 10 minutes."
-        );
+        assert_eq!(rl.user_message(Some(590)), "No usage data was returned. Trying again in about 10 minutes.");
         assert_eq!(
             UsageError::RateLimited { retry_after_secs: 30 }.user_message(Some(45)),
-            "Claude Code's usage service is rate-limiting this account. Trying again in about 1 minute."
+            "Usage requests are temporarily limited. Trying again in about 1 minute."
         );
-        assert_eq!(rl.user_message(None), "Claude Code's usage service is rate-limiting this account. Retrying.");
+        assert_eq!(rl.user_message(None), "No usage data was returned. Retrying.");
         assert_eq!(
             UsageError::Timeout.user_message(Some(1200)),
             "Claude Code took too long to answer. Trying again in about 20 minutes."

@@ -184,9 +184,9 @@ impl std::fmt::Display for HookError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             HookError::Parse(_) => {
-                write!(f, "settings.json isn't valid JSON, so it was left alone. Fix it and try again.")
+                write!(f, "settings.json contains invalid JSON. Fix the file, then retry. Nothing was written.")
             }
-            HookError::Shape(w) => write!(f, "settings.json has an unexpected layout ({w}), so it was left alone."),
+            HookError::Shape(w) => write!(f, "Unsupported settings.json layout: {w}. Nothing was written."),
             HookError::Io(e) => write!(f, "{}", crate::errors::io_message(e)),
         }
     }

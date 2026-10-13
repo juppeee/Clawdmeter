@@ -79,15 +79,15 @@ impl Items {
         let it = Items {
             menu: Menu::new(),
             status: MenuItem::new("Clawdmeter · Starting", false, None),
-            account: MenuItem::new("No data yet", false, None),
+            account: MenuItem::new("No usage data yet", false, None),
             session: MenuItem::new("Session  –", false, None),
             weekly: MenuItem::new("Weekly  –", false, None),
-            refresh: MenuItem::new("Refresh now", true, None),
+            refresh: MenuItem::new("Refresh usage", true, None),
             mute: CheckMenuItem::new("Mute attention beep", true, false, None),
             open: MenuItem::new("Open Clawdmeter", true, None),
             update: MenuItem::new("Flash firmware…", true, None),
             settings: MenuItem::new("Settings…", true, None),
-            quit: MenuItem::new("Quit (stops the daemon)", true, None),
+            quit: MenuItem::new("Quit Clawdmeter", true, None),
         };
         let _ = it.menu.append_items(&[
             &it.status,
@@ -112,15 +112,15 @@ impl Items {
         let state = snap.tray_state();
         let mut label = state.label().to_owned();
         if snap.link == "no_adapter" {
-            label = "Bluetooth off".into();
+            label = "Bluetooth unavailable".into();
         }
         self.status.set_text(format!("Clawdmeter · {label}"));
         let account = snap.account.as_deref().map(|a| tilde(a, &paths.home));
         self.account.set_text(match (account, snap.age(now)) {
             (Some(a), Some(age)) => format!("{a} · updated {}", ago(age)),
             (Some(a), None) => a,
-            (None, _) if snap.logged_out => "Run claude to sign in again".into(),
-            (None, _) => "No data yet".into(),
+            (None, _) if snap.logged_out => "Open Claude Code to sign in".into(),
+            (None, _) => "No usage data yet".into(),
         });
         self.session.set_text(match snap.session_pct {
             Some(p) if snap.window_started => format!("Session  {p}%"),
@@ -227,6 +227,7 @@ impl TrayApp {
         let status = self.daemon.as_ref().map(|d| d.status.borrow().clone()).unwrap_or_default();
         let mut snap = StatusSnapshot::from_status(&status, now);
         snap.beep_muted = self.beep_muted;
+        snap.windowed = !self.use_tray;
         snap.latest_firmware = self.latest.lock().ok().and_then(|l| l.clone());
         snap.device_firmware = ipc::load_firmware_record(&self.paths).map(|r| r.ver);
         snap

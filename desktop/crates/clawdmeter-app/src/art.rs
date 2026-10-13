@@ -62,10 +62,10 @@ impl TrayState {
     pub fn label(self) -> &'static str {
         match self {
             TrayState::Connected => "Connected",
-            TrayState::Stale => "Stale",
-            TrayState::Searching => "Searching",
+            TrayState::Stale => "Usage out of date",
+            TrayState::Searching => "Looking for device",
             TrayState::AuthError => "Signed out",
-            TrayState::Attention => "Needs you",
+            TrayState::Attention => "Claude needs you",
         }
     }
 }

@@ -63,7 +63,19 @@ const ASSETS: &[(&str, &[u8])] = bundled![
         "waveshare_lcd_154",
         "waveshare_lcd_4",
     ],
-    "icons": ["gauge", "tablet", "zap", "users", "webhook", "settings", "rotate-ccw", "refresh-cw", "x", "chevron-right", "chevron-down"],
+    "icons": [
+        "gauge",
+        "tablet",
+        "zap",
+        "users",
+        "webhook",
+        "settings",
+        "rotate-ccw",
+        "refresh-cw",
+        "x",
+        "chevron-right",
+        "chevron-down",
+    ],
 ];
 
 impl Assets {
@@ -259,6 +271,7 @@ pub fn chrome(t: &Theme, window: &Window, body: impl IntoElement) -> impl IntoEl
                             .cursor_pointer()
                             .hover(|s| s.bg(wash(0.15)))
                             .active(|s| s.bg(wash(0.3)))
+                            .tooltip(widgets::tooltip("Close window"))
                             .child(widgets::icon("x", 16., t.text))
                             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                             .on_click(|_, window, _| window.remove_window()),
@@ -318,7 +331,7 @@ pub fn command(paths: &Paths, cmd: AppCommand) {
 
 /// Text for "the daemon isn't running" banners.
 pub fn not_running_text() -> SharedString {
-    "Clawdmeter isn't running, so there's no live status. Start it from your app menu, or run clawdmeter.".into()
+    "Start Clawdmeter from your app menu, or run clawdmeter in a terminal.".into()
 }
 
 /// Run blocking work off the UI thread, then hand the result to the view.

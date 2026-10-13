@@ -75,11 +75,11 @@ impl std::fmt::Display for DeviceError {
                 "No permission to open {port}. Add yourself to the dialout group (uucp on Arch): \
                  sudo usermod -aG dialout $USER, then log out and back in."
             ),
-            DeviceError::PermissionDenied { port } => write!(f, "No permission to open {port}."),
+            DeviceError::PermissionDenied { port } => write!(f, "Permission denied for {port}."),
             DeviceError::Busy { port } => {
-                write!(f, "{port} is in use by another program, like a serial monitor. Close it and try again.")
+                write!(f, "{port} is in use. Close the serial monitor or other app using it, then retry.")
             }
-            DeviceError::Disconnected => write!(f, "The board disconnected. Plug it back in and try again."),
+            DeviceError::Disconnected => write!(f, "The board disconnected. Reconnect USB and retry."),
             DeviceError::NoBootloader(_) => {
                 write!(f, "The board didn't respond. Unplug it, hold BOOT while you plug it back in, then try again.")
             }

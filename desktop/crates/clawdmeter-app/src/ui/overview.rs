@@ -121,10 +121,10 @@ pub fn state_tone(state: TrayState) -> Tone {
 /// One headline for the link and data state.
 pub fn state_title(s: &StatusSnapshot) -> &'static str {
     match (s.link.as_str(), s.tray_state()) {
-        ("no_adapter", _) => "Bluetooth is off",
+        ("no_adapter", _) => "Bluetooth unavailable",
         (_, TrayState::Connected) => "Connected",
-        (_, TrayState::Stale) => "Waiting for fresh numbers",
-        (_, TrayState::Searching) => "Looking for your Clawdmeter",
+        (_, TrayState::Stale) => "Usage out of date",
+        (_, TrayState::Searching) => "Looking for Clawdmeter",
         (_, TrayState::AuthError) => "Signed out of Claude Code",
         (_, TrayState::Attention) => "Claude needs you",
     }
@@ -161,13 +161,13 @@ impl Render for OverviewView {
         let now = clawdmeter_core::unix_now();
         let home = self.paths.home.clone();
         let (tone, title, sub) = match &self.snap {
-            None => (Tone::Plain, "Not running", "No live usage until Clawdmeter starts.".to_string()),
+            None => (Tone::Plain, "Not running", "Start Clawdmeter to update usage.".to_string()),
             Some(s) => {
                 let sub = match (&s.account, s.age(now)) {
-                    _ if s.logged_out => "Run claude in a terminal to sign in again.".into(),
+                    _ if s.logged_out => "Open Claude Code in a terminal and sign in.".into(),
                     (Some(a), Some(age)) => format!("{} · updated {}", tilde(a, &home), ago(age)),
                     (Some(a), None) => tilde(a, &home),
-                    (None, _) => "No usage yet".into(),
+                    (None, _) => "No usage data yet".into(),
                 };
                 (state_tone(s.tray_state()), state_title(s), sub)
             }
@@ -212,15 +212,16 @@ impl Render for OverviewView {
         if let Some(v) = s.update_available() {
             let v = v.trim_start_matches('v').to_owned();
             page = page.child(
-                notice(&t, Tone::Accent, format!("Firmware v{v} is out. Updating takes about a minute over USB."))
-                    .child(div().flex().pl(px(18.)).child(button(
+                notice(&t, Tone::Accent, format!("Firmware v{v} is available. Connect USB to update.")).child(
+                    div().flex().pl(px(18.)).child(button(
                         &t,
                         "go-update",
                         "Update firmware",
                         ButtonKind::Primary,
                         true,
                         cx.listener(|_, _, _, cx| cx.emit(Navigate(Page::Flash))),
-                    ))),
+                    )),
+                ),
             );
         }
         page
@@ -238,13 +239,14 @@ impl OverviewView {
             RefreshState::Ready => None,
         };
         let checking = state == RefreshState::Checking;
-        let button = icon_button(t, "refresh", "refresh-cw", state == RefreshState::Ready, checking, {
-            cx.listener(|v, _, _, cx| {
-                command(&v.paths, AppCommand::Refresh);
-                v.refreshing = Some(clawdmeter_core::unix_now());
-                cx.notify();
-            })
-        });
+        let button =
+            icon_button(t, "refresh", "refresh-cw", "Refresh usage", state == RefreshState::Ready, checking, {
+                cx.listener(|v, _, _, cx| {
+                    command(&v.paths, AppCommand::Refresh);
+                    v.refreshing = Some(clawdmeter_core::unix_now());
+                    cx.notify();
+                })
+            });
         div()
             .flex()
             .flex_shrink_0()
