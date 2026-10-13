@@ -1,4 +1,4 @@
-//! The handful of controls the windows need, drawn with the design tokens:
+//! The handful of controls the window needs, drawn with the design tokens:
 //! buttons, pills, toggles, segmented choices, setting rows, and Clawd.
 
 use gpui::{
@@ -362,26 +362,6 @@ pub fn clawd(cell: f32) -> impl IntoElement {
             },
         )
         .size_full(),
-    )
-}
-
-/// A board thumbnail: the panel at true aspect ratio inside a bezel, with a
-/// 1 px-cell Clawd on it, in a `box_px` square.
-pub fn board_thumb(t: &Theme, panel: (f32, f32), box_px: f32) -> impl IntoElement {
-    let (w, h) = panel;
-    div().flex().flex_shrink_0().items_center().justify_center().size(px(box_px)).child(
-        div().p(px(2.)).rounded(px(4.)).bg(t.track).child(
-            div()
-                .flex()
-                .items_center()
-                .justify_center()
-                .w(px(w))
-                .h(px(h))
-                .rounded(px(2.))
-                .bg(rgb(0x000000))
-                .overflow_hidden()
-                .child(clawd(if w.min(h) >= 60. { 2. } else { 1. })),
-        ),
     )
 }
 

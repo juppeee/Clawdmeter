@@ -1,5 +1,6 @@
-//! The settings window (spec §03): one window instead of the three install
-//! scripts. Tabs: Device, Accounts, Hooks, Alerts, Background.
+//! The settings pages (spec §03): Device, Accounts, Hooks and Background,
+//! one view behind four sidebar entries. The setup wizard borrows the Hooks
+//! page.
 //!
 //! It edits the same config file the daemon reads (through
 //! `ConfigFile`/`Settings`, which keep comments, unknown keys and hand-written
@@ -13,37 +14,19 @@ use clawdmeter_core::autostart::{self, LaunchMode};
 use clawdmeter_core::config::{ClockMode, ConfigFile};
 use clawdmeter_core::{Paths, Settings};
 use clawdmeter_flash::device::{self, FirmwareInfo};
-use gpui::{div, prelude::*, px, Context, PathPromptOptions, SharedString, Window};
+use gpui::{div, img, prelude::*, px, Context, EventEmitter, PathPromptOptions, SharedString, Window};
 
-use super::theme::{Theme, FONT_MONO, R_M, R_S};
+use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_M, R_S};
 use super::widgets::{
-    board_thumb, button, caption, card, field, heading, kv, notice, para, pill, segmented, subheading, toggle,
-    ButtonKind, Tone,
+    button, caption, card, field, heading, notice, para, pill, segmented, subheading, toggle, ButtonKind, Tone,
 };
-use super::{chrome, command, live_status, not_running_text, run_blocking, REFRESH};
-use crate::boards;
+use super::{command, live_status, not_running_text, run_blocking, Navigate, REFRESH};
 use crate::diff::{line_diff, with_context, DiffLine};
 use crate::errors;
 use crate::hooks::install::{self as hooks, HookPlan, HookStatus, HOOKS};
 use crate::ipc::{self, AppCommand, FirmwareRecord, StatusSnapshot};
 use crate::tilde;
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Tab {
-    Device,
-    Accounts,
-    Hooks,
-    Alerts,
-    Background,
-}
-
-const TABS: [(Tab, &str); 5] = [
-    (Tab::Device, "Device"),
-    (Tab::Accounts, "Accounts"),
-    (Tab::Hooks, "Hooks"),
-    (Tab::Alerts, "Alerts"),
-    (Tab::Background, "Background"),
-];
+use crate::{boards, Page};
 
 struct HookRow {
     dir: PathBuf,
@@ -78,10 +61,14 @@ enum PollChoice {
     Every(u64),
 }
 
-/// The settings window.
+/// The settings pages.
 pub struct SettingsView {
     paths: Paths,
-    tab: Tab,
+    page: Page,
+    /// Shown inside the setup wizard (no page heading).
+    embedded: bool,
+    /// One of this view's pages is on screen.
+    visible: bool,
     snap: Option<StatusSnapshot>,
     settings: Settings,
     config_error: Option<String>,
@@ -100,16 +87,16 @@ pub struct SettingsView {
     ticks: u32,
 }
 
+impl EventEmitter<Navigate> for SettingsView {}
+
 impl SettingsView {
-    /// Build, load the config, and start probing for a USB-attached device.
-    pub fn new(paths: Paths, tab: Option<&str>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
-        Self::with_usb(paths, tab, true, cx)
+    /// Build and load the config. USB is probed while the Device page is up.
+    pub fn new(paths: Paths, page: Page, cx: &mut Context<Self>) -> Self {
+        Self::with_usb(paths, page, true, cx)
     }
 
     /// [`SettingsView::new`]; `usb: false` never touches serial ports (tests).
-    pub fn with_usb(paths: Paths, tab: Option<&str>, usb: bool, cx: &mut Context<Self>) -> Self {
-        let tab =
-            TABS.iter().find(|(_, l)| tab.is_some_and(|t| l.eq_ignore_ascii_case(t))).map_or(Tab::Device, |(t, _)| *t);
+    pub fn with_usb(paths: Paths, page: Page, usb: bool, cx: &mut Context<Self>) -> Self {
         cx.spawn(async move |this, cx| loop {
             cx.background_executor().timer(REFRESH).await;
             if this.update(cx, |v, cx| v.tick(cx)).is_err() {
@@ -120,7 +107,9 @@ impl SettingsView {
         let mut v = SettingsView {
             settings: Settings::from_config(&ConfigFile::default(), &paths, None),
             paths,
-            tab,
+            page,
+            embedded: false,
+            visible: false,
             snap: None,
             config_error: None,
             hooks: Vec::new(),
@@ -135,10 +124,42 @@ impl SettingsView {
             ticks: 0,
         };
         v.reload();
-        if usb {
-            v.probe_device(cx);
-        }
+        v.show(page, false, cx);
         v
+    }
+
+    /// Put `page` on screen (`embedded`: inside the setup wizard). Other
+    /// pages hide this view.
+    pub fn show(&mut self, page: Page, embedded: bool, cx: &mut Context<Self>) {
+        self.visible = matches!(page, Page::Device | Page::Accounts | Page::Hooks | Page::Background);
+        if !self.visible {
+            return;
+        }
+        self.page = page;
+        self.embedded = embedded;
+        self.reload();
+        if page == Page::Device && self.usb && !self.device.probing && self.device.port.is_none() {
+            self.probe_device(cx);
+        }
+        cx.notify();
+    }
+
+    /// Accounts whose hooks need installing or updating.
+    pub fn pending_hooks(&self) -> usize {
+        self.hooks.iter().filter(|h| h.status.needs_install()).count()
+    }
+
+    /// Open the review of installing hooks in every account that needs them
+    /// (what the page's install button does).
+    pub fn review_hook_install(&mut self, cx: &mut Context<Self>) {
+        let pending = self.hooks.iter().filter(|h| h.status.needs_install()).map(|h| h.dir.clone()).collect();
+        self.plan_hooks(HookAction::Install, pending);
+        cx.notify();
+    }
+
+    /// Accounts whose hooks are set up.
+    pub fn installed_hooks(&self) -> usize {
+        self.hooks.iter().filter(|h| h.status == HookStatus::Installed).count()
     }
 
     fn reload(&mut self) {
@@ -179,8 +200,10 @@ impl SettingsView {
         if self.ticks.is_multiple_of(6) && self.preview.is_none() {
             self.reload();
         }
-        // Notice a board being plugged in.
-        if self.usb && self.ticks.is_multiple_of(4) && !self.device.probing && self.device.port.is_none() {
+        // Notice a board being plugged in (only while the Device page is up,
+        // so it never competes with the flasher for the port).
+        let on_device = self.visible && self.page == Page::Device;
+        if self.usb && on_device && self.ticks.is_multiple_of(4) && !self.device.probing && self.device.port.is_none() {
             if let Some(p) = device::list_ports().into_iter().next() {
                 self.device.port = Some(p.path);
                 self.probe_device(cx);
@@ -367,87 +390,75 @@ impl SettingsView {
             .or_else(|| rec.as_ref().map(|r| r.ver.clone()))
             .or_else(|| snap.as_ref().and_then(|s| s.device_firmware.clone()));
         let board = env.as_deref().and_then(boards::board);
-        let thumb = board.map(|b| b.thumb(96.)).unwrap_or((80., 80.));
-        let board_text: SharedString = match (board, &env) {
-            (Some(b), _) => format!("{} · {}", b.name, b.chip.trim_start_matches("ESP32-")).into(),
+        let name: SharedString = match (board, &env) {
+            (Some(b), _) => b.product.into(),
             (None, Some(e)) => e.clone().into(),
-            (None, None) => "Not identified yet".into(),
+            (None, None) => "Board not identified yet".into(),
         };
         let update = snap.as_ref().and_then(|s| s.update_available().map(str::to_owned));
-        let link: SharedString = match snap.as_ref() {
-            None => "Clawdmeter isn't running".into(),
+        let (link_tone, link): (Tone, SharedString) = match snap.as_ref() {
+            None => (Tone::Plain, "Clawdmeter isn't running".into()),
             Some(s) => match s.link.as_str() {
-                "connected" => {
-                    format!("Connected over Bluetooth ({})", s.device_key.clone().unwrap_or_default()).into()
-                }
-                "no_adapter" => "Bluetooth is off or unavailable".into(),
-                "connecting" => "Connecting…".into(),
-                _ => "Looking for it over Bluetooth…".into(),
+                "connected" => (Tone::Ok, "Connected over Bluetooth".into()),
+                "no_adapter" => (Tone::Bad, "Bluetooth is off".into()),
+                "connecting" => (Tone::Accent, "Connecting…".into()),
+                _ => (Tone::Plain, "Looking for it over Bluetooth".into()),
             },
         };
-        let port_text: SharedString = match (&self.device.port, self.device.probing) {
+        let usb: SharedString = match (&self.device.port, self.device.probing) {
             (_, true) => "Checking USB…".into(),
-            (Some(p), _) => p.clone().into(),
-            (None, _) if board.is_none() => "Not plugged in. Plug it in to identify the board.".into(),
-            (None, _) => "Not plugged in".into(),
+            (Some(p), _) => format!("On USB at {p}").into(),
+            (None, _) if board.is_none() => "Plug it in over USB to identify it".into(),
+            (None, _) => "Not on USB".into(),
         };
-        let mut fw_row = div()
-            .flex()
-            .items_center()
-            .gap(px(8.))
-            .child(ver.clone().map_or_else(|| "Unknown".into(), |v| format!("v{}", v.trim_start_matches('v'))));
-        if update.is_some() {
-            fw_row = fw_row.child(pill(t, "Update available", Tone::Accent));
-        }
-
-        let mut pane = div().flex().flex_col().gap(px(14.)).child(heading(t, "Device"));
-        pane = pane.child(
-            card(t).flex_row().items_center().gap(px(18.)).child(board_thumb(t, thumb, 104.)).child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .flex_1()
-                    .child(kv(t, vec![("Board", board_text), ("Link", link), ("USB", port_text)]))
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(12.))
-                            .child(div().w(px(76.)).text_size(px(13.)).text_color(t.mute).child("Firmware"))
-                            .child(div().text_size(px(13.)).child(fw_row)),
-                    ),
-            ),
+        let firmware: SharedString = match (&ver, &update) {
+            (Some(v), Some(u)) => {
+                format!("Firmware v{} · v{} is out", v.trim_start_matches('v'), u.trim_start_matches('v')).into()
+            }
+            (Some(v), None) => format!("Firmware v{}", v.trim_start_matches('v')).into(),
+            (None, _) => "Firmware version unknown".into(),
+        };
+        let art = div().flex().flex_shrink_0().items_center().justify_center().size(px(150.)).child(match board {
+            Some(b) => img(b.illustration()).size(px(150.)).into_any_element(),
+            None => super::widgets::clawd(4.).into_any_element(),
+        });
+        let (label, kind) = match &update {
+            Some(_) => ("Update firmware", ButtonKind::Primary),
+            None => ("Flash firmware…", ButtonKind::Normal),
+        };
+        let card = card(t).flex_row().items_center().gap(px(20.)).p(px(20.)).child(art).child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .gap(px(8.))
+                .child(div().font_family(FONT_DISPLAY).text_size(px(19.)).child(name))
+                .child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .gap(px(6.))
+                        .child(pill(t, link, link_tone))
+                        .when_some(update.as_ref(), |d, _| d.child(pill(t, "Update available", Tone::Accent))),
+                )
+                .child(div().text_size(px(13.)).text_color(t.dim).child(firmware))
+                .child(div().text_size(px(13.)).text_color(t.mute).child(usb))
+                .child(div().flex().pt(px(4.)).child(button(
+                    t,
+                    "update-now",
+                    label,
+                    kind,
+                    true,
+                    cx.listener(|_, _, _, cx| cx.emit(Navigate(Page::Flash))),
+                ))),
         );
-        if let Some(u) = update {
-            let p = self.paths.clone();
-            let have = ver.map_or_else(|| "an older version".into(), |v| format!("v{}", v.trim_start_matches('v')));
-            pane = pane.child(
-                card(t)
-                    .flex_row()
-                    .items_center()
-                    .gap(px(16.))
-                    .border_1()
-                    .border_color(t.line)
-                    .child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .flex_1()
-                            .min_w_0()
-                            .gap(px(4.))
-                            .child(format!("Firmware v{} is available", u.trim_start_matches('v')))
-                            .child(
-                                div()
-                                    .text_size(px(12.5))
-                                    .text_color(t.mute)
-                                    .child(format!("This device has {have}. Updating takes about a minute over USB.")),
-                            ),
-                    )
-                    .child(button(t, "update-now", "Update…", ButtonKind::Primary, true, move |_, _, _| {
-                        command(&p, AppCommand::Open("flasher".into()))
-                    })),
-            );
-        }
+        let mut pane = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(heading(t, "Device"))
+            .child(div().pt(px(8.)).pb(px(10.)).child(card));
 
         // Minimal display (sent over USB).
         let minimal_sel = self.device.minimal.as_ref().map(|(_, o)| o.clone()).unwrap_or_else(|| "auto".into());
@@ -460,7 +471,7 @@ impl SettingsView {
             (None, Some(_)) if self.device.probing => "Asking the device…".into(),
             (None, Some(_)) => "This firmware is too old for minimal mode. Update it first.".into(),
             (None, None) => {
-                "A still Clawd and the meters, no animation. Plug the device in over USB to change it.".into()
+                "A still Clawd and the meters, no animation. Changed over USB, so plug the device in.".into()
             }
         };
         pane = pane.child(field(
@@ -490,7 +501,7 @@ impl SettingsView {
         let me = cx.entity().downgrade();
         pane = pane.child(field(
             t,
-            "Clock on the device",
+            "Clock",
             "Shows the time at the top of the screen. Auto follows this computer's 12/24-hour setting.",
             segmented(
                 t,
@@ -511,20 +522,37 @@ impl SettingsView {
                 },
             ),
         ));
-
-        let p = self.paths.clone();
-        pane = pane.child(field(
-            t,
-            "Forget this device",
-            "Forgets the remembered address and picks up whichever paired Clawdmeter is around. Use it after swapping boards.",
-            button(t, "forget", "Forget", ButtonKind::Small, true, move |_, _, _| command(&p, AppCommand::Forget)),
-        ));
+        let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let (beep, chime) = (self.settings.beep, self.settings.chime);
+        pane = pane
+            .child(field(
+                t,
+                "Beep when Claude needs you",
+                "Plays on boards with a speaker. You can mute it for a while from the tray or the Overview.",
+                toggle(t, "beep", beep, true, move |_, _, cx| {
+                    let _ = me1.update(cx, |v, cx| {
+                        v.save(|s, _| s.beep = !beep);
+                        cx.notify();
+                    });
+                }),
+            ))
+            .child(field(
+                t,
+                "Chime when the session resets",
+                "One short chime when your 5-hour window rolls over.",
+                toggle(t, "chime", chime, true, move |_, _, cx| {
+                    let _ = me2.update(cx, |v, cx| {
+                        v.save(|s, _| s.chime = !chime);
+                        cx.notify();
+                    });
+                }),
+            ));
         let me = cx.entity().downgrade();
         let on = self.settings.update_check;
         pane = pane.child(field(
             t,
             "Check for firmware updates",
-            "Looks for new firmware on GitHub once a day and tells you in the tray.",
+            "Looks for new firmware on GitHub once a day and tells you here and in the tray.",
             toggle(t, "update-check", on, true, move |_, _, cx| {
                 let _ = me.update(cx, |v, cx| {
                     v.save(|s, _| s.update_check = !on);
@@ -532,18 +560,13 @@ impl SettingsView {
                 });
             }),
         ));
-        let (p1, p2) = (self.paths.clone(), self.paths.clone());
-        pane.child(
-            div()
-                .flex()
-                .gap(px(8.))
-                .child(button(t, "check-now", "Check now", ButtonKind::Normal, true, move |_, _, _| {
-                    command(&p1, AppCommand::CheckUpdate)
-                }))
-                .child(button(t, "flash-new", "Flash a new device…", ButtonKind::Normal, true, move |_, _, _| {
-                    command(&p2, AppCommand::Open("flasher".into()))
-                })),
-        )
+        let p = self.paths.clone();
+        pane.child(field(
+            t,
+            "Forget this device",
+            "Drops the remembered address and picks up whichever paired Clawdmeter is around. Use it after swapping boards.",
+            button(t, "forget", "Forget", ButtonKind::Small, true, move |_, _, _| command(&p, AppCommand::Forget)),
+        ))
     }
 
     fn accounts_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
@@ -626,12 +649,15 @@ impl SettingsView {
     }
 
     fn hooks_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
-        let mut pane = div().flex().flex_col().gap(px(14.)).child(heading(t, "Hooks")).child(para(
-            t,
-            "Hooks let Clawd react while you work: he notices prompts, keeps up with tools, and comes to find you \
-             when Claude Code is waiting. Each account gets five small entries in its settings.json that record only \
-             the event type and session ID. Without them Clawdmeter still works; it just checks every 2 minutes.",
-        ));
+        let mut pane = div().flex().flex_col().gap(px(14.)).when(!self.embedded, |d| {
+            d.child(heading(t, "Hooks")).child(para(
+                t,
+                "Hooks let Clawd react while you work: he notices prompts, keeps up with tools, and comes to find \
+                 you when Claude Code is waiting. Each account gets five small entries in its settings.json that \
+                 record only the event type and session ID. Without them Clawdmeter still works; it just checks \
+                 every 2 minutes.",
+            ))
+        });
         let busy = self.preview.is_some();
         let mut list = div().flex().flex_col().rounded(px(R_M)).border_1().border_color(t.line);
         for (i, row) in self.hooks.iter().enumerate() {
@@ -809,50 +835,27 @@ impl SettingsView {
                             });
                         }))
                     })
-                    .child(button(t, "test-alert", "Send a test alert", ButtonKind::Normal, true, move |_, _, cx| {
-                        let _ = me2.update(cx, |v, cx| {
-                            v.send_test_alert();
-                            cx.notify();
-                        });
-                    })),
+                    .when(!self.embedded, |d| {
+                        d.child(button(
+                            t,
+                            "test-alert",
+                            "Send a test alert",
+                            ButtonKind::Normal,
+                            true,
+                            move |_, _, cx| {
+                                let _ = me2.update(cx, |v, cx| {
+                                    v.send_test_alert();
+                                    cx.notify();
+                                });
+                            },
+                        ))
+                    }),
             );
         }
         if let Some((tone, m)) = &self.hook_msg {
             pane = pane.child(notice(t, *tone, m.clone()));
         }
         pane
-    }
-
-    fn alerts_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
-        let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
-        let (beep, chime) = (self.settings.beep, self.settings.chime);
-        div()
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .child(heading(t, "Alerts"))
-            .child(field(
-                t,
-                "Beep when Claude needs you",
-                "Plays on boards with a speaker. You can mute it from the tray.",
-                toggle(t, "beep", beep, true, move |_, _, cx| {
-                    let _ = me1.update(cx, |v, cx| {
-                        v.save(|s, _| s.beep = !beep);
-                        cx.notify();
-                    });
-                }),
-            ))
-            .child(field(
-                t,
-                "Chime when the session resets",
-                "One short chime when your 5-hour window rolls over.",
-                toggle(t, "chime", chime, true, move |_, _, cx| {
-                    let _ = me2.update(cx, |v, cx| {
-                        v.save(|s, _| s.chime = !chime);
-                        cx.notify();
-                    });
-                }),
-            ))
     }
 
     fn background_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
@@ -961,6 +964,16 @@ impl SettingsView {
             tilde(&cfgp.display().to_string(), &self.paths.home),
             button(t, "open-cfg", "Open", ButtonKind::Small, cfgp.exists(), move |_, _, cx| cx.open_with_system(&cfgp)),
         ));
+        let p = self.paths.clone();
+        pane = pane.child(field(
+            t,
+            "Quit Clawdmeter",
+            "Stops the background part and closes this window. The device keeps its last numbers until they go stale.",
+            button(t, "quit", "Quit", ButtonKind::Small, self.snap.is_some(), move |_, window, _| {
+                command(&p, AppCommand::Quit);
+                window.remove_window();
+            }),
+        ));
         if let Some(legacy) = self.legacy.clone() {
             let me = cx.entity().downgrade();
             let home = self.paths.home.clone();
@@ -993,72 +1006,16 @@ fn with_alpha(c: gpui::Rgba, a: f32) -> gpui::Hsla {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = Theme::for_appearance(window.appearance());
-        let pending_hooks = self.hooks.iter().filter(|h| h.status.needs_install()).count();
-        let mut tabs = div()
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .w(px(168.))
-            .flex_shrink_0()
-            .p(px(12.))
-            .border_r_1()
-            .border_color(t.line);
-        for (tab, label) in TABS {
-            let on = tab == self.tab;
-            let me = cx.entity().downgrade();
-            tabs = tabs.child(
-                div()
-                    .id(label)
-                    .debug_selector(|| format!("tab-{label}"))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .px(px(12.))
-                    .py(px(7.))
-                    .rounded(px(R_S))
-                    .cursor_pointer()
-                    .text_color(if on { t.text } else { t.dim })
-                    .when(on, |d| d.bg(t.panel))
-                    .hover(|s| s.bg(t.panel))
-                    .on_click(move |_, _, cx| {
-                        let _ = me.update(cx, |v, cx| {
-                            v.tab = tab;
-                            cx.notify();
-                        });
-                    })
-                    .child(label)
-                    .when(tab == Tab::Hooks && pending_hooks > 0, |d| {
-                        d.child(
-                            div()
-                                .px(px(7.))
-                                .rounded(px(999.))
-                                .bg(t.accent)
-                                .text_color(t.accent_ink)
-                                .text_size(px(11.))
-                                .child(pending_hooks.to_string()),
-                        )
-                    }),
-            );
-        }
-        tabs =
-            tabs.child(div().flex_1()).child(
-                div().flex().items_center().gap(px(10.)).px(px(12.)).pb(px(4.)).child(super::widgets::clawd(1.)).child(
-                    div().text_size(px(12.)).text_color(t.mute).child(format!("Clawdmeter {}", crate::version())),
-                ),
-            );
-        let pane = match self.tab {
-            Tab::Device => self.device_pane(&t, cx),
-            Tab::Accounts => self.accounts_pane(&t, cx),
-            Tab::Hooks => self.hooks_pane(&t, cx),
-            Tab::Alerts => self.alerts_pane(&t, cx),
-            Tab::Background => self.background_pane(&t, cx),
+        let mut pane = match self.page {
+            Page::Accounts => self.accounts_pane(&t, cx),
+            Page::Hooks => self.hooks_pane(&t, cx),
+            Page::Background => self.background_pane(&t, cx),
+            _ => self.device_pane(&t, cx),
         };
-        let mut content = div().id("pane").flex_1().min_w_0().overflow_y_scroll().p(px(24.)).child(pane);
         if let Some(e) = self.config_error.clone().or_else(|| self.notice.as_ref().map(|(_, m)| m.clone())) {
-            content = content.child(div().pt(px(12.)).text_size(px(13.)).text_color(t.bad).child(e));
+            pane = pane.child(div().pt(px(12.)).text_size(px(13.)).text_color(t.bad).child(e));
         }
-        let body = div().size_full().flex().bg(t.surface).child(tabs.bg(t.bg)).child(content);
-        chrome(&t, "Clawdmeter settings", window, body)
+        pane
     }
 }
 
@@ -1089,13 +1046,13 @@ mod tests {
     fn toggles_and_choices_write_the_config(cx: &mut TestAppContext) {
         let paths = home("cfg");
         let p = paths.clone();
-        let (_view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Some("alerts"), false, cx));
+        let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Page::Device, false, cx));
         click(cx, "chime");
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(text.starts_with("# mine\n"), "comments kept: {text}");
         assert!(text.contains("chime = on"), "{text}");
 
-        click(cx, "tab-Background");
+        view.update(cx, |v, cx| v.show(Page::Background, false, cx));
         click(cx, "poll-2"); // Every 5 min
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(text.contains("poll_interval = 300"), "{text}");
@@ -1111,7 +1068,7 @@ mod tests {
         let before = r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/old/attention-hook.sh event"}]}]}}"#;
         std::fs::write(&settings, before).unwrap();
         let p = paths.clone();
-        let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Some("hooks"), false, cx));
+        let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Page::Hooks, false, cx));
         view.read_with(cx, |v, _| assert_eq!(v.hooks[0].status, HookStatus::Legacy));
 
         click(cx, "install-all");

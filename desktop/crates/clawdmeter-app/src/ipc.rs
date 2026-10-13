@@ -1,17 +1,20 @@
 //! How the windows see the daemon.
 //!
-//! The tray process owns the daemon. Each window (settings, flasher, the
-//! no-tray status window) is its own short-lived GPUI process, because GPUI
-//! ends its event loop when the last window closes on Linux and Windows, and a
-//! tray app has no window most of the time. The two sides talk through two
-//! small files in the state dir, the same way the hook script and the daemon
-//! already do:
+//! The tray process owns the daemon. The app window is its own GPUI process
+//! (`clawdmeter --window [page]`), because GPUI ends its event loop when the
+//! last window closes on Linux and Windows, and a tray app has no window most
+//! of the time. There is only ever one window process (`window.lock`); the
+//! tray switches it between pages rather than opening another. The two sides
+//! talk through small files in the state dir, the same way the hook and the
+//! daemon already do:
 //!
 //! - `app-status.json`: the tray process rewrites it whenever the status
-//!   changes (and at least every few seconds, so a window can tell a live
+//!   changes (and at least every few seconds, so the window can tell a live
 //!   daemon from a dead one by `updated_at`).
-//! - `app-commands`: windows append one command per line; the tray process
-//!   takes the file (rename, read, delete) every tick.
+//! - `app-commands`: the window appends one command per line; the tray
+//!   process takes the file (rename, read, delete) every tick.
+//! - `window-commands`: `show <page>` lines for the window process, taken the
+//!   same way: bring the window to the front on that page.
 
 use std::fs;
 use std::io::{self, Write as _};
@@ -217,7 +220,7 @@ pub enum AppCommand {
     Forget,
     /// Mute / unmute the attention beep for this run.
     Mute(bool),
-    /// Open a window (`settings`, `flasher`, `status`).
+    /// Open the app window on a page (see [`crate::Page::parse`]).
     Open(String),
     /// Re-run the firmware update check now.
     CheckUpdate,
@@ -248,7 +251,7 @@ impl AppCommand {
             ("forget", None) => AppCommand::Forget,
             ("mute", Some("on")) => AppCommand::Mute(true),
             ("mute", Some("off")) => AppCommand::Mute(false),
-            ("open", Some(w)) if crate::WindowKind::parse(w).is_some() => AppCommand::Open(w.to_owned()),
+            ("open", Some(w)) if crate::Page::parse(w).is_some() => AppCommand::Open(w.to_owned()),
             ("check-update", None) => AppCommand::CheckUpdate,
             ("quit", None) => AppCommand::Quit,
             _ => return None,
@@ -288,6 +291,47 @@ pub fn lock_file(paths: &Paths) -> PathBuf {
 pub fn acquire_instance_lock(paths: &Paths) -> io::Result<Option<fs::File>> {
     fs::create_dir_all(&paths.state_dir)?;
     let f = fs::OpenOptions::new().create(true).truncate(false).write(true).open(lock_file(paths))?;
+    match f.try_lock() {
+        Ok(()) => Ok(Some(f)),
+        Err(fs::TryLockError::WouldBlock) => Ok(None),
+        Err(fs::TryLockError::Error(e)) => Err(e),
+    }
+}
+
+/// `<state>/window-commands`.
+pub fn window_commands_file(paths: &Paths) -> PathBuf {
+    paths.state_dir.join("window-commands")
+}
+
+/// `<state>/window.lock`: held by the app window process.
+pub fn window_lock_file(paths: &Paths) -> PathBuf {
+    paths.state_dir.join("window.lock")
+}
+
+/// Ask the running window process to come to the front on `page`.
+pub fn send_window_command(paths: &Paths, page: crate::Page) -> io::Result<()> {
+    fs::create_dir_all(&paths.state_dir)?;
+    let mut f = fs::OpenOptions::new().create(true).append(true).open(window_commands_file(paths))?;
+    writeln!(f, "show {}", page.as_str())
+}
+
+/// Take every pending `show <page>` (rename first, as [`take_commands`]).
+pub fn take_window_commands(paths: &Paths) -> Vec<crate::Page> {
+    let path = window_commands_file(paths);
+    let taking = path.with_extension("taking");
+    if fs::rename(&path, &taking).is_err() {
+        return Vec::new();
+    }
+    let text = fs::read_to_string(&taking).unwrap_or_default();
+    let _ = fs::remove_file(&taking);
+    text.lines().filter_map(|l| l.strip_prefix("show ")).filter_map(|p| crate::Page::parse(p.trim())).collect()
+}
+
+/// Take the window lock. `Ok(None)`: a window process is already running
+/// (send it a [`send_window_command`] instead). Keep the file open.
+pub fn acquire_window_lock(paths: &Paths) -> io::Result<Option<fs::File>> {
+    fs::create_dir_all(&paths.state_dir)?;
+    let f = fs::OpenOptions::new().create(true).truncate(false).write(true).open(window_lock_file(paths))?;
     match f.try_lock() {
         Ok(()) => Ok(Some(f)),
         Err(fs::TryLockError::WouldBlock) => Ok(None),
@@ -387,7 +431,7 @@ mod tests {
         let cmds = [
             AppCommand::Refresh,
             AppCommand::Mute(true),
-            AppCommand::Open("settings".into()),
+            AppCommand::Open("hooks".into()),
             AppCommand::Forget,
             AppCommand::Quit,
         ];
@@ -399,6 +443,21 @@ mod tests {
         assert_eq!(AppCommand::decode("rm -rf"), None);
         assert_eq!(take_commands(&paths), cmds.to_vec());
         assert!(take_commands(&paths).is_empty());
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn window_commands_and_lock() {
+        let dir = std::env::temp_dir().join(format!("clawdmeter-win-{}", std::process::id()));
+        let paths = Paths::under(&dir);
+        send_window_command(&paths, crate::Page::Hooks).unwrap();
+        send_window_command(&paths, crate::Page::Flash).unwrap();
+        assert_eq!(take_window_commands(&paths), [crate::Page::Hooks, crate::Page::Flash]);
+        assert!(take_window_commands(&paths).is_empty());
+        let first = acquire_window_lock(&paths).unwrap();
+        assert!(first.is_some());
+        assert!(acquire_window_lock(&paths).unwrap().is_none());
+        drop(first);
         let _ = fs::remove_dir_all(dir);
     }
 

@@ -1,6 +1,6 @@
-//! What the flasher knows about each board for its picker: a name, the panel
-//! resolution and size (for the true-aspect thumbnail), and a short summary.
-//! The release manifest's `display_name` wins when it has one.
+//! What the app knows about each supported board: names, a short summary,
+//! where to buy one, and its illustration (`assets/boards/<env>.svg`, drawn
+//! for the app; bundled into the binary by [`crate::ui::Assets`]).
 
 /// One supported board.
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -9,12 +9,14 @@ pub struct BoardInfo {
     pub env: &'static str,
     /// Short name.
     pub name: &'static str,
+    /// Full product name.
+    pub product: &'static str,
     /// Panel width, px.
     pub width: u32,
     /// Panel height, px.
     pub height: u32,
-    /// Panel diagonal, inches (thumbnail scale).
-    pub diagonal: f32,
+    /// Where to buy one.
+    pub buy_url: &'static str,
     /// One-line summary.
     pub summary: &'static str,
     /// SoC.
@@ -26,63 +28,70 @@ pub const BOARDS: [BoardInfo; 7] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
+        product: "Waveshare ESP32-S3-Touch-AMOLED-2.16",
         width: 480,
         height: 480,
-        diagonal: 2.16,
+        buy_url: "https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=149786",
         summary: "480×480 · 3 buttons",
         chip: "ESP32-S3",
     },
     BoardInfo {
         env: "waveshare_amoled_18",
         name: "AMOLED 1.8",
+        product: "Waveshare ESP32-S3-Touch-AMOLED-1.8",
         width: 368,
         height: 448,
-        diagonal: 1.8,
+        buy_url: "https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=149786",
         summary: "368×448 · 2 buttons",
         chip: "ESP32-S3",
     },
     BoardInfo {
         env: "waveshare_amoled_206",
         name: "AMOLED 2.06",
+        product: "Waveshare ESP32-S3-Touch-AMOLED-2.06",
         width: 410,
         height: 502,
-        diagonal: 2.06,
+        buy_url: "https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm?&aff_id=149786",
         summary: "410×502 · watch",
         chip: "ESP32-S3",
     },
     BoardInfo {
         env: "waveshare_lcd_154",
         name: "LCD 1.54",
+        product: "Waveshare ESP32-S3-Touch-LCD-1.54",
         width: 240,
         height: 240,
-        diagonal: 1.54,
+        buy_url: "https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33869&aff_id=149786",
         summary: "240×240 · SPI TFT",
         chip: "ESP32-S3",
     },
     BoardInfo {
         env: "waveshare_lcd_4",
         name: "LCD 4\"",
+        product: "Waveshare ESP32-S3-Touch-LCD-4",
         width: 480,
         height: 480,
-        diagonal: 4.0,
+        buy_url: "https://www.waveshare.com/esp32-s3-touch-lcd-4.htm",
         summary: "480×480 · RGB TFT",
         chip: "ESP32-S3",
     },
     BoardInfo {
         env: "waveshare_amoled_216_c6",
         name: "AMOLED 2.16 (C6)",
+        product: "Waveshare ESP32-C6-Touch-AMOLED-2.16",
         width: 480,
         height: 480,
-        diagonal: 2.16,
+        buy_url: "https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm?&aff_id=149786",
         summary: "480×480 · ESP32-C6",
         chip: "ESP32-C6",
     },
     BoardInfo {
         env: "waveshare_amoled_18_c6",
         name: "AMOLED 1.8 (C6)",
+        product: "Waveshare ESP32-C6-Touch-AMOLED-1.8",
         width: 368,
         height: 448,
-        diagonal: 1.8,
+        buy_url: "https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm?&aff_id=149786",
         summary: "368×448 · ESP32-C6",
         chip: "ESP32-C6",
     },
@@ -94,18 +103,9 @@ pub fn board(env: &str) -> Option<&'static BoardInfo> {
 }
 
 impl BoardInfo {
-    /// Thumbnail panel size inside a `box_px` square: true aspect ratio,
-    /// scaled by diagonal relative to the 2.16 (clamped so the 1.54 stays
-    /// visible and the 4" still fits).
-    pub fn thumb(&self, box_px: f32) -> (f32, f32) {
-        let scale = (self.diagonal / 2.16).clamp(0.62, 1.1);
-        let max = box_px * 0.84 * scale / 1.1;
-        let (w, h) = (self.width as f32, self.height as f32);
-        if w >= h {
-            (max, max * h / w)
-        } else {
-            (max * w / h, max)
-        }
+    /// The illustration's asset path (see [`crate::ui::Assets`]).
+    pub fn illustration(&self) -> String {
+        format!("boards/{}.svg", self.env)
     }
 }
 
@@ -127,11 +127,10 @@ mod tests {
     }
 
     #[test]
-    fn thumbnails_keep_aspect() {
-        let (w, h) = board("waveshare_amoled_18").unwrap().thumb(48.0);
-        assert!((w / h - 368.0 / 448.0).abs() < 1e-3);
-        let small = board("waveshare_lcd_154").unwrap().thumb(48.0).0;
-        let big = board("waveshare_lcd_4").unwrap().thumb(48.0).0;
-        assert!(small < big && big <= 48.0);
+    fn every_board_has_art_and_a_shop() {
+        for b in BOARDS {
+            assert!(crate::ui::Assets::get(&b.illustration()).is_some(), "{} has no illustration", b.env);
+            assert!(b.buy_url.starts_with("https://www.waveshare.com/"), "{}", b.env);
+        }
     }
 }

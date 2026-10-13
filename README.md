@@ -27,15 +27,19 @@ How the rooms and beats work is written up in [`docs/clawd-director.md`](docs/cl
 
 ## Hardware
 
-Boards supported out of the box:
+### Supported boards
 
-- [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=149786)
-- [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm?&aff_id=149786)
-- [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=149786)
-- [Waveshare ESP32-C6-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm?&aff_id=149786)
-- [Waveshare ESP32-S3-Touch-AMOLED-2.06](https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm?&aff_id=149786)
-- [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33869&aff_id=149786)
-- [Waveshare ESP32-S3-Touch-LCD-4](https://www.waveshare.com/esp32-s3-touch-lcd-4.htm)
+The desktop app's flasher recognises each of these and the setup wizard links to them.
+
+| | Board | |
+| :-: | --- | --- |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_216.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=149786) | 480×480 AMOLED, 3 buttons, speaker. The original. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_216_c6.svg" height="90" alt=""> | [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm?&aff_id=149786) | 480×480 AMOLED on the ESP32-C6 (no PSRAM, so Clawd stands still in the corner). |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_18.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=149786) | 368×448 AMOLED, 2 buttons, speaker. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_18_c6.svg" height="90" alt=""> | [Waveshare ESP32-C6-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm?&aff_id=149786) | 368×448 AMOLED on the ESP32-C6. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_206.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-AMOLED-2.06](https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm?&aff_id=149786) | 410×502 AMOLED in a watch case. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_lcd_154.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33869&aff_id=149786) | 240×240 IPS, 3 buttons, speaker. The smallest. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_lcd_4.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-LCD-4](https://www.waveshare.com/esp32-s3-touch-lcd-4.htm) | 480×480 IPS, 4 inches, one button. |
 
 > Please check if a pull request exists for your alternative hardware port before opening a new one, providing QA feedback and testing on the same hardware is more valuable than duplicate pull requests.
 
@@ -49,15 +53,21 @@ You need Claude Code installed and signed in to a subscription (Pro, Max, Team o
 
 Download the archive for your OS from the [latest release](https://github.com/HermannBjorgvin/Clawdmeter/releases/latest):
 
-- **Linux** (`clawdmeter-<version>-linux-x86_64.tar.gz`): unpack and put `clawdmeter` somewhere on your `PATH`, e.g. `~/.local/bin`. It needs BlueZ and a D-Bus session; the tray icon needs a StatusNotifierItem host (KDE, most Wayland/X11 panels; on GNOME the AppIndicator extension). Without one, the app shows a small status window instead.
+- **Linux** (`clawdmeter-<version>-linux-x86_64.tar.gz`): unpack and put `clawdmeter` somewhere on your `PATH`, e.g. `~/.local/bin`. It needs BlueZ and a D-Bus session; the tray icon needs a StatusNotifierItem host (KDE, most Wayland/X11 panels; on GNOME the AppIndicator extension). Without one, the app shows its window instead, and closing the window quits.
 - **macOS** (`clawdmeter-<version>-macos-universal.tar.gz`): unpack and move `Clawdmeter.app` to `/Applications`. The app isn't notarized, so the first time right-click it and choose **Open**. macOS then asks for Bluetooth access; allow it.
 - **Windows** (`clawdmeter-<version>-windows-x86_64.zip`): unpack `clawdmeter.exe` somewhere permanent, e.g. `%LOCALAPPDATA%\Programs\Clawdmeter`, and run it. SmartScreen may warn about an unknown publisher the first time.
 
-Run it with no arguments. It lives in the tray (menu bar on macOS): the menu shows the connection, the account and both meters, plus **Refresh now**, **Mute attention beep**, **Update firmware…**, **Flash a new device…**, **Settings…** and **Quit** (which stops the daemon; the device keeps showing its last numbers until they go stale).
+Run it with no arguments. It lives in the tray (menu bar on macOS): the menu shows the connection, the account and both meters, plus **Refresh now**, **Mute attention beep**, **Open Clawdmeter**, **Flash firmware…** (**Update firmware to vX…** when there's a new release), **Settings…** and **Quit** (which stops the daemon; the device keeps showing its last numbers until they go stale).
+
+Everything else happens in one window with a sidebar: **Overview** (link, meters, refresh, mute), **Device**, **Flash**, **Accounts**, **Hooks** and **Background**. The tray's items open it on the right page, or bring it to the front if it's already open. The first time you run the app, the window opens on a short setup wizard that walks through the next three steps; skip it whenever you like, and rerun it with **Run setup again** at the bottom of the sidebar.
+
+![The Overview page](desktop/docs/screenshots/overview.png)
 
 ### 2. Flash the board
 
-Plug the board in over USB-C and choose **Flash a new device…** from the tray. The flasher asks the chip what it is, offers the matching board image from the latest release, and writes it. **Update firmware…** does the same for a board that's already running Clawdmeter. On Linux your user needs access to the serial port (the flasher tells you which group to join if it doesn't).
+Plug the board in over USB-C and open the **Flash** page (the setup wizard starts there too). The flasher asks the chip what it is, offers the matching board image from the latest release, and writes it; your Bluetooth pairing survives the update. A board that already runs the latest release is left alone unless you ask. On Linux your user needs access to the serial port (the flasher tells you which group to join if it doesn't).
+
+![Picking the board](desktop/docs/screenshots/flash-identify.png)
 
 **Browser fallback:** each release also has one merged image per board, `<env>-<version>.bin`. In Chrome or Edge, open [Espressif's web flasher](https://espressif.github.io/esptool-js/), connect to the board, add that file at address `0x0`, and click **Program**.
 
@@ -73,15 +83,15 @@ The app only ever talks to a Clawdmeter your computer is paired with, never to o
 
 ### 4. Install the hooks
 
-Open **Settings… → Hooks** and click **Install in N accounts**. You see the exact change to each account's `settings.json` and confirm it with **Save changes**; the old file is kept as `settings.json.bak`. There's also a **Send a test alert** button. The hooks run `clawdmeter hook …`, which appends one line to a log and exits; nothing from your prompts or tool calls is recorded. Without hooks the meters still work, but Clawd can't react to you and attention alerts don't fire.
+Open the **Hooks** page and click **Install in N accounts**. You see the exact change to each account's `settings.json` and confirm it with **Save changes**; the old file is kept as `settings.json.bak`. There's also a **Send a test alert** button. The hooks run `clawdmeter hook …`, which appends one line to a log and exits; nothing from your prompts or tool calls is recorded. Without hooks the meters still work, but Clawd can't react to you and attention alerts don't fire.
 
 ### 5. Start at login
 
-**Settings… → Background → Start at login** adds a login item: an XDG autostart entry on Linux, a LaunchAgent on macOS, an `HKCU\…\Run` value on Windows.
+**Background → Start at login** adds a login item: an XDG autostart entry on Linux, a LaunchAgent on macOS, an `HKCU\…\Run` value on Windows.
 
 ## Settings
 
-Everything in the Settings window is stored in a plain config file, `~/.config/claude-usage-monitor/config` (`%LOCALAPPDATA%\Clawdmeter\config` on Windows). You can edit it by hand; the app re-reads it within a few seconds and keeps your comments.
+Everything on the app's settings pages is stored in a plain config file, `~/.config/claude-usage-monitor/config` (`%LOCALAPPDATA%\Clawdmeter\config` on Windows). You can edit it by hand; the app re-reads it within a few seconds and keeps your comments.
 
 | Key | Default | What it does |
 | --- | --- | --- |
@@ -94,8 +104,9 @@ Everything in the Settings window is stored in a plain config file, `~/.config/c
 | `claude_path` | found on `PATH` | Full path to `claude`, if the app can't find it. |
 | `update_check` | `on` | Daily check for new firmware. |
 | `release_repo` | `HermannBjorgvin/Clawdmeter` | Where the flasher looks for releases. |
+| `onboarding_done` | unset | Set to `true` once the setup wizard is finished or skipped (**Run setup again** in the sidebar brings it back). |
 
-Logs are in `~/.config/claude-usage-monitor/daemon.log`; **Settings… → Background** has a button to open it.
+Logs are in `~/.config/claude-usage-monitor/daemon.log`; the **Background** page has a button to open it.
 
 ### Command line
 
@@ -103,25 +114,25 @@ Logs are in `~/.config/claude-usage-monitor/daemon.log`; **Settings… → Backg
 clawdmeter                      tray app (the normal way to run it)
 clawdmeter --daemon             headless: no tray, no windows (servers)
 clawdmeter --once               poll /usage once and print the payload, no Bluetooth
-clawdmeter --window settings    open one window (settings, flasher or status)
+clawdmeter --window [PAGE]      open the app window (overview, device, flash, accounts, hooks, background, setup)
 clawdmeter --ports              list attached ESP32 USB ports
 clawdmeter --info PORT          ask the firmware on PORT for its board and version
 clawdmeter hook MODE [event]    the Claude Code hook (alert, clear or event)
 ```
 
-`CLAWDMETER_LOG=debug` turns up logging, `CLAWDMETER_NO_TRAY=1` shows the status window instead of a tray icon, and `CLAWDMETER_BLE_ADDRESS=AA:BB:…` tells the app which paired device to try first.
+`CLAWDMETER_LOG=debug` turns up logging, `CLAWDMETER_NO_TRAY=1` shows the app window instead of a tray icon, and `CLAWDMETER_BLE_ADDRESS=AA:BB:…` tells the app which paired device to try first.
 
 ## Upgrading from the old daemons
 
 Earlier versions ran a bash daemon (Linux), a Python daemon (macOS) or a Python tray (Windows), set up with `install.sh`, `install-mac.sh` or `install-windows.ps1`. The app replaces all three and keeps your config file, your paired device and the hook state files.
 
-1. Install the app as above. If an old daemon is still set to start at login, the app logs a warning, and **Settings… → Background** shows a **Turn it off** button. It stops the old service and removes its login entry:
+1. Install the app as above. If an old daemon is still set to start at login, the app logs a warning, and the **Background** page shows a **Turn it off** button. It stops the old service and removes its login entry:
    - Linux: `systemctl --user disable --now claude-usage-daemon` and deletes `~/.config/systemd/user/claude-usage-daemon.service`.
    - macOS: `launchctl unload -w` and deletes `~/Library/LaunchAgents/com.user.claude-usage-daemon.plist`.
    - Windows: deletes the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Clawdmeter` value if it still points at `pythonw.exe`. Quit the old tray icon yourself (or log out), since it may still be running.
 
    Running both at once makes them fight over the device.
-2. **Settings… → Hooks** shows hooks that still run `attention-hook.sh` as out of date. **Update N accounts** rewrites them to `clawdmeter hook …` in place, after the same preview.
+2. The **Hooks** page shows hooks that still run `attention-hook.sh` as out of date. **Update N accounts** rewrites them to `clawdmeter hook …` in place, after the same preview.
 3. Delete your old checkout's `daemon/.venv` if you had one. Nothing else is left behind.
 
 ## How it works

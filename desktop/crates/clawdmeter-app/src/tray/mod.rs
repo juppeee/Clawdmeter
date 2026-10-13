@@ -1,18 +1,17 @@
 //! The tray process: the daemon, the tray icon and menu (spec §04), the daily
-//! firmware update check, and the window processes it launches.
+//! firmware update check, and the app window process it launches.
 //!
 //! The tray icon needs a platform event loop on the main thread (a Win32
 //! message loop, NSApplication on macOS); on Linux it's a StatusNotifierItem
 //! served over D-Bus by `ksni` on its own thread, so no GTK is linked. See
 //! [`event_loop`]. When a Linux desktop has no StatusNotifierWatcher (GNOME
-//! without the AppIndicator extension), the tray falls back to the status
-//! window, and closing that window quits the app.
+//! without the AppIndicator extension), the app window stands in for the
+//! tray, and closing it quits the app.
 
 mod event_loop;
 #[cfg(target_os = "linux")]
 mod sni;
 
-use std::collections::HashMap;
 use std::process::{Child, Command as Proc};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -25,7 +24,7 @@ use tray_icon::{Icon, TrayIcon, TrayIconBuilder};
 use crate::art::{tray_icon_rgba, TrayState};
 use crate::daemon::{self, Command, DaemonHandle};
 use crate::ipc::{self, AppCommand, StatusSnapshot};
-use crate::{ago, tilde, WindowKind};
+use crate::{ago, tilde, Page};
 
 /// Status file refresh even when nothing changed (windows use it as a
 /// liveness signal).
@@ -39,7 +38,7 @@ const UPDATE_POLL: Duration = Duration::from_secs(600);
 static QUIT: AtomicBool = AtomicBool::new(false);
 
 /// Does this desktop show tray icons? (Always true off Linux.)
-/// `CLAWDMETER_NO_TRAY=1` forces the status-window fallback.
+/// `CLAWDMETER_NO_TRAY=1` forces the window fallback.
 pub fn tray_supported() -> bool {
     if std::env::var_os("CLAWDMETER_NO_TRAY").is_some_and(|v| v != "0") {
         return false;
@@ -54,10 +53,11 @@ pub fn tray_supported() -> bool {
     }
 }
 
-/// Launch a window process (`clawdmeter --window <kind>`).
-pub fn spawn_window(kind: WindowKind) -> std::io::Result<Child> {
+/// Launch the window process (`clawdmeter --window <page>`). If one is
+/// already running, the new process hands it the page and exits.
+pub fn spawn_window(page: Page) -> std::io::Result<Child> {
     let exe = std::env::current_exe()?;
-    Proc::new(exe).arg("--window").arg(kind.as_str()).spawn()
+    Proc::new(exe).arg("--window").arg(page.as_str()).spawn()
 }
 
 struct Items {
@@ -68,8 +68,8 @@ struct Items {
     weekly: MenuItem,
     refresh: MenuItem,
     mute: CheckMenuItem,
+    open: MenuItem,
     update: MenuItem,
-    flash: MenuItem,
     settings: MenuItem,
     quit: MenuItem,
 }
@@ -84,8 +84,8 @@ impl Items {
             weekly: MenuItem::new("Weekly  –", false, None),
             refresh: MenuItem::new("Refresh now", true, None),
             mute: CheckMenuItem::new("Mute attention beep", true, false, None),
-            update: MenuItem::new("Update firmware…", true, None),
-            flash: MenuItem::new("Flash a new device…", true, None),
+            open: MenuItem::new("Open Clawdmeter", true, None),
+            update: MenuItem::new("Flash firmware…", true, None),
             settings: MenuItem::new("Settings…", true, None),
             quit: MenuItem::new("Quit (stops the daemon)", true, None),
         };
@@ -98,8 +98,9 @@ impl Items {
             &PredefinedMenuItem::separator(),
             &it.refresh,
             &it.mute,
+            &PredefinedMenuItem::separator(),
+            &it.open,
             &it.update,
-            &it.flash,
             &it.settings,
             &PredefinedMenuItem::separator(),
             &it.quit,
@@ -134,7 +135,7 @@ impl Items {
         self.mute.set_enabled(beep_enabled);
         self.update.set_text(match snap.update_available() {
             Some(v) => format!("Update firmware to {}…", display_version(v)),
-            None => "Update firmware…".into(),
+            None => "Flash firmware…".into(),
         });
     }
 }
@@ -171,7 +172,8 @@ struct TrayApp {
     last_written_at: i64,
     menu_at: i64,
     beep_muted: bool,
-    children: HashMap<WindowKind, Child>,
+    /// The window process, while it runs.
+    window: Option<Child>,
     latest: Arc<Mutex<Option<String>>>,
     check_now: Arc<AtomicBool>,
     settings: Settings,
@@ -179,18 +181,19 @@ struct TrayApp {
 }
 
 impl TrayApp {
-    fn open(&mut self, kind: WindowKind) {
-        if let Some(c) = self.children.get_mut(&kind) {
+    /// Show the window on `page`: switch the open one, or start it.
+    fn open(&mut self, page: Page) {
+        if let Some(c) = self.window.as_mut() {
             if matches!(c.try_wait(), Ok(None)) {
-                log::info!("{} window already open", kind.as_str());
+                if let Err(e) = ipc::send_window_command(&self.paths, page) {
+                    log::warn!("couldn't switch the window to {}: {e}", page.as_str());
+                }
                 return;
             }
         }
-        match spawn_window(kind) {
-            Ok(c) => {
-                self.children.insert(kind, c);
-            }
-            Err(e) => log::error!("couldn't open the {} window: {e}", kind.as_str()),
+        match spawn_window(page) {
+            Ok(c) => self.window = Some(c),
+            Err(e) => log::error!("couldn't open the window: {e}"),
         }
     }
 
@@ -210,8 +213,8 @@ impl TrayApp {
                 self.send(Command::SetBeepMuted(m));
             }
             AppCommand::Open(w) => {
-                if let Some(k) = WindowKind::parse(&w) {
-                    self.open(k);
+                if let Some(p) = Page::parse(&w) {
+                    self.open(p);
                 }
             }
             AppCommand::CheckUpdate => self.check_now.store(true, Ordering::SeqCst),
@@ -247,10 +250,12 @@ impl TrayApp {
                 Some(AppCommand::Refresh)
             } else if id == *items.mute.id() {
                 Some(AppCommand::Mute(items.mute.is_checked()))
-            } else if id == *items.update.id() || id == *items.flash.id() {
-                Some(AppCommand::Open(WindowKind::Flasher.as_str().into()))
+            } else if id == *items.open.id() {
+                Some(AppCommand::Open(Page::Overview.as_str().into()))
+            } else if id == *items.update.id() {
+                Some(AppCommand::Open(Page::Flash.as_str().into()))
             } else if id == *items.settings.id() {
-                Some(AppCommand::Open(WindowKind::Settings.as_str().into()))
+                Some(AppCommand::Open(Page::Device.as_str().into()))
             } else if id == *items.quit.id() {
                 Some(AppCommand::Quit)
             } else {
@@ -308,16 +313,12 @@ impl TrayApp {
             self.last_written_at = now;
         }
 
-        // Reap windows; with no tray, the status window is the app.
-        let mut status_closed = false;
-        self.children.retain(|k, c| match c.try_wait() {
-            Ok(None) => true,
-            _ => {
-                status_closed |= *k == WindowKind::Status;
-                false
-            }
-        });
-        !status_closed || self.use_tray
+        // Reap the window; with no tray, the window is the app.
+        let closed = self.window.as_mut().is_some_and(|c| !matches!(c.try_wait(), Ok(None)));
+        if closed {
+            self.window = None;
+        }
+        !closed || self.use_tray
     }
 
     fn create_tray(&mut self) {
@@ -335,9 +336,9 @@ impl TrayApp {
                 self.shown_state = Some(TrayState::Searching);
             }
             Err(e) => {
-                log::error!("tray icon unavailable ({e}); showing the status window instead");
+                log::error!("tray icon unavailable ({e}); showing the window instead");
                 self.use_tray = false;
-                self.open(WindowKind::Status);
+                self.open(Page::Overview);
             }
         }
     }
@@ -346,7 +347,7 @@ impl TrayApp {
         if let Some(d) = self.daemon.take() {
             d.shutdown();
         }
-        for (_, mut c) in self.children.drain() {
+        if let Some(mut c) = self.window.take() {
             let _ = c.kill();
         }
         let _ = std::fs::remove_file(ipc::status_file(&self.paths));
@@ -418,15 +419,15 @@ fn install_signal_handler() {
     });
 }
 
-/// Run the tray app until Quit (or the status window closes, with no tray).
+/// Run the tray app until Quit (or the window closes, with no tray).
 pub fn run(paths: Paths) -> i32 {
     let lock = match ipc::acquire_instance_lock(&paths) {
         Ok(Some(f)) => Some(f),
         Ok(None) => {
-            // Already running: show its settings window instead of starting
-            // a second daemon. (A headless `--daemon` holder ignores this.)
-            log::info!("Clawdmeter is already running; opening its settings window");
-            let _ = ipc::send_command(&paths, &AppCommand::Open(WindowKind::Settings.as_str().into()));
+            // Already running: show its window instead of starting a second
+            // daemon. (A headless `--daemon` holder ignores this.)
+            log::info!("Clawdmeter is already running; opening its window");
+            let _ = ipc::send_command(&paths, &AppCommand::Open(Page::Overview.as_str().into()));
             return 0;
         }
         Err(e) => {
@@ -451,7 +452,7 @@ fn run_locked(paths: Paths, _lock: Option<std::fs::File>) -> i32 {
     if !use_tray {
         log::warn!(
             "no tray (CLAWDMETER_NO_TRAY is set, or no StatusNotifierWatcher on the session bus: \
-             GNOME needs the AppIndicator extension); showing the status window instead"
+             GNOME needs the AppIndicator extension); showing the window instead"
         );
     }
     let latest = Arc::new(Mutex::new(None));
@@ -469,14 +470,17 @@ fn run_locked(paths: Paths, _lock: Option<std::fs::File>) -> i32 {
         last_written_at: 0,
         menu_at: 0,
         beep_muted: false,
-        children: HashMap::new(),
+        window: None,
         latest,
         check_now,
         settings,
         settings_at: unix_now(),
     };
-    if !use_tray {
-        app.open(WindowKind::Status);
+    // First run opens the setup wizard; without a tray the window is the app.
+    if crate::onboarding::needed(&app.paths) {
+        app.open(Page::Setup);
+    } else if !use_tray {
+        app.open(Page::Overview);
     }
     let app = std::rc::Rc::new(std::cell::RefCell::new(Some(app)));
     let tick_app = app.clone();

@@ -1,0 +1,52 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="132" height="139" viewBox="62.0 27.8 132.0 139.2">
+<title>Waveshare ESP32-S3 LCD 1.54</title>
+<ellipse cx="128.0" cy="154" rx="60.0" ry="7" fill="#000000" opacity="0.14"/>
+<g transform="translate(120 98) skewY(-6) translate(-120 -98)">
+<rect x="88.4" y="48.8" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="88.0" y="48.5" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="87.5" y="48.2" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="87.0" y="48.0" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="86.6" y="47.7" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="86.2" y="47.4" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="85.7" y="47.1" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="85.2" y="46.9" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="84.8" y="46.6" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="84.3" y="46.3" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="83.9" y="46.0" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="83.5" y="45.8" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="83.0" y="45.5" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="82.5" y="45.2" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="82.1" y="45.0" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="81.7" y="44.7" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="81.2" y="44.4" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="80.8" y="44.1" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="80.3" y="43.9" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="79.8" y="43.6" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="79.4" y="43.3" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="79.0" y="43.0" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="78.5" y="42.8" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="78.0" y="42.5" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="77.6" y="42.2" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="77.2" y="41.9" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="76.7" y="41.6" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="76.2" y="41.4" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="75.8" y="41.1" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="75.3" y="40.8" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="74.9" y="40.5" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="74.5" y="40.3" width="94.0" height="98.0" rx="16.0" fill="#b9b5aa"/>
+<rect x="74.0" y="40.0" width="94.0" height="98.0" rx="16.0" fill="#e9e6dd"/>
+<rect x="74.6" y="40.6" width="92.8" height="96.8" rx="15.4" fill="none" stroke="#ffffff" stroke-width="1.2"/>
+<rect x="96.0" y="36.0" width="11.0" height="5.0" rx="2.5" fill="#c9c5ba"/>
+<rect x="114.0" y="36.0" width="11.0" height="5.0" rx="2.5" fill="#c9c5ba"/>
+<rect x="132.0" y="36.0" width="11.0" height="5.0" rx="2.5" fill="#c9c5ba"/>
+<rect x="117.0" y="146.0" width="16.0" height="4.0" rx="2.0" fill="#8f8b81"/>
+<rect x="84.0" y="50.0" width="74.0" height="74.0" rx="6.0" fill="#1a1a19"/>
+<rect x="89.0" y="55.0" width="64.0" height="64.0" rx="2.0" fill="#050505"/>
+<path d="M113.76 67.80h1.81v1.81h-1.81zM115.57 67.80h1.81v1.81h-1.81zM117.38 67.80h1.81v1.81h-1.81zM119.19 67.80h1.81v1.81h-1.81zM121.00 67.80h1.81v1.81h-1.81zM122.81 67.80h1.81v1.81h-1.81zM124.62 67.80h1.81v1.81h-1.81zM126.43 67.80h1.81v1.81h-1.81zM113.76 69.61h1.81v1.81h-1.81zM117.38 69.61h1.81v1.81h-1.81zM119.19 69.61h1.81v1.81h-1.81zM121.00 69.61h1.81v1.81h-1.81zM122.81 69.61h1.81v1.81h-1.81zM126.43 69.61h1.81v1.81h-1.81zM110.14 71.42h1.81v1.81h-1.81zM111.95 71.42h1.81v1.81h-1.81zM113.76 71.42h1.81v1.81h-1.81zM115.57 71.42h1.81v1.81h-1.81zM117.38 71.42h1.81v1.81h-1.81zM119.19 71.42h1.81v1.81h-1.81zM121.00 71.42h1.81v1.81h-1.81zM122.81 71.42h1.81v1.81h-1.81zM124.62 71.42h1.81v1.81h-1.81zM126.43 71.42h1.81v1.81h-1.81zM128.24 71.42h1.81v1.81h-1.81zM130.05 71.42h1.81v1.81h-1.81zM110.14 73.23h1.81v1.81h-1.81zM111.95 73.23h1.81v1.81h-1.81zM113.76 73.23h1.81v1.81h-1.81zM115.57 73.23h1.81v1.81h-1.81zM117.38 73.23h1.81v1.81h-1.81zM119.19 73.23h1.81v1.81h-1.81zM121.00 73.23h1.81v1.81h-1.81zM122.81 73.23h1.81v1.81h-1.81zM124.62 73.23h1.81v1.81h-1.81zM126.43 73.23h1.81v1.81h-1.81zM128.24 73.23h1.81v1.81h-1.81zM130.05 73.23h1.81v1.81h-1.81zM113.76 75.04h1.81v1.81h-1.81zM115.57 75.04h1.81v1.81h-1.81zM117.38 75.04h1.81v1.81h-1.81zM119.19 75.04h1.81v1.81h-1.81zM121.00 75.04h1.81v1.81h-1.81zM122.81 75.04h1.81v1.81h-1.81zM124.62 75.04h1.81v1.81h-1.81zM126.43 75.04h1.81v1.81h-1.81zM113.76 76.85h1.81v1.81h-1.81zM115.57 76.85h1.81v1.81h-1.81zM117.38 76.85h1.81v1.81h-1.81zM119.19 76.85h1.81v1.81h-1.81zM121.00 76.85h1.81v1.81h-1.81zM122.81 76.85h1.81v1.81h-1.81zM124.62 76.85h1.81v1.81h-1.81zM126.43 76.85h1.81v1.81h-1.81zM113.76 78.66h1.81v1.81h-1.81zM117.38 78.66h1.81v1.81h-1.81zM122.81 78.66h1.81v1.81h-1.81zM126.43 78.66h1.81v1.81h-1.81zM113.76 80.47h1.81v1.81h-1.81zM117.38 80.47h1.81v1.81h-1.81zM122.81 80.47h1.81v1.81h-1.81zM126.43 80.47h1.81v1.81h-1.81z" fill="#d97757"/>
+<path d="M115.57 69.61h1.81v1.81h-1.81zM124.62 69.61h1.81v1.81h-1.81z" fill="#141413"/>
+<rect x="99.9" y="90.0" width="42.2" height="2.9" rx="1.4" fill="#2a2a28"/>
+<rect x="99.9" y="90.0" width="14.4" height="2.9" rx="1.4" fill="#788c5d"/>
+<rect x="99.9" y="98.3" width="42.2" height="2.9" rx="1.4" fill="#2a2a28"/>
+<rect x="99.9" y="98.3" width="26.2" height="2.9" rx="1.4" fill="#d97757"/>
+</g>
+</svg>

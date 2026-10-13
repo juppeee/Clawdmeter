@@ -1,9 +1,12 @@
-//! The GPUI windows. Each runs in its own `clawdmeter --window <kind>`
-//! process (see [`crate::ipc`]) and exits when its window closes.
+//! The app window: one GPUI process (`clawdmeter --window [page]`) with a
+//! sidebar of pages and the first-run setup wizard. It exits when the window
+//! closes; see [`crate::ipc`] for how it talks to the tray process.
 
+pub mod app;
 pub mod flasher;
+pub mod overview;
 pub mod settings;
-pub mod status;
+pub mod setup;
 pub mod theme;
 pub mod widgets;
 
@@ -12,12 +15,13 @@ use std::time::Duration;
 
 use clawdmeter_core::{unix_now, Paths};
 use gpui::{
-    div, prelude::*, px, size, App, Application, Bounds, Decorations, MouseButton, SharedString, TitlebarOptions,
-    Window, WindowBounds, WindowDecorations, WindowOptions,
+    canvas, div, point, prelude::*, px, size, App, Application, AssetSource, Bounds, CursorStyle, Decorations,
+    HitboxBehavior, MouseButton, Pixels, Point, ResizeEdge, SharedString, Size, TitlebarOptions, Window, WindowBounds,
+    WindowDecorations, WindowOptions,
 };
 
 use crate::ipc::{self, AppCommand, StatusSnapshot};
-use crate::WindowKind;
+use crate::Page;
 use theme::{Theme, FONT_BODY};
 
 /// The three faces the firmware fonts are generated from (spec §01).
@@ -27,24 +31,93 @@ const FONTS: [&[u8]; 3] = [
     include_bytes!("../../../../../assets/DejaVuSansMono.ttf"),
 ];
 
-/// How often windows re-read the tray process's status.
+/// How often the window re-reads the tray process's status.
 pub const REFRESH: Duration = Duration::from_millis(500);
 
-/// Options for one window.
+/// The window's size, and the smallest it can be made.
+const SIZE: (f32, f32) = (880., 640.);
+const MIN_SIZE: (f32, f32) = (720., 540.);
+
+/// Images bundled into the binary, served to `img()` by path. SVGs go
+/// through GPUI's resvg path, which renders them in full colour.
+pub struct Assets;
+
+macro_rules! board_art {
+    ($($env:literal),* $(,)?) => {
+        &[$((concat!("boards/", $env, ".svg"), include_bytes!(concat!("../../assets/boards/", $env, ".svg")))),*]
+    };
+}
+
+const ASSETS: &[(&str, &[u8])] = board_art![
+    "waveshare_amoled_216",
+    "waveshare_amoled_216_c6",
+    "waveshare_amoled_18",
+    "waveshare_amoled_18_c6",
+    "waveshare_amoled_206",
+    "waveshare_lcd_154",
+    "waveshare_lcd_4",
+];
+
+impl Assets {
+    /// The bytes of a bundled asset.
+    pub fn get(path: &str) -> Option<&'static [u8]> {
+        ASSETS.iter().find(|(p, _)| *p == path).map(|(_, b)| *b)
+    }
+}
+
+impl AssetSource for Assets {
+    fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
+        Ok(Assets::get(path).map(Cow::Borrowed))
+    }
+
+    fn list(&self, path: &str) -> gpui::Result<Vec<SharedString>> {
+        Ok(ASSETS.iter().filter(|(p, _)| p.starts_with(path)).map(|(p, _)| SharedString::from(*p)).collect())
+    }
+}
+
+/// Options for the window.
 #[derive(Debug, Clone, Default)]
 pub struct WindowArgs {
-    /// Settings tab to open on (`device`, `accounts`, `hooks`, `alerts`,
-    /// `background`).
-    pub tab: Option<String>,
-    /// Flasher: a local release `manifest.json` to use instead of GitHub.
+    /// Flash page: a local release `manifest.json` to use instead of GitHub.
     pub manifest: Option<std::path::PathBuf>,
 }
 
-/// Open one window and run until it closes.
-pub fn run(kind: WindowKind, paths: Paths, args: WindowArgs) -> i32 {
-    Application::new().run(move |cx: &mut App| {
-        let tab = args.tab.clone();
-        let manifest = args.manifest.clone();
+/// A child view asks the window to show another page.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Navigate(pub Page);
+
+/// Open the app window on `page` and run until it closes. If the window is
+/// already open (another process holds the window lock), hand it the page
+/// and return.
+pub fn run(page: Option<Page>, paths: Paths, args: WindowArgs) -> i32 {
+    let lock = match ipc::acquire_window_lock(&paths) {
+        Ok(Some(f)) => Some(f),
+        Ok(None) => {
+            log::info!("the Clawdmeter window is already open; bringing it to the front");
+            let _ = ipc::send_window_command(&paths, page.unwrap_or(Page::Overview));
+            return 0;
+        }
+        Err(e) => {
+            log::warn!("window lock unavailable ({e}); continuing");
+            None
+        }
+    };
+    // Requests aimed at a window that has since closed.
+    let _ = ipc::take_window_commands(&paths);
+    let page = match page {
+        Some(p) => p,
+        None if crate::onboarding::needed(&paths) => Page::Setup,
+        None => Page::Overview,
+    };
+    open(move |window, cx| app::AppView::new(paths.clone(), page, args.manifest.clone(), window, cx));
+    drop(lock);
+    0
+}
+
+/// Run GPUI with the bundled fonts and images, open the app window with the
+/// root `build` makes, and return when it closes.
+pub fn open(build: impl FnOnce(&mut Window, &mut gpui::Context<app::AppView>) -> app::AppView + 'static) {
+    Application::new().with_assets(Assets).run(move |cx: &mut App| {
         if let Err(e) = cx.text_system().add_fonts(FONTS.iter().map(|f| Cow::Borrowed(*f)).collect()) {
             log::warn!("bundled fonts not registered ({e}); using system fonts");
         }
@@ -55,50 +128,60 @@ pub fn run(kind: WindowKind, paths: Paths, args: WindowArgs) -> i32 {
             }
         })
         .detach();
-        let (title, w, h) = match kind {
-            WindowKind::Settings => ("Clawdmeter settings", 780., 600.),
-            WindowKind::Flasher => ("Flash your Clawdmeter", 620., 560.),
-            WindowKind::Status => ("Clawdmeter", 380., status::HEIGHT_RUNNING),
-        };
         let options = WindowOptions {
-            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(w), px(h)), cx))),
-            titlebar: Some(TitlebarOptions { title: Some(title.into()), ..Default::default() }),
+            window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(SIZE.0), px(SIZE.1)), cx))),
+            titlebar: Some(TitlebarOptions { title: Some("Clawdmeter".into()), ..Default::default() }),
             app_id: Some("clawdmeter".into()),
             is_resizable: true,
-            // The status window fits its height to its content, so only its width is floored.
-            window_min_size: Some(match kind {
-                WindowKind::Status => size(px(w * 0.8), px(status::HEIGHT_NOT_RUNNING)),
-                _ => size(px(w * 0.8), px(h * 0.8)),
-            }),
+            window_min_size: Some(size(px(MIN_SIZE.0), px(MIN_SIZE.1))),
             window_decorations: Some(WindowDecorations::Server),
             ..Default::default()
         };
-        let p = paths.clone();
-        let opened = match kind {
-            WindowKind::Settings => cx
-                .open_window(options, move |w, cx| cx.new(|cx| settings::SettingsView::new(p, tab.as_deref(), w, cx)))
-                .map(|_| ()),
-            WindowKind::Flasher => cx
-                .open_window(options, move |w, cx| cx.new(|cx| flasher::FlasherView::new(p, manifest.clone(), w, cx)))
-                .map(|_| ()),
-            WindowKind::Status => {
-                cx.open_window(options, move |w, cx| cx.new(|cx| status::StatusView::new(p, w, cx))).map(|_| ())
-            }
-        };
-        if let Err(e) = opened {
+        if let Err(e) = cx.open_window(options, move |w, cx| cx.new(|cx| build(w, cx))) {
             log::error!("couldn't open the window: {e}");
             cx.quit();
         }
         cx.activate(true);
     });
-    0
+}
+
+/// Grab width for the resize edges of a client-drawn frame.
+const RESIZE_EDGE: f32 = 6.;
+
+fn resize_edge(pos: Point<Pixels>, size: Size<Pixels>) -> Option<ResizeEdge> {
+    let e = px(RESIZE_EDGE);
+    let (top, bottom) = (pos.y < e, pos.y > size.height - e);
+    let (left, right) = (pos.x < e, pos.x > size.width - e);
+    Some(match (top, bottom, left, right) {
+        (true, _, true, _) => ResizeEdge::TopLeft,
+        (true, _, _, true) => ResizeEdge::TopRight,
+        (_, true, true, _) => ResizeEdge::BottomLeft,
+        (_, true, _, true) => ResizeEdge::BottomRight,
+        (true, ..) => ResizeEdge::Top,
+        (_, true, ..) => ResizeEdge::Bottom,
+        (_, _, true, _) => ResizeEdge::Left,
+        (_, _, _, true) => ResizeEdge::Right,
+        _ => return None,
+    })
+}
+
+fn resize_cursor(edge: ResizeEdge) -> CursorStyle {
+    match edge {
+        ResizeEdge::Top | ResizeEdge::Bottom => CursorStyle::ResizeUpDown,
+        ResizeEdge::Left | ResizeEdge::Right => CursorStyle::ResizeLeftRight,
+        ResizeEdge::TopLeft | ResizeEdge::BottomRight => CursorStyle::ResizeUpLeftDownRight,
+        ResizeEdge::TopRight | ResizeEdge::BottomLeft => CursorStyle::ResizeUpRightDownLeft,
+    }
 }
 
 /// The window frame: the system's title bar when the compositor draws one,
-/// otherwise (GNOME on Wayland) a minimal one of our own with a close button.
-pub fn chrome(t: &Theme, title: &'static str, window: &Window, body: impl IntoElement) -> impl IntoElement {
+/// otherwise (GNOME on Wayland) a minimal one of our own with a close button
+/// and resize edges.
+pub fn chrome(t: &Theme, window: &Window, body: impl IntoElement) -> impl IntoElement {
     let client = matches!(window.window_decorations(), Decorations::Client { .. });
     div()
+        .id("frame")
+        .relative()
         .size_full()
         .flex()
         .flex_col()
@@ -124,11 +207,13 @@ pub fn chrome(t: &Theme, title: &'static str, window: &Window, body: impl IntoEl
                     // bar does: starting it from the press didn't move the
                     // window on GNOME Wayland.
                     .on_mouse_move(|e, window, _| {
-                        if e.pressed_button == Some(MouseButton::Left) {
+                        if e.pressed_button == Some(MouseButton::Left)
+                            && resize_edge(e.position, window.window_bounds().get_bounds().size).is_none()
+                        {
                             window.start_window_move();
                         }
                     })
-                    .child(div().text_size(px(13.)).text_color(t.dim).child(title))
+                    .child(div().text_size(px(13.)).text_color(t.dim).child("Clawdmeter"))
                     .child(
                         div()
                             .id("close")
@@ -147,6 +232,37 @@ pub fn chrome(t: &Theme, title: &'static str, window: &Window, body: impl IntoEl
             )
         })
         .child(div().flex_1().min_h_0().child(body))
+        .when(client, |d| {
+            // Resize edges: a cursor hint along the border, and a press there
+            // starts an interactive resize.
+            d.child(
+                canvas(
+                    |_, window, _| {
+                        window.insert_hitbox(
+                            Bounds::new(point(px(0.), px(0.)), window.window_bounds().get_bounds().size),
+                            HitboxBehavior::Normal,
+                        )
+                    },
+                    |_, hitbox, window, _| {
+                        let size = window.window_bounds().get_bounds().size;
+                        if let Some(edge) = resize_edge(window.mouse_position(), size) {
+                            window.set_cursor_style(resize_cursor(edge), &hitbox);
+                        }
+                    },
+                )
+                .size_full()
+                .absolute()
+                .top_0()
+                .left_0(),
+            )
+            .on_mouse_move(|_, window, _| window.refresh())
+            .on_mouse_down(MouseButton::Left, |e, window, cx| {
+                if let Some(edge) = resize_edge(e.position, window.window_bounds().get_bounds().size) {
+                    window.start_window_resize(edge);
+                    cx.stop_propagation();
+                }
+            })
+        })
 }
 
 /// Read the latest status (None when the tray process isn't running).
@@ -154,16 +270,12 @@ pub fn live_status(paths: &Paths) -> Option<StatusSnapshot> {
     ipc::read_status(paths).filter(|s| s.alive(unix_now()))
 }
 
-/// Ask the tray process to do something; if it isn't running, do what we
-/// can from here (open windows ourselves).
+/// Ask the tray process to do something (nothing happens when it isn't
+/// running; the pages say so where it matters).
 pub fn command(paths: &Paths, cmd: AppCommand) {
     if live_status(paths).is_none() {
-        if let AppCommand::Open(w) = &cmd {
-            if let Some(k) = WindowKind::parse(w) {
-                let _ = crate::tray::spawn_window(k);
-            }
-            return;
-        }
+        log::info!("{}: Clawdmeter isn't running", cmd.encode());
+        return;
     }
     if let Err(e) = ipc::send_command(paths, &cmd) {
         log::warn!("command {}: {e}", cmd.encode());

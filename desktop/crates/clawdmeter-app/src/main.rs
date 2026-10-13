@@ -1,15 +1,16 @@
 //! `clawdmeter`: the desktop companion.
 //!
-//! - no arguments: the tray app (daemon + tray icon; windows open as
-//!   `--window` child processes).
+//! - no arguments: the tray app (daemon + tray icon; the app window runs as
+//!   a `--window` child process).
 //! - `--daemon`: headless (no window, no tray) for servers and CI.
-//! - `--window settings|flasher|status`: one GPUI window.
+//! - `--window [PAGE]`: the app window (one per user; a second call switches
+//!   the open one to PAGE).
 
 // The tray app is a GUI program on Windows: no console window. CLI modes
 // attach to the parent console instead (see `attach_console`).
 #![cfg_attr(windows, windows_subsystem = "windows")]
 
-use clawdmeter_app::{daemon, logger, tray, ui, WindowKind};
+use clawdmeter_app::{daemon, logger, tray, ui, Page};
 use clawdmeter_core::Paths;
 
 const USAGE: &str = "\
@@ -18,14 +19,14 @@ clawdmeter - Claude Code usage on your desk
 USAGE:
     clawdmeter [OPTIONS]
 
-With no options, runs the tray app: the daemon plus a tray icon (or a status
+With no options, runs the tray app: the daemon plus a tray icon (or the app
 window on desktops without a tray).
 
 OPTIONS:
     --daemon          Run headless: poll usage, follow hooks, drive the device over BLE
-    --window KIND     Open one window: settings, flasher or status
-      [--tab NAME]    settings tab: device, accounts, hooks, alerts, background
-      [--manifest P]  flasher: use a local release manifest.json instead of GitHub
+    --window [PAGE]   Open the app window on a page: overview (default), device,
+                      flash, accounts, hooks, background or setup
+      [--manifest P]  flash page: use a local release manifest.json instead of GitHub
     --once            Poll /usage for every account once, print the payload, exit (no BLE)
     --ports           List attached Espressif USB ports
     --info PORT       Ask the firmware on PORT for its env/version
@@ -36,7 +37,7 @@ OPTIONS:
 
 ENVIRONMENT:
     CLAWDMETER_LOG       error|warn|info|debug (default info)
-    CLAWDMETER_NO_TRAY   1 = show the status window instead of a tray icon
+    CLAWDMETER_NO_TRAY   1 = show the app window instead of a tray icon
     POLL_INTERVAL        default poll interval (the config file overrides it)
 ";
 
@@ -69,16 +70,18 @@ fn main() {
     logger::init();
     let code = match args[0].as_str() {
         "--daemon" => run_daemon(paths),
-        "--window" => match args.get(1).and_then(|k| WindowKind::parse(k)) {
-            Some(kind) => {
-                let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
-                ui::run(kind, paths, ui::WindowArgs { tab: opt("--tab"), manifest: opt("--manifest").map(Into::into) })
+        "--window" => {
+            let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+            // `--tab` is the old settings-window flag; it names a page too.
+            let name = opt("--tab").or_else(|| args.get(1).filter(|a| !a.starts_with("--")).cloned());
+            match name.as_deref().map(Page::parse) {
+                Some(None) => {
+                    eprintln!("--window takes one of: overview, device, flash, accounts, hooks, background, setup");
+                    2
+                }
+                page => ui::run(page.flatten(), paths, ui::WindowArgs { manifest: opt("--manifest").map(Into::into) }),
             }
-            None => {
-                eprintln!("--window needs one of: settings, flasher, status");
-                2
-            }
-        },
+        }
         "--once" => daemon::once(&paths),
         "--ports" => {
             for p in clawdmeter_flash::device::list_ports() {
@@ -123,12 +126,12 @@ fn main() {
 }
 
 /// The bash / Python daemon this app replaces would fight it for the device.
-/// Settings > Background turns it off (`autostart::disable_legacy`).
+/// The Background page turns it off (`autostart::disable_legacy`).
 fn warn_if_legacy_daemon(paths: &Paths) {
     if let Some(e) = clawdmeter_core::autostart::legacy_entry(&paths.home) {
         log::warn!(
             "the old Clawdmeter daemon is still set to start at login ({}); it will fight this app for the \
-             device. Turn it off in Settings > Background",
+             device. Turn it off on the app's Background page",
             e.describe()
         );
     }

@@ -1,4 +1,5 @@
-//! The flasher (spec §02): plug in, confirm the board, flash.
+//! The flasher (spec §02): plug in, confirm the board, flash. It is the
+//! Flash page, and the setup wizard's board and flash steps.
 //!
 //! Steps: Connect → Identify → Firmware → Flash → Set up. Detection is the
 //! three probes from the spec, cheapest first: the firmware's `info` command,
@@ -16,13 +17,14 @@ use clawdmeter_flash::device::{self, ChipInfo, DeviceError, FirmwareInfo, FlashP
 use clawdmeter_flash::release::{self, Release};
 use clawdmeter_flash::{BoardImage, Manifest};
 use futures::StreamExt as _;
-use gpui::{div, prelude::*, px, Context, PathPromptOptions, SharedString, Window};
+use gpui::{div, img, prelude::*, px, Context, EventEmitter, PathPromptOptions, SharedString, Window};
 
 use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_M, R_PILL, R_S};
-use super::widgets::{bar, board_thumb, button, caption, card, clawd, kv, notice, para, pill, ButtonKind, Tone};
-use super::{chrome, command, live_status, run_blocking, REFRESH};
-use crate::boards;
+use super::widgets::{bar, button, caption, card, clawd, kv, notice, para, pill, ButtonKind, Tone};
+use super::{command, live_status, run_blocking, Navigate, REFRESH};
+use crate::boards::{self, BoardInfo};
 use crate::ipc::{self, AppCommand, FirmwareRecord};
+use crate::Page;
 
 const STEPS: [&str; 5] = ["Connect", "Identify", "Firmware", "Flash", "Set up"];
 
@@ -70,13 +72,38 @@ fn load_local(path: &std::path::Path) -> Result<Source, (String, bool)> {
         .map_err(|m| (m, false))
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum Step {
+/// Where the flow currently is.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Step {
+    /// Waiting for a board on USB.
     Connect,
+    /// Asking the board who it is / picking among candidates.
     Identify,
+    /// Downloading and checking the image.
     Firmware,
+    /// Writing it.
     Flash,
+    /// Written and restarted.
     Done,
+}
+
+/// Where the flasher is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlashMode {
+    /// The Flash page.
+    Page,
+    /// Inside the setup wizard: no step header, no done screen, and a board
+    /// that already runs the latest firmware can skip flashing.
+    Setup,
+}
+
+/// What the setup wizard listens for.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FlashEvent {
+    /// The board was flashed and restarted.
+    Flashed,
+    /// The board already runs the latest firmware; nothing was written.
+    UpToDate,
 }
 
 impl Step {
@@ -134,11 +161,18 @@ impl FlashHardware for Usb {
     }
 }
 
-/// The flasher window.
+/// The flasher.
 pub struct FlasherView {
     paths: Paths,
     hw: Arc<dyn FlashHardware>,
     step: Step,
+    mode: FlashMode,
+    /// On screen: only then does it listen on USB.
+    active: bool,
+    /// The release check has been started (it runs on first show).
+    requested: bool,
+    /// "Don't have one?": the supported boards with where to buy them.
+    shop: bool,
     /// `None` while checking; `Err((message, no_release_yet))`.
     source: Option<Result<Source, (String, bool)>>,
     port: Option<String>,
@@ -157,10 +191,56 @@ pub struct FlasherView {
     ticks: u32,
 }
 
+impl EventEmitter<Navigate> for FlasherView {}
+impl EventEmitter<FlashEvent> for FlasherView {}
+
+/// A board's illustration in a `w`×`h` box.
+pub fn board_art(b: &BoardInfo, w: f32, h: f32) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_shrink_0()
+        .items_center()
+        .justify_center()
+        .w(px(w))
+        .h(px(h))
+        .child(img(b.illustration()).w(px(w)).h(px(h)))
+}
+
+/// Every supported board with a link to buy it.
+pub fn shop(t: &Theme) -> impl IntoElement {
+    let mut grid = div().flex().flex_wrap().gap(px(10.));
+    for (i, b) in boards::BOARDS.iter().enumerate() {
+        let url = b.buy_url;
+        grid = grid.child(
+            div()
+                .id(SharedString::from(format!("buy-{i}")))
+                .debug_selector(move || format!("buy-{i}"))
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(2.))
+                .w(px(146.))
+                .pt(px(8.))
+                .pb(px(12.))
+                .rounded(px(R_M))
+                .bg(t.panel)
+                .cursor_pointer()
+                .hover(|s| s.bg(t.track))
+                .on_click(move |_, _, cx| cx.open_url(url))
+                .child(board_art(b, 120., 110.))
+                .child(div().text_size(px(13.5)).child(b.name))
+                .child(div().text_size(px(11.5)).text_color(t.mute).child(b.summary))
+                .child(div().pt(px(4.)).text_size(px(12.5)).text_color(t.accent).child("Buy ↗")),
+        );
+    }
+    grid
+}
+
 impl FlasherView {
-    /// Build, fetch the release manifest, and start listening on USB.
-    /// `manifest`: a local release `manifest.json` to use instead of GitHub.
-    pub fn new(paths: Paths, manifest: Option<PathBuf>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+    /// Build. The release manifest is fetched and USB watched once the
+    /// flasher is on screen ([`FlasherView::set_active`]). `manifest`: a local
+    /// release `manifest.json` to use instead of GitHub.
+    pub fn new(paths: Paths, manifest: Option<PathBuf>, cx: &mut Context<Self>) -> Self {
         Self::with_hardware(paths, manifest, Arc::new(Usb), cx)
     }
 
@@ -182,6 +262,10 @@ impl FlasherView {
             paths,
             hw,
             step: Step::Connect,
+            mode: FlashMode::Page,
+            active: false,
+            requested: false,
+            shop: false,
             source: None,
             port: None,
             probing: false,
@@ -198,11 +282,73 @@ impl FlasherView {
             connected: false,
             ticks: 0,
         };
-        match manifest {
-            Some(m) => v.source = Some(load_local(&m)),
-            None => v.fetch_release(cx),
+        if let Some(m) = manifest {
+            v.source = Some(load_local(&m));
+            v.requested = true;
         }
         v
+    }
+
+    /// Show or hide the flasher. Shown, it checks for the release (once)
+    /// and listens for a board on USB.
+    pub fn set_active(&mut self, active: bool, cx: &mut Context<Self>) {
+        self.active = active;
+        if active && !self.requested {
+            self.requested = true;
+            self.fetch_release(cx);
+        }
+        cx.notify();
+    }
+
+    /// Page or setup-wizard presentation.
+    pub fn set_mode(&mut self, mode: FlashMode, cx: &mut Context<Self>) {
+        self.mode = mode;
+        cx.notify();
+    }
+
+    /// Where the flow is.
+    pub fn step(&self) -> Step {
+        self.step
+    }
+
+    /// Pick a board among the candidates and fetch its image (what the
+    /// picker and Continue do).
+    pub fn choose(&mut self, env: &str, cx: &mut Context<Self>) {
+        self.pick = Some(env.to_owned());
+        self.start_download(cx);
+    }
+
+    /// Write the fetched image (what the Flash button does).
+    pub fn flash(&mut self, cx: &mut Context<Self>) {
+        self.start_flash(cx);
+    }
+
+    /// Open or close the "Don't have one?" board list.
+    pub fn show_shop(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.shop = open;
+        cx.notify();
+    }
+
+    /// Boards the identified chip could be.
+    pub fn candidates(&self) -> &[String] {
+        &self.candidates
+    }
+
+    /// Writing to the board right now (don't walk away).
+    pub fn flashing(&self) -> bool {
+        self.flashing
+    }
+
+    /// The fetched image is ready to write.
+    pub fn image_ready(&self) -> bool {
+        matches!(self.image, Some(Ok(_)))
+    }
+
+    /// The board on USB already runs this release (or newer).
+    pub fn up_to_date(&self) -> bool {
+        let (Some(info), Some(Ok(source))) = (&self.info, &self.source) else { return false };
+        info.ver.trim_start_matches(['v', 'V']).starts_with(|c: char| c.is_ascii_digit())
+            && !clawdmeter_flash::manifest::is_newer(&source.manifest().version, &info.ver)
     }
 
     fn fetch_release(&mut self, cx: &mut Context<Self>) {
@@ -263,7 +409,7 @@ impl FlasherView {
 
     fn tick(&mut self, cx: &mut Context<Self>) {
         self.ticks += 1;
-        if self.step == Step::Connect && !self.probing && self.ticks.is_multiple_of(2) {
+        if self.active && self.step == Step::Connect && !self.probing && self.ticks.is_multiple_of(2) {
             if let Some(p) = self.hw.ports().into_iter().next() {
                 self.port = Some(p);
                 self.step = Step::Identify;
@@ -273,7 +419,9 @@ impl FlasherView {
         if self.step == Step::Done {
             self.connected = live_status(&self.paths).is_some_and(|s| s.link == "connected");
         }
-        cx.notify();
+        if self.active {
+            cx.notify();
+        }
     }
 
     fn identify(&mut self, cx: &mut Context<Self>) {
@@ -449,6 +597,7 @@ impl FlasherView {
                             let _ = ipc::save_firmware_record(&v.paths, &FirmwareRecord { env, ver });
                             command(&v.paths, AppCommand::Reconnect);
                             v.step = Step::Done;
+                            cx.emit(FlashEvent::Flashed);
                         }
                         FlashMsg::Finished(Err(e)) => {
                             v.flashing = false;
@@ -466,7 +615,20 @@ impl FlasherView {
         .detach();
     }
 
-    fn restart(&mut self) {
+    /// One step back (the wizard's Back). False at the first step.
+    pub fn back(&mut self) -> bool {
+        match self.step {
+            Step::Connect => return false,
+            Step::Identify | Step::Done => self.restart(),
+            Step::Firmware => self.step = Step::Identify,
+            Step::Flash if !self.flashing => self.step = Step::Firmware,
+            Step::Flash => {}
+        }
+        true
+    }
+
+    /// Back to "plug it in".
+    pub fn restart(&mut self) {
         self.step = Step::Connect;
         self.port = None;
         self.info = None;
@@ -540,6 +702,7 @@ impl FlasherView {
     }
 
     fn connect_view(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
+        let shop_open = self.shop;
         let mut d = div()
             .flex()
             .flex_col()
@@ -552,7 +715,25 @@ impl FlasherView {
                 t,
                 "Use a USB-C data cable. Charge-only cables are the most common reason nothing shows up.",
             )))
-            .child(pill(t, "Listening on USB", Tone::Accent));
+            .child(pill(t, "Listening on USB", Tone::Accent))
+            .child(
+                div()
+                    .id("shop-toggle")
+                    .debug_selector(|| "shop-toggle".into())
+                    .pt(px(8.))
+                    .text_size(px(13.))
+                    .text_color(t.accent)
+                    .cursor_pointer()
+                    .hover(|s| s.text_color(t.focus))
+                    .on_click(cx.listener(|v, _, _, cx| {
+                        v.shop = !v.shop;
+                        cx.notify();
+                    }))
+                    .child(if shop_open { "Hide the boards" } else { "Don't have one yet? See the boards it runs on" }),
+            );
+        if shop_open {
+            d = d.child(div().pt(px(4.)).child(shop(t)));
+        }
         if let Some(p) = self.source_problem(t, cx) {
             d = d.child(div().w_full().pt(px(8.)).child(p));
         }
@@ -591,7 +772,12 @@ impl FlasherView {
         if self.probing {
             return d.child(para(t, "Asking the board who it is. If it isn't running Clawdmeter yet, it restarts briefly into its bootloader."));
         }
+        let latest = self.source.as_ref().and_then(|s| s.as_ref().ok()).map(Source::version).unwrap_or_default();
+        let up_to_date = self.up_to_date();
         let hint = match (&self.info, self.candidates.len()) {
+            (Some(_), _) if up_to_date => {
+                format!("It already runs the latest Clawdmeter firmware ({latest}), so there's nothing to flash.")
+            }
             (Some(_), _) => "It already runs Clawdmeter, so it told us exactly which board it is.".to_string(),
             (None, 1) => "Only one board in this release fits this chip.".to_string(),
             (None, n) if n > 1 => format!("The chip narrows it to {n} boards. Pick the one on your desk."),
@@ -624,8 +810,10 @@ impl FlasherView {
                     .flex_col()
                     .items_center()
                     .gap(px(4.))
-                    .w(px(124.))
-                    .p(px(10.))
+                    .w(px(146.))
+                    .pt(px(8.))
+                    .px(px(10.))
+                    .pb(px(12.))
                     .rounded(px(R_M))
                     .border_1()
                     .border_color(if on { t.accent } else { t.line })
@@ -639,28 +827,63 @@ impl FlasherView {
                             cx.notify();
                         });
                     })
-                    .child(board_thumb(t, info.map(|b| b.thumb(56.)).unwrap_or((40., 40.)), 64.))
-                    .child(div().pt(px(4.)).text_size(px(13.5)).text_center().child(name))
+                    .child(match info {
+                        Some(b) => board_art(b, 120., 110.).into_any_element(),
+                        None => div().h(px(110.)).flex().items_center().child(clawd(2.)).into_any_element(),
+                    })
+                    .child(div().text_size(px(13.5)).text_center().child(name))
                     .child(div().text_size(px(11.5)).text_color(t.mute).text_center().child(summary)),
             );
         }
         d = d.child(grid);
         let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
+        // In setup, an up-to-date board moves straight on; flashing it again
+        // stays possible.
+        let skip = up_to_date && self.mode == FlashMode::Setup;
+        let mut actions = div().flex().items_center().gap(px(8.));
+        if skip {
+            actions = actions
+                .child(button(t, "flash-anyway", "Flash anyway", ButtonKind::Small, true, move |_, _, cx| {
+                    let _ = me2.update(cx, |v, cx| v.start_download(cx));
+                }))
+                .child(button(
+                    t,
+                    "continue",
+                    "Continue",
+                    ButtonKind::Primary,
+                    true,
+                    cx.listener(|_, _, _, cx| cx.emit(FlashEvent::UpToDate)),
+                ));
+        } else {
+            let label = if up_to_date { "Flash it again" } else { "Continue" };
+            actions = actions.child(button(
+                t,
+                "continue",
+                label,
+                ButtonKind::Primary,
+                self.pick.is_some(),
+                move |_, _, cx| {
+                    let _ = me2.update(cx, |v, cx| v.start_download(cx));
+                },
+            ));
+        }
+        // In setup the wizard's footer has Back.
+        let setup = self.mode == FlashMode::Setup;
         d.child(
             div()
                 .flex()
                 .items_center()
                 .justify_between()
                 .pt(px(4.))
-                .child(button(t, "back0", "Back", ButtonKind::Small, true, move |_, _, cx| {
-                    let _ = me1.update(cx, |v, cx| {
-                        v.restart();
-                        cx.notify();
-                    });
+                .child(div().when(!setup, |d| {
+                    d.child(button(t, "back0", "Back", ButtonKind::Small, true, move |_, _, cx| {
+                        let _ = me1.update(cx, |v, cx| {
+                            v.restart();
+                            cx.notify();
+                        });
+                    }))
                 }))
-                .child(button(t, "continue", "Continue", ButtonKind::Primary, self.pick.is_some(), move |_, _, cx| {
-                    let _ = me2.update(cx, |v, cx| v.start_download(cx));
-                })),
+                .child(actions),
         )
     }
 
@@ -696,7 +919,10 @@ impl FlasherView {
                     .flex_row()
                     .items_center()
                     .gap(px(18.))
-                    .child(board_thumb(t, info.map(|b| b.thumb(96.)).unwrap_or((80., 80.)), 104.))
+                    .child(match info {
+                        Some(b) => board_art(b, 132., 110.).into_any_element(),
+                        None => clawd(4.).into_any_element(),
+                    })
                     .child(kv(
                         t,
                         vec![
@@ -717,16 +943,19 @@ impl FlasherView {
         }
         let ready = matches!(self.image, Some(Ok(_)));
         let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
+        let setup = self.mode == FlashMode::Setup;
         d.child(
             div()
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(button(t, "back1", "Back", ButtonKind::Small, true, move |_, _, cx| {
-                    let _ = me1.update(cx, |v, cx| {
-                        v.step = Step::Identify;
-                        cx.notify();
-                    });
+                .child(div().when(!setup, |d| {
+                    d.child(button(t, "back1", "Back", ButtonKind::Small, true, move |_, _, cx| {
+                        let _ = me1.update(cx, |v, cx| {
+                            v.back();
+                            cx.notify();
+                        });
+                    }))
                 }))
                 .child(button(t, "flash", format!("Flash {ver}"), ButtonKind::Primary, ready, move |_, _, cx| {
                     let _ = me2.update(cx, |v, cx| v.start_flash(cx));
@@ -798,7 +1027,7 @@ impl FlasherView {
     }
 
     fn done_view(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
-        let (me, p) = (cx.entity().downgrade(), self.paths.clone());
+        let me = cx.entity().downgrade();
         div()
             .flex()
             .flex_col()
@@ -827,9 +1056,14 @@ impl FlasherView {
                             cx.notify();
                         });
                     }))
-                    .child(button(t, "settings", "Open settings", ButtonKind::Small, true, move |_, _, _| {
-                        command(&p, AppCommand::Open("settings".into()))
-                    })),
+                    .child(button(
+                        t,
+                        "settings",
+                        "Device settings",
+                        ButtonKind::Small,
+                        true,
+                        cx.listener(|_, _, _, cx| cx.emit(Navigate(Page::Device))),
+                    )),
             )
     }
 }
@@ -837,22 +1071,21 @@ impl FlasherView {
 impl Render for FlasherView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = Theme::for_appearance(window.appearance());
+        let setup = self.mode == FlashMode::Setup;
         let view = match self.step {
             Step::Connect => self.connect_view(&t, cx),
             Step::Identify => self.identify_view(&t, cx),
             Step::Firmware => self.firmware_view(&t, cx),
             Step::Flash => self.flash_view(&t, cx),
+            // The wizard moves on to pairing by itself.
+            Step::Done if setup => self.flash_view(&t, cx),
             Step::Done => self.done_view(&t, cx),
         };
         let mut body = div()
-            .id("flasher")
-            .size_full()
-            .overflow_y_scroll()
             .flex()
             .flex_col()
             .gap(px(18.))
-            .p(px(24.))
-            .child(self.steps(&t))
+            .when(!setup, |d| d.child(super::widgets::heading(&t, "Flash")).child(self.steps(&t)))
             .child(view);
         if let (Some(e), false) = (&self.error, self.step == Step::Flash) {
             let me = cx.entity().downgrade();
@@ -870,12 +1103,12 @@ impl Render for FlasherView {
                 },
             ))));
         }
-        chrome(&t, "Flash your Clawdmeter", window, body)
+        body
     }
 }
 
 #[cfg(test)]
-mod tests {
+pub(crate) mod tests {
     use std::sync::Mutex;
 
     use gpui::{Modifiers, TestAppContext, VisualTestContext};
@@ -885,7 +1118,7 @@ mod tests {
     /// A board on a fake port: an ESP32-S3 with 16 MB that doesn't run
     /// Clawdmeter yet. Records what gets flashed.
     #[derive(Default)]
-    struct FakeBoard {
+    pub(crate) struct FakeBoard {
         flashed: Mutex<Option<(String, usize, String)>>,
     }
 
@@ -947,8 +1180,11 @@ mod tests {
         let hw = Arc::new(FakeBoard::default());
         let hw2: Arc<dyn FlashHardware> = hw.clone();
         let p = paths.clone();
-        let (view, cx) =
-            cx.add_window_view(move |_, cx| FlasherView::with_hardware(p, Some(manifest.clone()), hw2, cx));
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let mut v = FlasherView::with_hardware(p, Some(manifest.clone()), hw2, cx);
+            v.set_active(true, cx);
+            v
+        });
 
         // Connect → Identify: the tick notices the port and probes the chip.
         cx.executor().advance_clock(REFRESH * 3);
@@ -991,7 +1227,11 @@ mod tests {
         let (manifest, paths) = release_dir("missing");
         let hw: Arc<dyn FlashHardware> = Arc::new(FakeBoard::default());
         let p = paths.clone();
-        let (view, cx) = cx.add_window_view(move |_, cx| FlasherView::with_hardware(p, Some(manifest.clone()), hw, cx));
+        let (view, cx) = cx.add_window_view(move |_, cx| {
+            let mut v = FlasherView::with_hardware(p, Some(manifest.clone()), hw, cx);
+            v.set_active(true, cx);
+            v
+        });
         cx.executor().advance_clock(REFRESH * 3);
         click(cx, "board-1");
         click(cx, "continue");
