@@ -13,8 +13,9 @@ use std::path::{Path, PathBuf};
 
 use crate::paths::Paths;
 
-/// Default seconds between `/usage` polls while a session is working.
-pub const DEFAULT_POLL_INTERVAL: u64 = 60;
+/// Default seconds between `/usage` polls while a session is working
+/// (`cadence::Cadence::default().working`).
+pub const DEFAULT_POLL_INTERVAL: u64 = 180;
 /// Default seconds between heartbeat replays.
 pub const DEFAULT_HEARTBEAT_INTERVAL: u64 = 60;
 /// Smallest accepted poll / heartbeat interval.
@@ -345,7 +346,7 @@ mod tests {
     #[test]
     fn intervals_like_bash() {
         let s = settings("");
-        assert_eq!((s.poll_interval, s.heartbeat_interval), (60, 60));
+        assert_eq!((s.poll_interval, s.heartbeat_interval), (180, 60));
         assert!(!s.poll_interval_explicit);
         let s = settings("poll_interval = 300\nheartbeat_interval = 45\n");
         assert_eq!((s.poll_interval, s.heartbeat_interval), (300, 45));
@@ -353,7 +354,7 @@ mod tests {
         assert_eq!(settings("  poll_interval=120 # comment\r\n").poll_interval, 120);
         let s = settings("poll_interval = 3\nheartbeat_interval = 0\n");
         assert_eq!((s.poll_interval, s.heartbeat_interval), (10, 10));
-        assert_eq!(settings("poll_interval = abc\n").poll_interval, 60);
+        assert_eq!(settings("poll_interval = abc\n").poll_interval, 180);
         assert_eq!(settings("poll_interval = 30\npoll_interval = 90\n").poll_interval, 90);
     }
 
@@ -363,9 +364,9 @@ mod tests {
         let p = paths();
         assert_eq!(Settings::from_config(&cfg, &p, Some("45")).poll_interval, 45);
         assert_eq!(Settings::from_config(&cfg, &p, Some("1")).poll_interval, 10);
-        assert_eq!(Settings::from_config(&cfg, &p, Some("abc")).poll_interval, 60);
-        assert_eq!(Settings::from_config(&cfg, &p, Some("-5")).poll_interval, 60);
-        assert_eq!(Settings::from_config(&cfg, &p, Some("")).poll_interval, 60);
+        assert_eq!(Settings::from_config(&cfg, &p, Some("abc")).poll_interval, 180);
+        assert_eq!(Settings::from_config(&cfg, &p, Some("-5")).poll_interval, 180);
+        assert_eq!(Settings::from_config(&cfg, &p, Some("")).poll_interval, 180);
         let file = ConfigFile::parse("poll_interval = 200\n");
         assert_eq!(Settings::from_config(&file, &p, Some("45")).poll_interval, 200);
     }

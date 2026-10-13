@@ -37,9 +37,9 @@ handling to Claude Code.
 | Enterprise spend % | `round(overage-utilization × 100)` as `s` | `Spend limit: $X / $Y spent <period> (N%)` or `Spend limit: N% used` → `s` | Format taken from the `/usage` command in Claude Code 2.1.296. Spend amounts aren't sent. |
 | Billing period (`tp`, `pd`, `rd`) | Period = one calendar month before the overage reset (day clamped), host-local; `tp` clamped 0–100; `{tp:0, pd:30, rd:""}` on a missing or garbage reset | `payload::billing_period`: same rule, plus `today` = 1 day and `this week` = 7 days when the line names the period | Ported cases: month clamping, January rollover, before/after clamps, host-local date. |
 | Seat-based Enterprise / Team | Same 5h/7d headers as Pro | Same `Current …` lines | Week-only output (no session line) works: `sr = -1`. |
-| Account with no limits in `/usage` | Whatever the headers said | A miss (`UsageError::NoUsageLines`); after three misses the device shows stale | `/usage` prints nothing to show, so nothing is invented. |
+| Account with no limits in `/usage` | Whatever the headers said | A miss (`UsageError::NoUsageLines`, or `RateLimited` when Claude Code's debug log shows a 429); the account backs off; the device shows stale after three misses or once the last good reading is over 20 min old | This is what a rate-limited usage endpoint looks like: Claude Code drops the `Current …` lines and remembers the 429 for ~600 s per token. Nothing is invented. |
 | Logged out / expired token | M, W: `{"ok":false}` when every dir fails auth · L: logged, nothing sent | `{"ok":false}` once per poll when every account fails with a login or not-a-subscription error (`engine.rs`) | |
-| Transient failure (network, 429, 5xx) | M, W: silent retry · L: logged | Silent; retry after 30 s (`cadence.rs`); the account keeps its last values and goes stale after three misses in a row | Misses never feed the rate math. |
+| Transient failure (network, 429, 5xx) | M, W: silent retry · L: logged | Per-account backoff (`clawdmeter-core/src/backoff.rs`): 10 min after a miss, then 20, then 30 (cap), reset on success; device refresh requests and "Refresh now" don't bypass it. The account keeps its last values (and stays shown) and goes stale after three misses in a row, or once its last good reading is over 20 min old. Settings › Accounts shows "Retrying" with the wait | Misses never feed the rate math. The 10-minute floor is Claude Code's own 429 memory; a longer "not asking again for Ns" from `<config dir>/debug/latest` wins. A missing CLI or a login problem doesn't back off; it retries after 2 min. |
 | Several accounts (`config_dirs`) | L, M; W: one account | Every listed dir is polled; the plan whose session % rose most recently is shown, else the highest (`selector.rs`) | Ported tests: startup pick, switch on rise, sticky, reset is not activity, larger rise wins. |
 | Default account | `~/.claude` (W: `CLAUDE_CONFIG_DIR` when set) | `~/.claude`, or `$CLAUDE_CONFIG_DIR` when the config has no `config_dirs` (`Settings::apply_env_config_dir`) | Only the daemon applies the env default; the settings window shows and saves the file's value. |
 
@@ -54,7 +54,7 @@ keeping comments and unknown keys.
 | Key | Old daemons | Rust | Notes |
 |---|---|---|---|
 | `config_dirs` | L, M | Yes | |
-| `poll_interval` | L only (min 10, re-read every tick); M, W fixed at 60 s | Yes (min 10) | When set, it replaces both the working cadence and the 2-minute no-hooks cadence. Unset, polling follows the hooks (see below). |
+| `poll_interval` | L only (min 10, re-read every tick); M, W fixed at 60 s | Yes (min 10; the scheduler never polls an account more than every 120 s) | When set, it replaces both the 3-minute working cadence and the 5-minute no-hooks cadence. Unset, polling follows the hooks (see below). |
 | `heartbeat_interval` | L only (default 60, min 10; off when ≥ `poll_interval`) | Yes (default 60, min 10) | Always on: with 15-minute idle polls the heartbeat is what keeps the device's 90 s freshness window open. |
 | `chime` | L, M, W | Yes (`c:1`) | |
 | `beep` | L, M | Yes (`b:1` with an alert) | |
@@ -76,8 +76,8 @@ keeping comments and unknown keys.
 
 | Behaviour | Old daemons | Rust | Notes |
 |---|---|---|---|
-| Poll cadence | Every 60 s (L: `poll_interval`), 5 s loop tick | Event-driven (`cadence.rs`): at once on a prompt, then every 60 s while working; once ~10 s after a Stop; every 2 min with no hooks; every 15 min after 10 quiet minutes | 0.5 s loop tick, so hook events reach the device within about a second. |
-| Device refresh request (REQ `0x01`) | L: dbus-monitor + flag file · M, W: notify callback | Notify stream opened before subscribing, subscribe bounded at 10 s (`clawdmeter-ble/src/lib.rs`) | Polls at once. |
+| Poll cadence | Every 60 s (L: `poll_interval`), 5 s loop tick | Event-driven and per account (`cadence.rs`). Shown account: at once on a prompt, then every 3 min while working; once ~10 s after a Stop; every 5 min with no hooks or before 10 quiet minutes; every 15 min after. Other accounts: every 10 min. Never twice within 2 min per account, whatever the trigger | `/usage` hits a rate-limited endpoint, so the budget is well under the old 60 s. 0.5 s loop tick, so hook events still reach the device within about a second. |
+| Device refresh request (REQ `0x01`) | L: dbus-monitor + flag file · M, W: notify callback | Notify stream opened before subscribing, subscribe bounded at 10 s (`clawdmeter-ble/src/lib.rs`) | Polls every account at once, except one polled in the last 2 min or backing off. |
 | Heartbeat replay | L: replays the last payload with `sr`/`wr` aged by whole minutes and `t` advanced | Rebuilds the payload from the absolute reset times (exact) and marks it `rp:1` (`engine.rs`) | `rp` keeps replays out of the firmware's rate math. Stops once the shown account is stale, so the device can show it. |
 | "Neither interval ≤ 80 s" warning | L | Not ported | The heartbeat can't be disabled any more. |
 

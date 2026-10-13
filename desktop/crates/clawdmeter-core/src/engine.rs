@@ -9,7 +9,7 @@ use std::time::SystemTime;
 use chrono::{DateTime, TimeZone, Utc};
 
 use crate::attention::{Alert, AttentionState};
-use crate::cadence::{heartbeat_due, Cadence, PollReason, Scheduler};
+use crate::cadence::{heartbeat_due, AccountClock, Cadence, PollReason, Scheduler};
 use crate::config::Settings;
 use crate::events::{Activity, HookEvent, Signal};
 use crate::payload::{clock_fields, Payload};
@@ -56,6 +56,27 @@ pub struct HostClock {
     pub prefers_12h: bool,
 }
 
+/// A `/usage` poll to run now.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PollPlan {
+    /// Why (the earliest-due account's reason).
+    pub reason: PollReason,
+    /// The accounts due now; the rest wait (cadence, gap or backoff).
+    pub accounts: Vec<PathBuf>,
+}
+
+/// One account's last poll error, for the settings window.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AccountError {
+    /// The account (config dir).
+    pub dir: PathBuf,
+    /// What to tell the user.
+    pub message: String,
+    /// The app is retrying on its own (rate limit, timeout, odd output);
+    /// otherwise the user has to act.
+    pub retrying: bool,
+}
+
 /// Snapshot for the tray / status output.
 #[derive(Debug, Clone, PartialEq, Default)]
 pub struct EngineStatus {
@@ -70,7 +91,7 @@ pub struct EngineStatus {
     /// Every account failed with a login problem.
     pub logged_out: bool,
     /// Per-account last error, for the settings window.
-    pub errors: Vec<(PathBuf, String)>,
+    pub errors: Vec<AccountError>,
     /// An attention alert is up.
     pub attention: bool,
     /// Hook activity level 0-3.
@@ -94,6 +115,7 @@ pub struct Engine {
     attention: AttentionState,
     selector: PlanSelector<PathBuf>,
     accounts: BTreeMap<PathBuf, AccountState>,
+    in_flight: Vec<PathBuf>,
     active: Option<PathBuf>,
     rate: RateTracker,
     hooks_installed: bool,
@@ -122,6 +144,7 @@ impl Engine {
             attention: AttentionState::default(),
             selector: PlanSelector::default(),
             accounts: BTreeMap::new(),
+            in_flight: Vec::new(),
             active: None,
             rate: RateTracker::default(),
             hooks_installed: false,
@@ -147,9 +170,9 @@ impl Engine {
             return;
         }
         self.scheduler.cadence = Cadence::from_settings(settings.poll_interval, settings.poll_interval_explicit);
+        // A newly added account has never been polled, so it is due at once.
         if settings.config_dirs != self.settings.config_dirs {
             self.accounts.retain(|k, _| settings.config_dirs.contains(k));
-            self.scheduler.request();
         }
         self.settings = settings;
     }
@@ -168,7 +191,7 @@ impl Engine {
     pub fn on_hook_event(&mut self, ev: &HookEvent, now: i64) {
         match self.activity.ingest(ev) {
             Signal::Prompt { .. } => {
-                self.scheduler.on_prompt();
+                self.scheduler.on_prompt(now);
                 self.last_event_ts = Some(now);
             }
             Signal::Stop => {
@@ -184,9 +207,11 @@ impl Engine {
         self.attention.ingest(alert, clears);
     }
 
-    /// The device (REQ notify) or the user asked for fresh numbers.
-    pub fn request_refresh(&mut self) {
-        self.scheduler.request();
+    /// The device (REQ notify) or the user asked for fresh numbers. Accounts
+    /// that are backing off, or were polled in the last 2 minutes, still
+    /// wait for that to pass.
+    pub fn request_refresh(&mut self, now: i64) {
+        self.scheduler.request(now);
     }
 
     /// A (re)connection: resend everything the device needs.
@@ -199,27 +224,66 @@ impl Engine {
         }
     }
 
-    /// `Some(reason)` when a `/usage` poll should start now.
+    fn account_due(&self, dir: &PathBuf, now: i64) -> (i64, PollReason) {
+        let st = self.accounts.get(dir);
+        let clock = AccountClock {
+            shown: self.active.as_ref().is_none_or(|a| a == dir),
+            last_attempt: st.and_then(|a| a.last_attempt_at),
+            last_failed: st.is_some_and(|a| a.last_error.is_some()),
+            blocked_until: st.and_then(|a| a.backoff.until()),
+        };
+        self.scheduler.account_due(&clock, &self.activity, self.hooks_installed, now)
+    }
+
+    /// The earliest account's next poll: (unix seconds, reason).
+    fn next_due(&self, now: i64) -> Option<(i64, PollReason)> {
+        self.settings.config_dirs.iter().map(|d| self.account_due(d, now)).min_by_key(|(t, _)| *t)
+    }
+
+    /// `Some(reason)` when some account's `/usage` poll is due now.
     pub fn poll_due(&self, now: i64) -> Option<PollReason> {
-        self.scheduler.due(&self.activity, self.hooks_installed, now)
+        self.next_due(now).filter(|(t, _)| *t <= now).map(|(_, why)| why)
     }
 
-    /// The accounts to poll.
-    pub fn accounts_to_poll(&self) -> Vec<PathBuf> {
-        self.settings.config_dirs.clone()
+    /// Start a poll: the accounts due now, stamped as attempted. `None` when
+    /// nothing is due. Hand the results to [`Engine::on_poll_results`].
+    pub fn begin_poll(&mut self, now: i64) -> Option<PollPlan> {
+        let reason = self.poll_due(now)?;
+        let accounts: Vec<PathBuf> =
+            self.settings.config_dirs.iter().filter(|d| self.account_due(d, now).0 <= now).cloned().collect();
+        for d in &accounts {
+            self.accounts.entry(d.clone()).or_default().last_attempt_at = Some(now);
+        }
+        self.in_flight = accounts.clone();
+        Some(PollPlan { reason, accounts })
     }
 
-    /// Results of one poll over all accounts.
+    /// Results of one poll (the accounts of a [`PollPlan`]).
     pub fn on_poll_results(&mut self, now: i64, results: Vec<(PathBuf, Result<UsageReading, UsageError>)>) {
-        let any_ok = results.iter().any(|(_, r)| r.is_ok());
-        let all_auth =
-            !results.is_empty() && results.iter().all(|(_, r)| r.as_ref().err().is_some_and(UsageError::is_auth));
+        let polled = !results.is_empty();
         let ok_dirs: Vec<PathBuf> = results.iter().filter(|(_, r)| r.is_ok()).map(|(d, _)| d.clone()).collect();
         for (dir, r) in results {
-            self.accounts.entry(dir).or_default().record(now, r);
+            let st = self.accounts.entry(dir.clone()).or_default();
+            // Results without a `begin_poll` (`--once`) count as attempted now.
+            if !self.in_flight.contains(&dir) {
+                st.last_attempt_at = Some(now);
+            }
+            st.record(now, r);
+            if let (Some(left), Some(e)) = (st.backoff.remaining(now), &st.last_error) {
+                log::info!("{}: {e}; not polling it for {left}s", dir.display());
+            }
         }
-        // Accounts that missed this cycle keep their last values, which don't
-        // count as a rise, so a glitch never flips the shown account.
+        // Every configured account's latest answer is a login problem.
+        let all_auth = !self.settings.config_dirs.is_empty()
+            && self
+                .settings
+                .config_dirs
+                .iter()
+                .all(|d| self.accounts.get(d).and_then(|a| a.last_error.as_ref()).is_some_and(UsageError::is_auth));
+        // Accounts that missed (or weren't polled) keep their last values,
+        // which don't count as a rise, so a miss, a rate limit or a backoff
+        // never flips the shown account. Only an account with no reading at
+        // all is left out.
         let sessions: Vec<(PathBuf, u32)> =
             self.accounts.iter().filter_map(|(k, a)| a.last.as_ref().map(|r| (k.clone(), r.session_pct()))).collect();
         let prev_active = self.active.clone();
@@ -240,9 +304,9 @@ impl Engine {
                 self.rate.sample(now, pct, false);
             }
         }
+        self.in_flight.clear();
         self.logged_out = all_auth;
-        self.fresh_poll = active_fresh || all_auth;
-        self.scheduler.polled(now, any_ok);
+        self.fresh_poll = active_fresh || (all_auth && polled);
     }
 
     fn active_state(&self) -> Option<&AccountState> {
@@ -254,8 +318,8 @@ impl Engine {
     }
 
     /// The shown account has missed three polls in a row.
-    pub fn stale(&self) -> bool {
-        self.active_state().is_some_and(AccountState::is_stale)
+    pub fn stale(&self, now: i64) -> bool {
+        self.active_state().is_some_and(|a| a.is_stale(now))
     }
 
     /// The next write, if one is due. Call [`Engine::mark_written`] after a
@@ -284,12 +348,12 @@ impl Engine {
                 WriteKind::Poll
             } else if self.attention.pending() {
                 WriteKind::Attention
-            } else if (new_event || a_changed || n_changed) && !self.stale() {
+            } else if (new_event || a_changed || n_changed) && !self.stale(now) {
                 // Any ok payload refreshes the device's DATA_FRESH_MS, so
                 // while the numbers are stale only alerts and polls go out
                 // and the device can show its stale state.
                 WriteKind::Event
-            } else if !self.stale() && heartbeat_due(self.last_write, self.settings.heartbeat_interval, now) {
+            } else if !self.stale(now) && heartbeat_due(self.last_write, self.settings.heartbeat_interval, now) {
                 WriteKind::Heartbeat
             } else {
                 return None;
@@ -357,19 +421,25 @@ impl Engine {
             active_account: self.active.clone(),
             reading: st.and_then(|a| a.last.clone()),
             age_secs: st.and_then(|a| a.age(now)),
-            stale: self.stale(),
+            stale: self.stale(now),
             logged_out: self.logged_out,
             errors: self
                 .accounts
                 .iter()
-                .filter_map(|(k, a)| a.last_error.as_ref().map(|e| (k.clone(), e.user_message())))
+                .filter_map(|(k, a)| {
+                    a.last_error.as_ref().map(|e| AccountError {
+                        dir: k.clone(),
+                        message: e.user_message(a.backoff.remaining(now)),
+                        retrying: e.is_transient(),
+                    })
+                })
                 .collect(),
             attention: self.attention.active(),
             activity: self.activity.level(now),
             sessions: self.activity.sessions_active(now),
             hooks: self.activity.hooks_seen,
             mood: st.and_then(|a| a.last.as_ref()).map(|_| self.rate.mood(self.activity.level(now))),
-            next_poll_at: Some(self.scheduler.next_due(&self.activity, self.hooks_installed, now).0),
+            next_poll_at: self.next_due(now).map(|(t, _)| t),
         }
     }
 }
@@ -438,7 +508,7 @@ mod tests {
         for i in 1..=3 {
             e.on_poll_results(T0 + 300 + i, vec![(dir.clone(), Err(UsageError::Timeout))]);
         }
-        assert!(e.stale());
+        assert!(e.stale(T0 + 304));
         assert!(write(&mut e, T0 + 1000).is_none());
         assert_eq!(e.status(T0 + 1000).reading, Some(reading(15)), "last values kept");
     }
@@ -448,7 +518,7 @@ mod tests {
         let mut e = Engine::new(settings("config_dirs = ~/.claude, ~/.claude-work\n"));
         let a = PathBuf::from("/h/.claude");
         let b = PathBuf::from("/h/.claude-work");
-        assert_eq!(e.accounts_to_poll(), vec![a.clone(), b.clone()]);
+        assert_eq!(e.begin_poll(T0).unwrap().accounts, vec![a.clone(), b.clone()]);
         e.on_poll_results(T0, vec![(a.clone(), Ok(reading(10))), (b.clone(), Ok(reading(30)))]);
         assert_eq!(e.status(T0).active_account, Some(b.clone()));
         e.on_poll_results(T0 + 60, vec![(a.clone(), Ok(reading(20))), (b.clone(), Ok(reading(30)))]);
@@ -570,7 +640,9 @@ mod tests {
         assert_eq!(w.payload.a, None, "no hooks seen yet");
 
         e.on_hook_event(&ev(T0 + 10, "UserPromptSubmit"), T0 + 10);
-        assert_eq!(e.poll_due(T0 + 10), Some(PollReason::Prompt));
+        // The prompt's poll waits out the 2-minute gap since the last one.
+        assert_eq!(e.poll_due(T0 + 10), None);
+        assert_eq!(e.poll_due(T0 + 120), Some(PollReason::Prompt));
         let w = write(&mut e, T0 + 10).unwrap();
         assert_eq!(w.kind, WriteKind::Event, "the event goes out before the poll lands");
         assert_eq!(
@@ -595,7 +667,8 @@ mod tests {
         e.on_hook_event(&ev(T0 + 30, "Stop"), T0 + 30);
         let w = write(&mut e, T0 + 30).unwrap();
         assert_eq!((w.payload.e.as_deref(), w.payload.es), (Some("s"), Some(2)));
-        assert_eq!(e.poll_due(T0 + 40), Some(PollReason::AfterStop));
+        assert_eq!(e.poll_due(T0 + 40), None, "polled at T0+11: gap until T0+131");
+        assert_eq!(e.poll_due(T0 + 131), Some(PollReason::AfterStop));
 
         // Old events stop riding along after a minute.
         let w = e.next_write(T0 + 200, HostClock::default()).unwrap();
@@ -617,7 +690,93 @@ mod tests {
         e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
         assert_eq!(e.poll_due(T0 + 1), None);
         e.update_settings(settings("config_dirs = ~/.claude, ~/.w\n"));
-        assert_eq!(e.poll_due(T0 + 1), Some(PollReason::Requested));
+        assert_eq!(e.poll_due(T0 + 1), Some(PollReason::Startup));
+        assert_eq!(e.begin_poll(T0 + 1).unwrap().accounts, vec![PathBuf::from("/h/.w")], "only the new account");
+    }
+
+    fn poll(e: &mut Engine, now: i64, answer: impl Fn(&Path) -> Result<UsageReading, UsageError>) -> Vec<PathBuf> {
+        let Some(plan) = e.begin_poll(now) else { return Vec::new() };
+        let results = plan.accounts.iter().map(|d| (d.clone(), answer(d))).collect();
+        e.on_poll_results(now, results);
+        plan.accounts
+    }
+
+    fn no_lines() -> Result<UsageReading, UsageError> {
+        Err(UsageError::NoUsageLines("You are currently using your subscription".into()))
+    }
+
+    // The owner's case: the shown account's /usage comes back without its
+    // lines (429). It keeps being shown with its last values, isn't polled
+    // again for 10 minutes whatever asks, and the other account keeps its
+    // own 10-minute rhythm.
+    #[test]
+    fn rate_limited_shown_account_backs_off_and_stays() {
+        let mut e = Engine::new(settings("config_dirs = ~/.claude, ~/.claude-work\n"));
+        e.set_hooks_installed(true);
+        let (a, b) = (PathBuf::from("/h/.claude"), PathBuf::from("/h/.claude-work"));
+        let pct = |d: &Path| if d == a { 40 } else { 10 };
+        assert_eq!(poll(&mut e, T0, |d| Ok(reading(pct(d)))), vec![a.clone(), b.clone()]);
+        assert_eq!(e.status(T0).active_account, Some(a.clone()));
+        e.on_hook_event(&ev(T0 + 200, "UserPromptSubmit"), T0 + 200);
+        assert_eq!(poll(&mut e, T0 + 200, |_| no_lines()), vec![a.clone()], "the prompt polls the shown account only");
+        let st = e.status(T0 + 200);
+        assert_eq!(st.active_account, Some(a.clone()), "a rate limit doesn't flip the shown account");
+        assert_eq!(st.reading.map(|r| r.session_pct()), Some(40));
+        assert_eq!(
+            st.errors,
+            vec![AccountError {
+                dir: a.clone(),
+                message: "Claude Code's usage service is rate-limiting this account. Trying again in about 10 minutes."
+                    .into(),
+                retrying: true,
+            }]
+        );
+        // A refresh request polls only the account that isn't backing off,
+        // and prompts wait for the backoff too.
+        e.request_refresh(T0 + 300);
+        assert_eq!(poll(&mut e, T0 + 300, |_| Ok(reading(10))), vec![b.clone()]);
+        assert_eq!(e.status(T0 + 300).active_account, Some(a.clone()));
+        e.on_hook_event(&ev(T0 + 400, "UserPromptSubmit"), T0 + 400);
+        for t in [T0 + 400, T0 + 599, T0 + 799] {
+            assert!(e.begin_poll(t).is_none(), "nothing due at {t}");
+        }
+        assert_eq!(e.status(T0 + 700).next_poll_at, Some(T0 + 800));
+        // Second miss: 20 minutes.
+        assert_eq!(poll(&mut e, T0 + 800, |_| Err(UsageError::RateLimited { retry_after_secs: 400 })), vec![a.clone()]);
+        assert!(e.status(T0 + 800).errors[0].message.ends_with("about 20 minutes."));
+        assert_eq!(poll(&mut e, T0 + 900, |_| Ok(reading(10))), vec![b.clone()], "B every 10 minutes");
+        assert!(e.begin_poll(T0 + 1999).is_none_or(|p| !p.accounts.contains(&a)));
+        // Back: errors clear, and the device gets a poll write.
+        let polled = poll(&mut e, T0 + 2000, |d| Ok(reading(pct(d) + 5)));
+        assert!(polled.contains(&a));
+        assert!(e.status(T0 + 2000).errors.is_empty());
+        assert_eq!(write(&mut e, T0 + 2000).unwrap().kind, WriteKind::Poll);
+    }
+
+    // An account with no reading at all can't be shown; the other one is.
+    #[test]
+    fn account_without_data_is_not_shown() {
+        let mut e = Engine::new(settings("config_dirs = ~/.claude, ~/.claude-work\n"));
+        let (a, b) = (PathBuf::from("/h/.claude"), PathBuf::from("/h/.claude-work"));
+        poll(&mut e, T0, |d| if d == a { no_lines() } else { Ok(reading(5)) });
+        assert_eq!(e.status(T0).active_account, Some(b));
+        assert!(!e.status(T0).logged_out);
+        let _ = a;
+    }
+
+    // Logged out is about every account's latest answer, not just the ones
+    // polled this time.
+    #[test]
+    fn logged_out_needs_every_account() {
+        let mut e = Engine::new(settings("config_dirs = ~/.claude, ~/.claude-work\n"));
+        let (a, b) = (PathBuf::from("/h/.claude"), PathBuf::from("/h/.claude-work"));
+        e.on_poll_results(T0, vec![(a.clone(), Ok(reading(5))), (b.clone(), Ok(reading(3)))]);
+        e.on_poll_results(T0 + 600, vec![(b.clone(), Err(UsageError::NotLoggedIn("x".into())))]);
+        assert!(!e.status(T0 + 600).logged_out);
+        let errs = e.status(T0 + 600).errors;
+        assert_eq!((errs.len(), errs[0].retrying), (1, false));
+        e.on_poll_results(T0 + 700, vec![(a, Err(UsageError::NotLoggedIn("x".into())))]);
+        assert!(e.status(T0 + 700).logged_out);
     }
 
     #[test]

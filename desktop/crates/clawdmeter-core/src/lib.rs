@@ -8,6 +8,7 @@
 //! * [`attention`]: the attention hook's alert / clear files (written by
 //!   `clawdmeter hook`; the installer lives in the app crate).
 //! * [`cadence`]: when to poll, when to heartbeat.
+//! * [`backoff`]: how long an account waits after a failed poll.
 //! * [`selector`]: which account to show.
 //! * [`payload`]: the JSON the firmware parses.
 //! * [`rate`]: the slow-clock mood.
@@ -18,6 +19,7 @@
 
 pub mod attention;
 pub mod autostart;
+pub mod backoff;
 pub mod cadence;
 pub mod config;
 pub mod engine;
@@ -30,7 +32,7 @@ pub mod selector;
 pub mod usage;
 
 pub use config::{ConfigFile, Settings};
-pub use engine::{Engine, EngineStatus, HostClock, Write, WriteKind};
+pub use engine::{AccountError, Engine, EngineStatus, HostClock, PollPlan, Write, WriteKind};
 pub use paths::Paths;
 pub use payload::Payload;
 pub use usage::{UsageError, UsageReading, Window};

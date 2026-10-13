@@ -99,7 +99,7 @@ Everything on the app's settings pages is stored in a plain config file, `~/.con
 | `chime` | `off` | `on` = chime when the 5-hour session resets (boards with a speaker: S3 AMOLED-2.16 and 1.8, LCD-1.54). |
 | `beep` | `off` | `on` = beep with attention alerts. |
 | `clock` | `off` | `auto`, `12` or `24` shows a clock in place of the "Usage" title. |
-| `poll_interval` | unset | Seconds between `/usage` polls. Unset, polling follows your activity: right after a prompt, every minute while Claude works, every 15 minutes when it's quiet. |
+| `poll_interval` | unset | Seconds between `/usage` polls of the shown account while you work (at least 120). Unset, polling follows your activity: right after a prompt, every 3 minutes while Claude works, every 15 minutes when it's quiet. Other accounts are checked every 10 minutes. |
 | `heartbeat_interval` | `60` | Seconds between keep-alive writes, so the device knows the numbers are current. |
 | `claude_path` | found on `PATH` | Full path to `claude`, if the app can't find it. |
 | `update_check` | `on` | Daily check for new firmware. |
@@ -139,7 +139,7 @@ Earlier versions ran a bash daemon (Linux), a Python daemon (macOS) or a Python 
 
 <img src="assets/readme/magnifier.gif" width="150" align="right" alt="">
 
-1. **The slow clock.** The app runs `claude --output-format json -p /usage` for each account. Claude Code answers from its own cache of your limits without sending a message, so polling can't start a window or spend anything. The app parses the session and weekly percentages and reset times (or the spend limit, for spend-capped accounts).
+1. **The slow clock.** The app runs `claude --output-format json -p /usage` for each account. Claude Code reads your limits from Anthropic's usage endpoint without sending a message, so polling can't start a window or spend anything. The app parses the session and weekly percentages and reset times (or the spend limit, for spend-capped accounts). That endpoint is rate-limited per account, so the app polls sparingly (at most every 2 minutes per account) and, when Claude Code comes back without numbers, leaves that account alone for 10 minutes or more while the device keeps showing the last values.
 2. **The fast clock.** The Claude Code hooks append `<time> <event> <session>` to `~/.config/claude-usage-monitor/events.log`. The app follows that file and turns it into an activity level, the latest event and the number of active sessions. A prompt also triggers a fresh `/usage` poll.
 3. **Attention.** On a Notification or AskUserQuestion, the hook writes the message to an `attention` file; the next prompt or tool call in that session clears it.
 4. **The link.** The app finds the paired device over Bluetooth LE and writes one JSON payload to its data characteristic whenever something changes, plus a heartbeat every minute.

@@ -46,6 +46,20 @@ pub fn firmware_record_file(paths: &Paths) -> PathBuf {
     paths.cache_dir.join("device-firmware.json")
 }
 
+/// One account's last poll error. A status file from an older build (errors
+/// as `[dir, message]` pairs) still reads, as not retrying.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct AccountError {
+    /// Config dir.
+    pub dir: String,
+    /// What to tell the user.
+    pub message: String,
+    /// The app retries on its own (shown as "Retrying"); otherwise the user
+    /// has to act.
+    #[serde(default)]
+    pub retrying: bool,
+}
+
 /// The window-facing view of [`Status`].
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct StatusSnapshot {
@@ -73,8 +87,8 @@ pub struct StatusSnapshot {
     pub stale: bool,
     /// Every account is logged out.
     pub logged_out: bool,
-    /// Per-account errors (dir, message).
-    pub errors: Vec<(String, String)>,
+    /// Per-account errors.
+    pub errors: Vec<AccountError>,
     /// Attention alert up.
     pub attention: bool,
     /// Hook activity 0-3.
@@ -122,7 +136,15 @@ impl StatusSnapshot {
             read_at: e.age_secs.map(|a| now - a),
             stale: e.stale,
             logged_out: e.logged_out,
-            errors: e.errors.iter().map(|(d, m)| (d.display().to_string(), m.clone())).collect(),
+            errors: e
+                .errors
+                .iter()
+                .map(|x| AccountError {
+                    dir: x.dir.display().to_string(),
+                    message: x.message.clone(),
+                    retrying: x.retrying,
+                })
+                .collect(),
             attention: e.attention,
             activity: e.activity,
             sessions: e.sessions,
@@ -407,6 +429,18 @@ mod tests {
         assert_eq!(tray_state(&s, now), TrayState::AuthError);
         s.engine.attention = true;
         assert_eq!(tray_state(&s, now), TrayState::Attention);
+    }
+
+    #[test]
+    fn account_error_reads_old_pairs() {
+        let old: Vec<AccountError> = serde_json::from_str(r#"[["/h/.claude","Not logged in."]]"#).unwrap();
+        assert_eq!(
+            old[0],
+            AccountError { dir: "/h/.claude".into(), message: "Not logged in.".into(), retrying: false }
+        );
+        let e = AccountError { dir: "/d".into(), message: "m".into(), retrying: true };
+        let back: AccountError = serde_json::from_str(&serde_json::to_string(&e).unwrap()).unwrap();
+        assert_eq!(back, e);
     }
 
     #[test]

@@ -36,6 +36,8 @@ use std::time::{Duration, Instant};
 use chrono::{DateTime, Datelike, Duration as ChronoDuration, NaiveDate, NaiveTime, TimeZone, Utc};
 use chrono_tz::Tz;
 
+use crate::backoff::Backoff;
+
 /// One usage window (session or week).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Window {
@@ -129,8 +131,15 @@ pub enum UsageError {
     NotLoggedIn(String),
     /// The account isn't on a subscription plan (API key billing).
     NotSubscription,
-    /// The text had neither a session nor a week line.
+    /// The text had neither a session nor a week line. In practice this is
+    /// what a rate-limited usage endpoint looks like (see [`crate::backoff`]).
     NoUsageLines(String),
+    /// No usage lines, and Claude Code's debug log says its usage endpoint
+    /// answered 429 and it won't ask again for this long (s).
+    RateLimited {
+        /// Seconds until Claude Code asks the endpoint again.
+        retry_after_secs: i64,
+    },
 }
 
 impl std::fmt::Display for UsageError {
@@ -142,6 +151,9 @@ impl std::fmt::Display for UsageError {
             UsageError::NotLoggedIn(e) => write!(f, "not logged in: {e}"),
             UsageError::NotSubscription => write!(f, "account is not on a subscription plan"),
             UsageError::NoUsageLines(e) => write!(f, "no usage lines in /usage output: {e}"),
+            UsageError::RateLimited { retry_after_secs } => {
+                write!(f, "usage endpoint rate-limited (429); claude retries in {retry_after_secs}s")
+            }
         }
     }
 }
@@ -155,16 +167,47 @@ impl UsageError {
         matches!(self, UsageError::NotLoggedIn(_) | UsageError::NotSubscription)
     }
 
-    /// One short sentence for the app's UI; `Display` keeps the details for logs.
-    pub fn user_message(&self) -> String {
+    /// A miss that may have reached Claude Code's usage endpoint and is
+    /// worth retrying later: the account backs off ([`crate::backoff`]).
+    /// Not auth problems (the user has to act) and not a missing CLI (it
+    /// never got as far as the endpoint).
+    pub fn is_transient(&self) -> bool {
+        matches!(
+            self,
+            UsageError::Timeout
+                | UsageError::BadOutput(_)
+                | UsageError::NoUsageLines(_)
+                | UsageError::RateLimited { .. }
+        )
+    }
+
+    /// Claude Code's 429 memory, when its debug log told us.
+    pub fn retry_after(&self) -> Option<i64> {
+        match self {
+            UsageError::RateLimited { retry_after_secs } => Some(*retry_after_secs),
+            _ => None,
+        }
+    }
+
+    /// One or two short sentences for the app's UI; `Display` keeps the
+    /// details for logs. `retry_in` is how long the account's backoff has
+    /// left (s), when it is backing off.
+    pub fn user_message(&self, retry_in: Option<i64>) -> String {
+        let again = match retry_in.filter(|s| *s > 0) {
+            Some(s) => {
+                let m = (s + 59) / 60;
+                format!("Trying again in about {m} minute{}.", if m == 1 { "" } else { "s" })
+            }
+            None => "Retrying.".to_owned(),
+        };
         match self {
             UsageError::Spawn(_) => "Couldn't run the claude command. Is Claude Code installed?".into(),
-            UsageError::Timeout => "Claude Code took too long to answer. Retrying.".into(),
-            UsageError::BadOutput(_) => "Claude Code answered with something unexpected. Retrying.".into(),
+            UsageError::Timeout => format!("Claude Code took too long to answer. {again}"),
+            UsageError::BadOutput(_) => format!("Claude Code answered with something unexpected. {again}"),
             UsageError::NotLoggedIn(_) => "Not logged in. Run claude in a terminal and log in.".into(),
             UsageError::NotSubscription => "Not on a Claude subscription, so there are no limits to show.".into(),
-            UsageError::NoUsageLines(_) => {
-                "Claude Code isn't reporting usage limits for this account right now. Retrying.".into()
+            UsageError::NoUsageLines(_) | UsageError::RateLimited { .. } => {
+                format!("Claude Code's usage service is rate-limiting this account. {again}")
             }
         }
     }
@@ -566,7 +609,8 @@ pub fn run_usage_cli(claude: &Path, config_dir: &Path, home: &Path, timeout: Dur
     Ok(out)
 }
 
-/// Run and parse `/usage` for one account.
+/// Run and parse `/usage` for one account. A reply with no usage lines is
+/// checked against Claude Code's debug log ([`rate_limit_from_debug_log`]).
 pub fn poll_account(
     claude: &Path,
     config_dir: &Path,
@@ -574,13 +618,93 @@ pub fn poll_account(
     now: DateTime<Utc>,
 ) -> Result<UsageReading, UsageError> {
     let out = run_usage_cli(claude, config_dir, home, CLI_TIMEOUT)?;
-    parse_cli_output(&out, now)
+    match parse_cli_output(&out, now) {
+        Err(UsageError::NoUsageLines(text)) => Err(match rate_limit_from_debug_log(config_dir, Utc::now()) {
+            Some(retry_after_secs) => UsageError::RateLimited { retry_after_secs },
+            None => UsageError::NoUsageLines(text),
+        }),
+        other => other,
+    }
+}
+
+/// How much of the debug log's end is read.
+const DEBUG_TAIL_BYTES: u64 = 256 * 1024;
+
+/// Best effort: Claude Code's newest debug log for this config dir
+/// (`<config_dir>/debug/latest`, else the newest `*.txt` there) says its
+/// usage endpoint answered 429 and is still being left alone. Returns the
+/// seconds left. Claude Code writes this log only in some modes; we never ask
+/// it to (no `--debug`), so a missing log is the normal case.
+pub fn rate_limit_from_debug_log(config_dir: &Path, now: DateTime<Utc>) -> Option<i64> {
+    let dir = config_dir.join("debug");
+    let latest = dir.join("latest");
+    let file = if latest.is_file() {
+        latest
+    } else {
+        std::fs::read_dir(&dir)
+            .ok()?
+            .filter_map(Result::ok)
+            .filter(|e| e.path().extension().is_some_and(|x| x == "txt"))
+            .filter_map(|e| Some((e.metadata().ok()?.modified().ok()?, e.path())))
+            .max_by_key(|(t, _)| *t)?
+            .1
+    };
+    let tail = read_tail(&file, DEBUG_TAIL_BYTES).ok()?;
+    rate_limit_from_debug_text(&tail, now)
+}
+
+fn read_tail(path: &Path, max: u64) -> std::io::Result<String> {
+    use std::io::{Seek, SeekFrom};
+    let mut f = std::fs::File::open(path)?;
+    let len = f.metadata()?.len();
+    f.seek(SeekFrom::Start(len.saturating_sub(max)))?;
+    let mut buf = Vec::new();
+    f.read_to_end(&mut buf)?;
+    Ok(String::from_utf8_lossy(&buf).into_owned())
+}
+
+/// The newest 429 report in debug-log text, as seconds left at `now`:
+///
+/// ```text
+/// 2026-10-13T15:47:55.994Z [DEBUG] fetchUtilization: 429 remembered for this bearer; not asking again for 589s
+/// 2026-10-13T15:47:55.994Z [ERROR] Failed to load usage data: Request failed with status code 429
+/// ```
+///
+/// The first form gives the remaining time; the second alone counts as a
+/// fresh 429 with [`crate::backoff::RATE_LIMIT_FLOOR_SECS`] to go. Lines
+/// whose memory has run out by `now`, or without a timestamp, are ignored.
+pub fn rate_limit_from_debug_text(text: &str, now: DateTime<Utc>) -> Option<i64> {
+    let left_at = |line: &str, secs: i64| -> Option<i64> {
+        let ts = DateTime::parse_from_rfc3339(line.split_whitespace().next()?).ok()?;
+        Some((ts.with_timezone(&Utc) + ChronoDuration::seconds(secs) - now).num_seconds())
+    };
+    let remembered = text.lines().rev().find_map(|line| {
+        if !(line.contains("fetchUtilization") && line.contains("429")) {
+            return None;
+        }
+        let rest = line.split("not asking again for ").nth(1)?;
+        let digits: String = rest.chars().take_while(char::is_ascii_digit).collect();
+        left_at(line, digits.parse().ok()?)
+    });
+    let left = remembered.or_else(|| {
+        text.lines()
+            .rev()
+            .filter(|l| l.contains("Failed to load usage data") && l.contains("429"))
+            .find_map(|l| left_at(l, crate::backoff::RATE_LIMIT_FLOOR_SECS))
+    })?;
+    (left > 0).then_some(left)
 }
 
 /// Consecutive misses after which an account's numbers count as stale.
 pub const STALE_AFTER_MISSES: u32 = 3;
 
-/// Per-account memory across polls: last good reading, its age, and misses.
+/// Age of the last good reading after which a missing account counts as stale,
+/// however few misses that took: with the rate-limit backoff, three misses can
+/// take an hour, far too long to show old numbers as live.
+pub const STALE_AFTER_SECS: i64 = 20 * 60;
+
+/// Per-account memory across polls: last good reading, its age, misses and
+/// the backoff they caused.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct AccountState {
     /// Last successful reading, kept through misses.
@@ -591,10 +715,15 @@ pub struct AccountState {
     pub misses: u32,
     /// The most recent error, for the tray.
     pub last_error: Option<UsageError>,
+    /// When a poll of this account last started (unix seconds).
+    pub last_attempt_at: Option<i64>,
+    /// Pause after transient misses (rate limiting).
+    pub backoff: Backoff,
 }
 
 impl AccountState {
-    /// Record a poll outcome.
+    /// Record a poll outcome. A transient miss starts or extends the
+    /// account's backoff; a good reading clears it.
     pub fn record(&mut self, now: i64, result: Result<UsageReading, UsageError>) {
         match result {
             Ok(r) => {
@@ -602,17 +731,22 @@ impl AccountState {
                 self.last_ok_at = Some(now);
                 self.misses = 0;
                 self.last_error = None;
+                self.backoff.on_success();
             }
             Err(e) => {
                 self.misses = self.misses.saturating_add(1);
+                if e.is_transient() {
+                    self.backoff.on_miss(now, e.retry_after());
+                }
                 self.last_error = Some(e);
             }
         }
     }
 
-    /// Three misses in a row (or never read at all after three tries).
-    pub fn is_stale(&self) -> bool {
-        self.misses >= STALE_AFTER_MISSES
+    /// Three misses in a row (or never read at all after three tries), or a
+    /// miss with the last good reading over [`STALE_AFTER_SECS`] old.
+    pub fn is_stale(&self, now: i64) -> bool {
+        self.misses >= STALE_AFTER_MISSES || (self.misses > 0 && self.age(now).is_some_and(|a| a > STALE_AFTER_SECS))
     }
 
     /// Seconds since the last good reading.
@@ -729,16 +863,107 @@ mod tests {
     fn account_state_staleness() {
         let mut a = AccountState::default();
         a.record(100, Ok(UsageReading::default()));
-        assert!(!a.is_stale());
+        assert!(!a.is_stale(100));
         a.record(160, Err(UsageError::Timeout));
         a.record(220, Err(UsageError::Timeout));
-        assert!(!a.is_stale());
+        assert!(!a.is_stale(220));
         assert!(a.last.is_some(), "a miss keeps the last values");
         assert_eq!(a.age(220), Some(120));
         a.record(280, Err(UsageError::NoUsageLines("x".into())));
-        assert!(a.is_stale());
+        assert!(a.is_stale(280));
         a.record(340, Ok(UsageReading::default()));
-        assert!(!a.is_stale());
+        assert!(!a.is_stale(340));
+    }
+
+    #[test]
+    fn one_miss_goes_stale_once_the_reading_is_old() {
+        let mut a = AccountState::default();
+        a.record(0, Ok(UsageReading::default()));
+        a.record(600, Err(UsageError::NoUsageLines("x".into())));
+        assert!(!a.is_stale(600));
+        assert!(!a.is_stale(STALE_AFTER_SECS));
+        assert!(a.is_stale(STALE_AFTER_SECS + 1));
+        // No miss yet: an old reading alone isn't stale (polls are just spaced out).
+        let mut b = AccountState::default();
+        b.record(0, Ok(UsageReading::default()));
+        assert!(!b.is_stale(STALE_AFTER_SECS * 3));
+    }
+
+    // A miss that may have reached the endpoint parks the account; auth
+    // problems and a missing CLI don't.
+    #[test]
+    fn account_state_backoff() {
+        let mut a = AccountState::default();
+        a.record(1000, Err(UsageError::NoUsageLines("x".into())));
+        assert_eq!(a.backoff.until(), Some(1600));
+        a.record(1600, Err(UsageError::RateLimited { retry_after_secs: 300 }));
+        assert_eq!(a.backoff.until(), Some(2800), "second miss: 20 min");
+        a.record(2800, Ok(UsageReading::default()));
+        assert!(!a.backoff.active(2800));
+        a.record(2900, Err(UsageError::NotLoggedIn("x".into())));
+        a.record(2950, Err(UsageError::Spawn("x".into())));
+        assert_eq!(a.backoff.until(), None);
+    }
+
+    #[test]
+    fn user_messages_name_the_wait() {
+        let rl = UsageError::NoUsageLines("".into());
+        assert_eq!(
+            rl.user_message(Some(590)),
+            "Claude Code's usage service is rate-limiting this account. Trying again in about 10 minutes."
+        );
+        assert_eq!(
+            UsageError::RateLimited { retry_after_secs: 30 }.user_message(Some(45)),
+            "Claude Code's usage service is rate-limiting this account. Trying again in about 1 minute."
+        );
+        assert_eq!(rl.user_message(None), "Claude Code's usage service is rate-limiting this account. Retrying.");
+        assert_eq!(
+            UsageError::Timeout.user_message(Some(1200)),
+            "Claude Code took too long to answer. Trying again in about 20 minutes."
+        );
+        assert!(UsageError::Timeout.is_transient() && !UsageError::Spawn("x".into()).is_transient());
+        assert!(!UsageError::NotSubscription.is_transient());
+    }
+
+    const DEBUG_429: &str = "\
+2026-10-13T15:47:55.974Z [DEBUG] fetchUtilization: GET /api/oauth/usage (attempt 1)
+2026-10-13T15:47:55.994Z [DEBUG] fetchUtilization: 429 remembered for this bearer; not asking again for 589s
+2026-10-13T15:47:55.994Z [ERROR] Failed to load usage data: Request failed with status code 429
+2026-10-13T15:47:56.100Z [DEBUG] something else
+";
+
+    #[test]
+    fn debug_log_rate_limit() {
+        let now = at("2026-10-13T15:48:05Z");
+        // 589 s from 15:47:55.994 is 15:57:44.994; 579 s left at 15:48:05.
+        assert_eq!(rate_limit_from_debug_text(DEBUG_429, now), Some(579));
+        // Expired memory: nothing.
+        assert_eq!(rate_limit_from_debug_text(DEBUG_429, at("2026-10-13T16:00:00Z")), None);
+        // Only the error line: a fresh 429 with the 600 s floor.
+        let only_err = "2026-10-13T15:47:55Z [ERROR] Failed to load usage data: Request failed with status code 429\n";
+        assert_eq!(rate_limit_from_debug_text(only_err, now), Some(590));
+        // Unrelated logs and lines without a timestamp.
+        assert_eq!(rate_limit_from_debug_text("[DEBUG] fetchUtilization: 429 not asking again for 500s\n", now), None);
+        assert_eq!(rate_limit_from_debug_text("2026-10-13T15:47:55Z [DEBUG] fetchUtilization: 200 OK\n", now), None);
+        assert_eq!(rate_limit_from_debug_text("", now), None);
+    }
+
+    #[test]
+    fn debug_log_file_lookup() {
+        let root = std::env::temp_dir().join(format!("clawdmeter-debuglog-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let now = at("2026-10-13T15:48:05Z");
+        assert_eq!(rate_limit_from_debug_log(&root, now), None, "no debug dir");
+        let dbg = root.join("debug");
+        std::fs::create_dir_all(&dbg).unwrap();
+        std::fs::write(dbg.join("old.txt"), "2026-10-13T15:40:00Z [DEBUG] fine\n").unwrap();
+        assert_eq!(rate_limit_from_debug_log(&root, now), None);
+        std::thread::sleep(Duration::from_millis(20));
+        std::fs::write(dbg.join("new.txt"), DEBUG_429).unwrap();
+        assert_eq!(rate_limit_from_debug_log(&root, now), Some(579), "newest .txt without a latest link");
+        std::fs::write(dbg.join("latest"), "2026-10-13T15:40:00Z [DEBUG] fine\n").unwrap();
+        assert_eq!(rate_limit_from_debug_log(&root, now), None, "latest wins over mtimes");
+        let _ = std::fs::remove_dir_all(&root);
     }
 
     #[test]

@@ -257,7 +257,7 @@ pub struct Activity {
 /// What a live event means for the daemon.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Signal {
-    /// A prompt was sent (poll now, then every 60 s).
+    /// A prompt was sent (poll now, then on the working cadence).
     Prompt {
         /// After 10+ quiet minutes.
         back: bool,

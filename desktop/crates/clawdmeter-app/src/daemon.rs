@@ -171,7 +171,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         // ---- commands ----
         loop {
             match commands.try_recv() {
-                Ok(Command::RefreshNow) => engine.request_refresh(),
+                Ok(Command::RefreshNow) => engine.request_refresh(now),
                 Ok(cmd @ (Command::Reconnect | Command::Forget)) => {
                     if let Some(l) = link.take() {
                         l.close().await;
@@ -236,7 +236,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         if let Some(rx) = refresh.as_mut() {
             while rx.try_recv().is_ok() {
                 log::info!("refresh requested by device");
-                engine.request_refresh();
+                engine.request_refresh(now);
             }
         }
         if polling.as_ref().is_some_and(JoinHandle::is_finished) {
@@ -250,9 +250,9 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             }
         }
         if polling.is_none() {
-            if let Some(why) = engine.poll_due(now) {
-                log::debug!("polling /usage ({why:?})");
-                let (c, dirs, home) = (claude.clone(), engine.accounts_to_poll(), paths.home.clone());
+            if let Some(plan) = engine.begin_poll(now) {
+                log::debug!("polling /usage ({:?}): {} account(s)", plan.reason, plan.accounts.len());
+                let (c, dirs, home) = (claude.clone(), plan.accounts, paths.home.clone());
                 polling = Some(tokio::task::spawn_blocking(move || poll_all(c, dirs, home)));
             }
         }

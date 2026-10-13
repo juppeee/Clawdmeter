@@ -233,11 +233,22 @@ State lives in `~/.config/claude-usage-monitor/` on every OS (`events.log`,
 `config_dirs`, `poll_interval`, `heartbeat_interval`, `chime`, `beep`,
 `clock`, `claude_path`, `release_repo`, `update_check`, `onboarding_done`.
 
-Cadence: prompt → poll now, then 60 s while working; ~10 s after a Stop;
-2 min with no hooks; 15 min after 10 quiet min; retry 30 s. Heartbeat
-replays (`rp:1`) every `heartbeat_interval` (60 s) keep the firmware's 90 s
-`DATA_FRESH_MS` open, and stop after 3 consecutive misses so the device
-shows stale. A failed poll is never a zero.
+Cadence (per account, `cadence.rs`): every `/usage` makes Claude Code hit
+`GET /api/oauth/usage`, which is rate-limited per account, so the budget is
+small. Shown account: prompt → poll now, then 3 min while working; ~10 s
+after a Stop; 5 min with no hooks or between a Stop and 10 quiet min; 15 min
+after that. Other accounts: every 10 min. No account is polled twice within
+2 min, whatever asked (prompt, Stop, device REQ, tray "Refresh now").
+Backoff (`backoff.rs`): a 429 makes `/usage` print no `Current …` lines and
+Claude Code remembers the 429 for ~600 s per token (its
+`<config dir>/debug/latest` says `fetchUtilization: 429 remembered for this
+bearer; not asking again for Ns`), so any transient miss (no lines,
+timeout, odd output) parks that account 10 → 20 → 30 min, reset on success;
+nothing bypasses it. When the debug log exists, `usage.rs` reads it and
+reports `UsageError::RateLimited`. A parked shown account stays shown with
+its last values. Heartbeat replays (`rp:1`) every `heartbeat_interval`
+(60 s) keep the firmware's 90 s `DATA_FRESH_MS` open, and stop after 3
+consecutive misses so the device shows stale. A failed poll is never a zero.
 
 ```bash
 cargo fmt --all --check

@@ -591,17 +591,17 @@ impl SettingsView {
                  Clawdmeter checks all of them; the device shows whichever you used most recently.",
             ));
         let active = self.snap.as_ref().and_then(|s| s.account.clone());
-        let errors: Vec<(String, String)> = self.snap.as_ref().map(|s| s.errors.clone()).unwrap_or_default();
+        let errors: Vec<ipc::AccountError> = self.snap.as_ref().map(|s| s.errors.clone()).unwrap_or_default();
         let only_one = self.settings.config_dirs.len() <= 1;
         let mut list = div().flex().flex_col().rounded(px(R_M)).border_1().border_color(t.line);
         for (i, d) in self.settings.config_dirs.clone().into_iter().enumerate() {
             let ds = d.display().to_string();
-            let err = errors.iter().find(|(p, _)| *p == ds).map(|(_, e)| e.clone());
+            let err = errors.iter().find(|e| e.dir == ds).cloned();
             let is_active = active.as_deref() == Some(ds.as_str());
             let (meta, chip) = match (&err, is_active) {
-                // Messages ending in "Retrying." are transient; the rest need the user.
-                (Some(e), _) if e.ends_with("Retrying.") => (e.clone(), Some(pill(t, "Retrying", Tone::Warn))),
-                (Some(e), _) => (e.clone(), Some(pill(t, "Problem", Tone::Bad))),
+                // Transient errors retry on their own; the rest need the user.
+                (Some(e), _) if e.retrying => (e.message.clone(), Some(pill(t, "Retrying", Tone::Warn))),
+                (Some(e), _) => (e.message.clone(), Some(pill(t, "Problem", Tone::Bad))),
                 (None, true) => ("Shown on the device".to_string(), Some(pill(t, "On device", Tone::Ok))),
                 (None, false) if self.snap.is_some() => ("Checked, not shown".to_string(), None),
                 (None, false) => ("Not checked while Clawdmeter is stopped".to_string(), None),
@@ -907,8 +907,9 @@ impl SettingsView {
         pane = pane.child(field(
             t,
             "Usage checks",
-            "Automatic checks every minute while you work and every 15 minutes otherwise (every 2 minutes without \
-             hooks). Checks never start a session window.",
+            "Automatic checks every 3 minutes while you work and every 15 minutes otherwise (every 5 minutes \
+             without hooks); other accounts every 10 minutes. Claude Code's usage service is rate-limited, so an \
+             account is never checked twice within 2 minutes. Checks never start a session window.",
             segmented(t, "poll", &options, &poll, true, move |c, _, cx| {
                 let _ = me.update(cx, |v, cx| {
                     let paths = v.paths.clone();
