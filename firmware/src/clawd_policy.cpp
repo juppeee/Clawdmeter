@@ -21,7 +21,7 @@ void clawd_tuning_defaults(ClawdTuning* t) {
     t->blink_min_ms     = 2 * SEC;
     t->blink_max_ms     = 6 * SEC;
     t->peek_cooldown_ms = 60 * SEC;
-    t->peek_look_min_ms = 1600;       // + rise, blink and the look back ≈ 2.5–3.3 s up
+    t->peek_look_min_ms = 1600;       // then it rests until tapped
     t->peek_look_max_ms = 2400;
     t->peek_double_pct  = 30;
 }
@@ -176,6 +176,11 @@ const int         CLAWD_TAP_ACT_COUNT = sizeof(CLAWD_TAP_ACTS) / sizeof(CLAWD_TA
 const char* clawd_tap_act(const char* last, ClawdRng* r) {
     const int i = clawd_pick_no_repeat(CLAWD_TAP_ACTS, CLAWD_TAP_ACT_COUNT, last, r);
     return i < 0 ? CLAWD_TAP_ACTS[0] : CLAWD_TAP_ACTS[i];
+}
+
+PeekHold peek_hold(const QuietInput* q, const ClawdTuning* t) {
+    if (!q->meters_live) return PEEK_HOLD_DROP;
+    return screensaver_ready(q, t) ? PEEK_HOLD_SCREENSAVER : PEEK_HOLD_KEEP;
 }
 
 int peek_glance_px(int tap_x, int width, int max_px) {

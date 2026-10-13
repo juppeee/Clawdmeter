@@ -1,6 +1,8 @@
 #include "face.h"
 #include "clawd_policy.h"
 #include "theme.h"
+#include "perf.h"
+#include "field.h"
 #include "hal/board_caps.h"
 #include <lvgl.h>
 #include <Arduino.h>
@@ -19,15 +21,17 @@
 #define COL_FACE   THEME_ACCENT               // Clawd orange
 #define COL_EYE    lv_color_hex(0x141413)
 
-static lv_obj_t* root = NULL;
+static Field     field;      // the orange field: rows [top_y, H), redraws only what changes
+static lv_obj_t* root = NULL; // == field.obj: full screen, never moves; the eyes are its children
 static lv_obj_t* eye_box[2];
 static lv_obj_t* eye_open[2];
 static lv_obj_t* squint[2][9];
 
 static int W = 480, H = 480, mind = 480;
 static int eye_cx[2];        // eye centre x, px
-static int eye_top = 150;    // eye block top, px (face-local)
+static int eye_top = 150;    // eye block top, px (below the field's top edge)
 static int glance_px = 20;
+static int top_y = 480;      // the field's top edge; H = all the way down
 
 static bool moving = false;
 static bool rising = false;
@@ -88,15 +92,20 @@ void face_init(void) {
     eye_top = (H - mind) / 2 + S(150);
     glance_px = S(20);
 
-    root = rect(lv_layer_top(), 0, H, W, H, COL_FACE);
+    field_init(&field, lv_layer_top(), W, H, COL_FACE);
+    root = field.obj;
+    top_y = H;
     const int u = S(12) > 0 ? S(12) : 1;
     for (int e = 0; e < 2; e++) {
         // The box spans the open eye and the squint chevron (which reaches
-        // 2u past the eye's right edge); its children are box-local.
+        // 2u past the eye's right edge); its children are box-local. Kept
+        // tight: moving it redraws its whole area every frame of a rise.
+        const int bw = S(52) > 6 * u ? S(52) : 6 * u;
+        const int bh = S(120) > S(20) + 9 * u ? S(120) : S(20) + 9 * u;
         eye_box[e] = lv_obj_create(root);
         lv_obj_remove_style_all(eye_box[e]);
-        lv_obj_set_size(eye_box[e], S(30) + 6 * u, S(30) + 10 * u);
-        lv_obj_set_y(eye_box[e], eye_top);
+        lv_obj_set_size(eye_box[e], bw, bh);
+        lv_obj_set_y(eye_box[e], top_y + eye_top);
         lv_obj_clear_flag(eye_box[e], LV_OBJ_FLAG_CLICKABLE);
         lv_obj_clear_flag(eye_box[e], LV_OBJ_FLAG_SCROLLABLE);
         eye_open[e] = rect(eye_box[e], S(8), 0, S(44), S(120), COL_EYE);
@@ -110,33 +119,53 @@ void face_init(void) {
     }
     place_eyes(0);
     set_squint(false);
-    lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
     clawd_rng_seed(&rng, millis() ^ 0xFACE);
 }
 
-static void y_exec(void* var, int32_t v) { lv_obj_set_y((lv_obj_t*)var, v); }
+// The face's top edge at v: the field redraws only the rows it gained or
+// lost, and the eyes (small) ride along.
+static void set_top(int v) {
+    if (v == top_y) return;
+    top_y = v;
+    field_set(&field, 0, v, W - 1, H - 1);
+    for (int e = 0; e < 2; e++) lv_obj_set_y(eye_box[e], v + eye_top);
+}
+
+static void y_exec(void* var, int32_t v) { (void)var; set_top(v); }
+
+// Down and out of sight: hidden, so nothing of it can linger at the bottom
+// edge. Its eyes sit below the panel, so hiding repaints nothing.
+static void rest_hidden(void) {
+    set_top(H);
+    visible = false;
+    field_hide(&field);
+}
 
 static void y_done(lv_anim_t* a) {
     (void)a;
     moving = false;
-    if (!rising) {
-        visible = false;
-        lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
-    }
+    perf_end(rising ? PERF_FACE_RISE : PERF_FACE_DROP);
+    if (!rising) rest_hidden();
 }
 
 static void move_to(int to, uint32_t ms, lv_anim_path_cb_t path) {
     if (!root) return;
     lv_anim_delete(root, y_exec);
-    lv_obj_clear_flag(root, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_move_foreground(root);
+    if (!visible) {
+        // Coming up from all the way down: nothing on screen yet, so it
+        // shows and goes on top of the streak without a redraw.
+        set_top(H);
+        field_show(&field);
+        field_to_front(&field);
+    }
     visible = true;
     moving = true;
     lv_anim_t a;
     lv_anim_init(&a);
     lv_anim_set_var(&a, root);
     lv_anim_set_exec_cb(&a, y_exec);
-    lv_anim_set_values(&a, lv_obj_get_y(root), to);
+    lv_anim_set_values(&a, top_y, to);
+    perf_begin(rising ? PERF_FACE_RISE : PERF_FACE_DROP);
     lv_anim_set_duration(&a, ms);
     lv_anim_set_path_cb(&a, path);
     lv_anim_set_completed_cb(&a, y_done);
@@ -149,8 +178,6 @@ void face_rise(void) {
     blink_phase = 0; glance_phase = 0;
     set_squint(false);
     glance_cur = 0; place_eyes(0);
-    // Not yet on screen: start from just below the bezel.
-    if (!visible) lv_obj_set_y(root, H);
     move_to(0, RISE_MS, lv_anim_path_ease_out);
     next_act_at = millis() + RISE_MS + 1200;
 }
@@ -171,12 +198,12 @@ void face_hide_now(void) {
     if (!root) return;
     lv_anim_delete(root, y_exec);
     lv_anim_delete(&glance_cur, NULL);
-    moving = false; rising = false; visible = false; resting = false;
+    if (moving) perf_end(rising ? PERF_FACE_RISE : PERF_FACE_DROP);
+    moving = false; rising = false; resting = false;
     blink_phase = 0; glance_phase = 0; glance_cur = 0;
     set_squint(false);
     place_eyes(0);
-    lv_obj_set_y(root, H);
-    lv_obj_add_flag(root, LV_OBJ_FLAG_HIDDEN);
+    rest_hidden();
 }
 
 bool face_visible(void) { return visible; }

@@ -28,7 +28,7 @@ enum Beat {
     B_FACE_HOME,     // face drops into the meters, he hurries to his seat
     B_STREAK_HOME,   // stage releases, he runs off, streak reveals the meters
     B_ATTENTION,     // the big Clawd fetches you
-    B_PEEK,          // a tap on the meters: hop, duck out, the face looks, he's back
+    B_PEEK,          // a tap on the meters: hop, duck out, the face looks and stays until tapped
 };
 static const char* const BEAT_NAMES[] = {
     "home", "corner", "show", "screensaver", "face-home", "streak-home", "attention", "peek",
@@ -71,7 +71,6 @@ static PeekGate    peek_gate;
 static int         peek_x = 0;                // where the peek's tap landed
 static const char* last_tap_act = NULL;       // small reactions never repeat
 static lv_indev_t* touch_indev = NULL;
-static const uint8_t PEEK_STEP_DROPPING = 6;  // run_peek: the face is on its way down
 
 static uint32_t now_ms(void) { return millis(); }
 
@@ -254,10 +253,10 @@ void director_tap(int x) {
     if (minimal) return;
     if (beat == B_HOME) { tap_home(x); return; }
     if (beat == B_PEEK) {
-        // The face is up looking at you: he blinks and drops right away.
-        // Before it's up (hop, ducking out) or once it's dropping, the tap
-        // is absorbed: nothing queues.
-        const bool drop = face_visible() && step < PEEK_STEP_DROPPING;
+        // The face is up (or coming up) looking at you: he blinks and drops
+        // right away. Before it shows (hop, ducking out) the tap is
+        // absorbed: nothing queues.
+        const bool drop = face_visible();
         if (drop) to_meters(true);
         Serial.printf("[%lu] director: tap at x %d -> %s\n", (unsigned long)now_ms(), x,
                       drop ? "peek over" : "absorbed");
@@ -582,7 +581,8 @@ static void run_attention(uint32_t now) {
 // A tap on the meters, once the cooldown allows it (start_peek already
 // started the startled hop). One Clawd: he ducks out through the nearest edge
 // (his seat is by the left edge, so it's a few steps) before the face comes
-// up, and walks back in once it has dropped.
+// up. The face then stays, resting, until you tap it (director_tap → the
+// acknowledging blink, the drop, and he walks back to his seat).
 static void run_peek(uint32_t now) {
     if (!settled(now)) return;
     const ClawdTuning& t = clawd_tuning();
@@ -604,18 +604,31 @@ static void run_peek(uint32_t now) {
         face_blink(clawd_rng_chance(&rng, t.peek_double_pct));
         next_step();
         break;
-    case 4:  // the look comes back to you; a beat of eye contact
+    case 4:  // the look comes back to you, and he stays: resting on the glass
         if (face_busy()) return;
-        next_step(350);
+        face_set_resting(true);
+        next_step();
         break;
-    case 5:  // down behind the bezel (ease-in)
-        face_drop();
-        next_step();                  // == PEEK_STEP_DROPPING
+    default: {  // held until a tap (see peek_hold for everything else)
+        const QuietInput q = { now, last_engagement, signals_hooks_seen(), window_not_started,
+                               ui_meters_live() };
+        switch (peek_hold(&q, &t)) {
+        case PEEK_HOLD_KEEP:
+            break;
+        case PEEK_HOLD_DROP:            // link dropped / stale: show the hint
+            to_meters(false);
+            break;
+        case PEEK_HOLD_SCREENSAVER:
+            // Nobody's been around: the face simply becomes the screensaver.
+            // Same face, already up and resting, he's already out, so it
+            // joins run_screensaver where its face has just come up (the
+            // calm-dip clock starts there). Nothing on screen changes.
+            go(B_SCREENSAVER);
+            step = 2;
+            break;
+        }
         break;
-    default: // back to his seat from the edge he left by
-        mascot_return(-1, 150);
-        go(B_CORNER);
-        break;
+    }
     }
 }
 

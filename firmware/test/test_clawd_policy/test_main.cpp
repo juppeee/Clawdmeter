@@ -282,6 +282,47 @@ static void test_peek_looks_toward_the_tap(void) {
     TEST_ASSERT_EQUAL_INT(-20, rr);
 }
 
+static void test_peek_face_stays_up_until_tapped(void) {
+    // The tap that started the peek is the last engagement. Well past the
+    // old ~3 s hold, and minutes on, the face stays.
+    QuietInput q = { 0, 0, true, false, true };
+    const uint32_t at[] = { 3 * SEC, 30 * SEC, 5 * MIN, T.quiet_ms - 1 };
+    for (uint32_t now : at) {
+        q.now = now;
+        TEST_ASSERT_EQUAL_INT(PEEK_HOLD_KEEP, peek_hold(&q, &T));
+    }
+    // A prompt or tool activity while it's up doesn't drop it; it only
+    // restarts the quiet clock.
+    q.last_engagement = 9 * MIN;
+    q.now = 9 * MIN + T.quiet_ms - 1;
+    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_KEEP, peek_hold(&q, &T));
+    // Without the hooks the device can't tell you're away: it just stays.
+    QuietInput slow = { 2 * T.quiet_ms, 0, false, false, true };
+    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_KEEP, peek_hold(&slow, &T));
+}
+
+static void test_held_peek_becomes_the_screensaver_when_nobody_is_around(void) {
+    QuietInput q = { T.quiet_ms, 0, true, false, true };
+    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_SCREENSAVER, peek_hold(&q, &T));
+    // Wrap-safe like the screensaver gate.
+    QuietInput w = { T.quiet_ms - 1000, 0xFFFFFC18u, true, false, true };
+    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_SCREENSAVER, peek_hold(&w, &T));
+}
+
+static void test_held_peek_drops_when_the_meters_go_stale(void) {
+    // The face would hide the pairing / stale hint.
+    QuietInput q = { 5 * SEC, 0, true, false, false };
+    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_DROP, peek_hold(&q, &T));
+}
+
+static void test_attention_over_a_peek_ends_on_the_meters(void) {
+    // A peek starts from the meters, so an alert over it is ATTN_FROM_HOME:
+    // it never puts the face back, however it ends.
+    TEST_ASSERT_FALSE(attention_resumes_screensaver(ATTN_FROM_HOME, ATTN_END_TIMEOUT, false));
+    TEST_ASSERT_FALSE(attention_resumes_screensaver(ATTN_FROM_HOME, ATTN_END_CLEAR, false));
+    TEST_ASSERT_FALSE(attention_resumes_screensaver(ATTN_FROM_HOME, ATTN_END_TAP, true));
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_show_needs_five_sustained_minutes_of_level_3);
@@ -307,5 +348,9 @@ int main(int, char**) {
     RUN_TEST(test_tap_keeps_its_meaning_outside_home_and_minimal);
     RUN_TEST(test_small_tap_reactions_vary);
     RUN_TEST(test_peek_looks_toward_the_tap);
+    RUN_TEST(test_peek_face_stays_up_until_tapped);
+    RUN_TEST(test_held_peek_becomes_the_screensaver_when_nobody_is_around);
+    RUN_TEST(test_held_peek_drops_when_the_meters_go_stale);
+    RUN_TEST(test_attention_over_a_peek_ends_on_the_meters);
     return UNITY_END();
 }

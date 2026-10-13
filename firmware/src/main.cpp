@@ -18,6 +18,7 @@
 #include "idle.h"
 #include "idle_cfg.h"
 #include "brightness.h"
+#include "perf.h"
 
 #include "hal/board_caps.h"
 #include "hal/display_hal.h"
@@ -184,6 +185,7 @@ static void check_serial_cmd() {
             if (strcmp(cmd_buf, "screenshot") == 0) send_screenshot();
             else if (strcmp(cmd_buf, "buzz") == 0)  sound_hal_play_reset();
             else if (strcmp(cmd_buf, "info") == 0)  send_info();
+            else if (strcmp(cmd_buf, "perf") == 0)  perf_print();
             else if (strncmp(cmd_buf, "minimal", 7) == 0) minimal_cmd(cmd_buf + 7);
             else if (strncmp(cmd_buf, "clawd ", 6) == 0) {
                 const bool ok = director_debug(cmd_buf + 6);
@@ -236,6 +238,7 @@ void setup() {
     lv_display_set_buffers(disp, buf1, buf2, W * BUF_LINES * 2,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
     lv_display_add_event_cb(disp, rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
+    perf_attach(disp, LV_DEF_REFR_PERIOD);
 
     lv_indev_t* indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);

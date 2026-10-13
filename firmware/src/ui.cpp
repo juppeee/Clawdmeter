@@ -533,6 +533,12 @@ void ui_init(void) {
     lv_obj_t* scr = lv_screen_active();
     lv_obj_set_style_bg_color(scr, COL_BG, 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
+    // The screen is a fixed room, not a scroll view. Left scrollable (the
+    // LVGL default), it grows a theme scrollbar (a faint 4 px grey bar ~6 px
+    // above the bottom edge) whenever Clawd walks past an edge, e.g. on a
+    // lurk trip or the screensaver's walk-off, and a drag could scroll it.
+    lv_obj_clear_flag(scr, LV_OBJ_FLAG_SCROLLABLE);
+    lv_obj_set_scrollbar_mode(scr, LV_SCROLLBAR_MODE_OFF);
 
     // Static corner mascot (see clawd_still.h): fallback when the animated
     // one can't get its buffer.

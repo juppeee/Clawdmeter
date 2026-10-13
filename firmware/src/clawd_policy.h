@@ -25,7 +25,8 @@ struct ClawdTuning {
     uint32_t blink_min_ms;       // resting face: gap between blinks/glances
     uint32_t blink_max_ms;
     uint32_t peek_cooldown_ms;   // a tap on the meters earns the face peek at most once per this long
-    uint32_t peek_look_min_ms;   // the peeking face holds its look toward the tap (min..max)
+    uint32_t peek_look_min_ms;   // the peeking face holds its look toward the tap (min..max),
+                                 // then rests until tapped (peek_hold)
     uint32_t peek_look_max_ms;
     uint8_t  peek_double_pct;    // chance the peek's blink is a double
 };
@@ -160,6 +161,25 @@ TapReact clawd_tap_react(const PeekGate* g, const TapInput* in, const ClawdTunin
 extern const char* const CLAWD_TAP_ACTS[];
 extern const int         CLAWD_TAP_ACT_COUNT;
 const char* clawd_tap_act(const char* last, ClawdRng* r);
+
+// The peek's face stays up until you tap it: after the look and the blink it
+// rests on the glass like the screensaver face (irregular blinks, some
+// double, glances), which also keeps the flat orange field from burning in.
+// While it's held, prompts, stops, usage moving, buttons, a fresh window and
+// an earned show neither drop it nor get their usual corner reaction (he's
+// out of his seat, up at the glass); they still count as engagement. The
+// fresh-window joy keeps its usual 5 min wait for him to sit down. A tap
+// drops it (the acknowledging blink first). Attention interrupts it like
+// anything else and ends on the meters, never back on the face (the alert
+// started from the meters: ATTN_FROM_HOME). Each tick of the hold asks:
+enum PeekHold {
+    PEEK_HOLD_KEEP,          // stay up, resting
+    PEEK_HOLD_DROP,          // the meters stopped being live: drop to show the pairing / stale hint
+    PEEK_HOLD_SCREENSAVER,   // nobody's been around for quiet_ms: it becomes the
+                             // screensaver in place (same face, already up, he's
+                             // already out), so calm dips take over the burn-in care
+};
+PeekHold peek_hold(const QuietInput* q, const ClawdTuning* t);
 
 // Where the peeking face looks: a glance proportional to how far from the
 // centre the tap landed, ±max_px at the edges (the far eye then travels 1.5x

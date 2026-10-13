@@ -12,11 +12,13 @@ aquarium: he reacts (see "A tap on the meters" below).
 | File | Role |
 |---|---|
 | `firmware/src/clawd_director.{h,cpp}` | Owns the rooms and runs the beats. It is the only module that decides what Clawd does next. |
-| `firmware/src/clawd_policy.{h,cpp}` | Pure decision rules, unit-tested in `test/test_clawd_policy`: show gate and show group, screensaver gate, where attention returns to, how long a reaction waits for him, the corner seat's headroom, turn tracker, no-repeat picker, jitter, the resting face's rhythm, what a tap on the meters earns (peek gate, small reactions, where the face looks), and all tunables (`ClawdTuning`). |
+| `firmware/src/clawd_policy.{h,cpp}` | Pure decision rules, unit-tested in `test/test_clawd_policy`: show gate and show group, screensaver gate, where attention returns to, how long a reaction waits for him, the corner seat's headroom, turn tracker, no-repeat picker, jitter, the resting face's rhythm, what a tap on the meters earns (peek gate, small reactions, where the face looks, what the held peek face does each tick), and all tunables (`ClawdTuning`). |
 | `firmware/src/mascot.{h,cpp}` | Clawd on the meters: the corner Clawd in his seat, plus the full-size sprite used for the lurk trip and the attention walk-on. Does in-room secondary action (idle acts, lurk trips) when the director allows it. |
 | `firmware/src/splash.{h,cpp}` | The stage room: a full-screen 60×60-cell stage with one performer who stands, walks, or performs a scene. |
-| `firmware/src/face.{h,cpp}` | The #198 face: LVGL rectangles on `lv_layer_top()`. It is both the screensaver and the curtain that rooms change behind. |
-| `firmware/src/streak.{h,cpp}` | The orange streak: an LVGL rectangle that sweeps right to left and clips the stage so the meters show behind it. |
+| `firmware/src/face.{h,cpp}` | The #198 face: a field on `lv_layer_top()` with the eyes as small LVGL rectangles on it. It is the screensaver, the held peek, and the curtain that rooms change behind. |
+| `firmware/src/streak.{h,cpp}` | The orange streak: a field that sweeps right to left and clips the stage so the meters show behind it. |
+| `firmware/src/field.{h,cpp}` | A flat-colour rectangle on an overlay layer that redraws only the strips that change colour (see "Redraw cost and frame rate"). The face and the streak are fields. |
+| `firmware/src/perf.{h,cpp}` | The `perf` serial command: refresh count, timing and pixels sent for the last face rise, face drop and streak. |
 | `firmware/src/clawd_anim.{h,cpp}` | Read-only view of the official animations. It is the only translation unit that includes `splash_animations.h` (about 400 KB of static data). |
 | `firmware/src/ui.{h,cpp}` | Draws the meters only: cards, clock, status line, battery, the seat. Stale data dims the meters (see below); it never adds a second creature. |
 
@@ -73,9 +75,9 @@ passed. Beat changes always print; every step prints too after
 | `corner` | notice, wave, joy, or after a transition | Waits for the commanded corner act or walk to finish, then `home`. |
 | `show` | `a == 3` held for 5 min; at most one per 15 min; hooks seen; meters live | Points at the bar (or, if he's out on a lurk trip, heads straight out), walks off at 1.5×, face rises, blinks, stage is set behind it, face drops, walks on from the right at 1.5×, one scene (loop held 16 s, so about 20 s), waves, walks off right, face rises, blinks, meters are set behind it, face drops, corner walks back to his seat. |
 | `screensaver` | 10 min with no engagement; needs hooks seen or a window that hasn't started; meters live | Walks off through the nearest edge (a lurk trip finishes its peek first), face rises and rests (blinks every 2–6 s, about one in five a double, glances where the far eye travels 1.5×). Every 3–5 min: the stage is set behind the face with Clawd at home, the face drops, one calm scene plays (magnifier or walking, alternating), the face rises, the meters are set behind it, and he rests again. |
-| `face-home` | tap, prompt, button or attention while the face is up | If woken by a prompt or tapped during a peek, he blinks first (noticing), then the stage closes behind the face, the face drops into the meters, and the corner hurries home at 1.5×. |
+| `face-home` | tap, prompt, button or attention while the screensaver face is up; a tap or attention while the peek face is up | If woken by a prompt or tapped during a peek, he blinks first (noticing), then the stage closes behind the face, the face drops into the meters, and the corner hurries home at 1.5×. |
 | `streak-home` | tap, prompt or attention while on the stage | The scene releases to the idle pose on the spot, waits 150 ms, runs off right at 3×. The streak starts as soon as his last cell leaves the stage: 380 ms, ease in-out, the stage clipped to its left. Then the stage closes and the corner walks home at 1.5×. |
-| `peek` | a tap on the meters while home, at most one per 60 s (below) | Startled hop (`jumping` from its crouch, 1.5×), ducks out through the nearest edge at 3×, face rises, eyes glance toward the tap's x and hold 1.6–2.4 s, a blink (30 % double), the look comes back to you, 350 ms of eye contact, face drops, corner walks back to his seat at 1.5×. |
+| `peek` | a tap on the meters while home, at most one per 60 s (below) | Startled hop (`jumping` from its crouch, 1.5×), ducks out through the nearest edge at 3×, face rises, eyes glance toward the tap's x and hold 1.6–2.4 s, a blink (30 % double), the look comes back to you, and the face stays up, resting like the screensaver face (blinks every 2–6 s, some double, glances), until you tap it. That tap goes through `face-home`: the acknowledging blink, the drop, and he walks back to his seat at 1.5×. (below: what else happens while it's up) |
 | `attention` | `m` (alert) in a payload | The corner walks off at 2×, the big Clawd (12 px cells) walks on at 2×, then waves and points alternately. A tap, `x` (clear) or 2 min sends the big one off left. Interrupts a show or the screensaver through `face-home` / `streak-home`, and then returns to where it left off (below). |
 
 **Which scene a show plays.** The trigger (activity 3) lifts the live mood
@@ -140,9 +142,33 @@ frame (`clawd_tap_react`):
   prompt takes), and nothing else.
 - **Nothing** while a reaction is already playing, he's walking home, or the
   peek's hop or exit is under way. Taps are absorbed, never queued.
-- **A tap while the peek's face is up**: he blinks and the face drops
-  (`face-home` with the noticing blink), then he walks back to his seat. Once
-  the face is already dropping, the tap is absorbed.
+- **A tap while the peek's face is up** (or still rising): he blinks and the
+  face drops (`face-home` with the noticing blink), then he walks back to his
+  seat. Once the face is already dropping, the tap is absorbed.
+
+**While the peek's face is up** it stays until that tap (`peek_hold`, checked
+every tick once the look and blink are done):
+
+- Prompts, stops, usage moving, buttons and PWR don't drop it, and the usual
+  corner reactions (pointing, the long-turn wave) are skipped: he's up at the
+  glass, not in his seat. They still count as engagement. A fresh-window joy
+  keeps its usual 5 min wait for him to sit down; a show that comes due waits
+  for him to be home.
+- **Attention** interrupts it like anything else (`face-home` without the
+  blink, then the big Clawd). When the alert ends it's the meters, not the
+  face: the peek started from the meters (`ATTN_FROM_HOME`), and putting a
+  face back up after you've been fetched would be a non sequitur.
+- **The screensaver doesn't fight it.** If nobody's been around for the
+  screensaver's 10 quiet minutes, the held face becomes the screensaver in
+  place: same face, already up and resting, he's already out, so the director
+  joins `run_screensaver` at "face is up" and nothing on screen changes. From
+  then on it is the screensaver: calm dips every 3–5 min (which also break up
+  the flat field for burn-in) and a prompt wakes it. Without the hooks (slow
+  clock only) the screensaver never starts, so the face stays until tapped.
+- **Meters going stale or the link dropping** drop it (`face-home`, no
+  blink), so the pairing / stale hint is visible, as on the screensaver.
+- The 30-minute idle fade still applies: the panel dims and goes dark with
+  the face up, and the waking tap only wakes the panel.
 
 Unchanged: a tap during attention dismisses it, and a tap on the stage or the
 screensaver face still means "show me the meters". In minimal mode the tap
@@ -224,7 +250,7 @@ command, `z` in the sim):
 cooldown 15 min, show scene loop 16 s, quiet 10 min, calm dip every 3–5 min,
 calm scene loop 10 s, alert timeout 2 min, long turn 2 min, joy wait 5 min,
 reaction wait 15 s, blinks every 2–6 s, peek cooldown 60 s, peek look
-1.6–2.4 s, double blink on a peek 30 %. `clawd_tuning_fast()` compresses them for the sim
+1.6–2.4 s (then it rests until tapped), double blink on a peek 30 %. `clawd_tuning_fast()` compresses them for the sim
 (`SIM_FAST=1`; the peek cooldown becomes 20 s).
 
 ## QA
@@ -247,24 +273,85 @@ reaction wait 15 s, blinks every 2–6 s, peek cooldown 60 s, peek look
   walkthrough, 26 stale data, 27–29 a lurk cut short, 30–31 attention handing
   back to the screensaver, 32 PWR on a calm dip, 33–34 the jump at 368×448 and
   its 240×240 fallback, 35-peek-* a tap on the meters: crouch, hop, ducks out,
-  face rises, looks toward the tap, blinks, drops, back in his seat, a small
-  reaction in the cooldown, and a tap on the peeking face).
+  face rises, blinks, looks toward the tap, still up seconds later (a resting
+  glance, a double blink), the tap on the face blinks and drops it, back in his
+  seat, and a small reaction in the cooldown).
 
   The tap captures come from a single live payload (any one-line scenario)
   with scripted taps:
 
   ```bash
   SIM_FAST=1 SIM_TRACE=1 SIM_SCENARIO=<one live payload> \
-  SIM_TAPS="3000@420,300;12000@240,300;12150@240,300;12300@240,300;25000@60,300;27500@240,300" \
+  SIM_TAPS="3000@420,300;16000@240,300;22000@240,300;22150@240,300;22300@240,300;30000@60,300;34000@240,300" \
   .pio/build/sim/program
   ```
 
-  3 s: the peek, looking right. 12 s: a small reaction, and the rapid taps
-  after it are absorbed. 25 s: the cooldown is over, so the next peek looks
-  left, and the tap at 27.5 s blinks and drops it. A random lurk trip can
-  land on one of those taps (`tap at x … -> hurry home` in the log).
+  3 s: the peek, looking right; the face stays up, resting, until the tap at
+  16 s blinks and drops it (with `SIM_FAST` the screensaver's quiet time is
+  15 s, so without that tap the held face turns into the screensaver at 18 s:
+  `peek -> screensaver`, nothing on screen changes). 22 s: a small reaction
+  (still in the 20 s cooldown), and the rapid taps after it are absorbed.
+  30 s: the cooldown is over, so the next peek looks left, and the tap at
+  34 s drops it. A random lurk trip can land on one of those taps
+  (`tap at x … -> hurry home` in the log).
 - Hardware: send `clawd show`, `clawd screensaver`, `clawd attention`,
   `clawd joy`, `clawd lurk`, `clawd peek [x]` (the peek now, ignoring the
   cooldown, looking toward x) or `clawd home` on the serial console, then `screenshot`
   (`./screenshot.sh`). This replaces swapping the boot screen in `main.cpp`.
-  The device boots to the meters.
+  The device boots to the meters. `perf` prints the redraw cost of the last
+  face rise, face drop and streak (below).
+
+## Redraw cost and frame rate
+
+The face and the streak are big flat rectangles that move. As ordinary LVGL
+objects every move invalidates their whole old and new area, so each frame of
+the rise was a near full-screen render plus a full panel flush (about 460 KB
+over QSPI on the 2.16), and LVGL's default 33 ms refresh capped it at 30 fps.
+On hardware that read as choppy.
+
+- **Fields** (`field.{h,cpp}`): the face's orange and the streak's band are a
+  full-screen object that never moves and draws its rectangle in
+  `LV_EVENT_DRAW_MAIN`. Moving the rectangle invalidates only old XOR new: the
+  rows the rising face just covered, the columns the band gained and lost.
+  The face's eyes are small children that move normally. At rest a field is
+  `LV_OBJ_FLAG_HIDDEN` with an empty rectangle. Showing, hiding or restacking
+  a full-screen object would invalidate the whole screen even when it draws
+  nothing, so those (and the streak's per-frame narrowing of the stage, whose
+  pixels are all under the band or in a column the band just left) run with
+  `lv_display_enable_invalidation(false)` around them (`field_quietly`).
+- **The stage canvas** (PSRAM boards) repaints only the cells that changed
+  and invalidates their bounding box, instead of the whole 480×480 canvas
+  every stage frame. That was most of the streak's cost: the walk-off keeps
+  stepping after his last cell leaves.
+- **Refresh period 16 ms** (`-DLV_DEF_REFR_PERIOD=16` in every env, which also
+  sets the animation and touch-read timers). It's a cap, not a cost: LVGL
+  only renders what was invalidated, and a frame that takes longer than the
+  period just delays the next one, so a slow bus gets fewer frames, not more
+  work per frame. With fields a rise frame is a few strips plus the eyes,
+  about 10 % of the panel: roughly 45 KB per frame on the 480×480 boards,
+  which should fit well inside one 16 ms frame on the 2.16's 40 MHz QSPI and the C6 boards'
+  QSPI, the LCD-1.54's SPI (240×240, a quarter of the pixels), and the
+  LCD-4's RGB framebuffer copy. If one board turns out not to keep up, give
+  its env its own `-DLV_DEF_REFR_PERIOD`.
+
+Measured in the sim (`SIM_FAST=1`, a peek, a tap, a show and a tap; pixels
+per frame is the bus-independent part):
+
+| | before | after |
+|---|---|---|
+| face rise (600 ms) | 18 frames, 154 k px/frame (67 % of the panel) | 35 frames, 22 k px/frame (9.5 %) |
+| face drop (480 ms) | 13 frames, 162 k px/frame (70 %) | 27 frames, 25 k px/frame (11 %) |
+| streak (380 ms) | 13 frames, 161 k px/frame (70 %) | 22 frames, 25 k px/frame (11 %) |
+
+`perf` on the serial console prints the same for the last run of each on
+hardware: duration, frames and fps, the longest gap between two frames (the
+visible stutter), average and worst refresh time (render + flush, the flush
+is synchronous), average flush time, and pixels per frame.
+
+**Bottom edge.** The meters screen is not scrollable
+(`LV_OBJ_FLAG_SCROLLABLE` off, scrollbar mode off). LVGL's default left it
+scrollable, so whenever Clawd walked past an edge (a lurk trip, the
+screensaver's walk-off, the attention walk-on) the theme drew a faint grey
+4 px scrollbar about 6 px above the bottom edge. The sim's `SIM_EDGE_WATCH=1`
+logs every change to the bottom rows and right columns to catch anything
+like it.

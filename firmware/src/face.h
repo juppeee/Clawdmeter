@@ -4,8 +4,10 @@
 
 // The #198 face: Clawd up close, resting on the glass. Clawd-orange full
 // field, two tall dark eyes; a blink is the solid-cell > < squint; on a glance
-// the far eye travels 1.5x. Plain LVGL rectangles on lv_layer_top() — no pixel
-// buffer — so it runs on every board, PSRAM or not.
+// the far eye travels 1.5x. A field on lv_layer_top() (field.h) with the
+// eyes as small LVGL rectangles on it — no pixel buffer — so it runs on every
+// board, PSRAM or not. Rising and dropping redraw only the rows the field
+// gains or loses plus the eyes, not the whole face, every frame.
 //
 // It is both a room (the screensaver) and the curtain the other rooms change
 // behind: it rises from behind the bottom bezel (ease-out) and drops back

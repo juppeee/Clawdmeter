@@ -167,19 +167,52 @@ static void render_frame(const uint8_t* cells, const uint16_t* palette) {
     prev_valid   = true;
 }
 #else
+static uint8_t         canvas_cells[GRID * GRID];   // what canvas_buf shows
+static const uint16_t* canvas_palette = NULL;
+static bool            canvas_valid   = false;
+
+// Repaint only the cells that changed and invalidate just their bounding
+// box: a full-canvas invalidate is a full-screen render + panel flush per
+// stage frame, even when the frame only moves a few cells (or none: a walk
+// finishing off screen).
 static void render_frame(const uint8_t* cells, const uint16_t* palette) {
     if (!row_buf || !canvas_buf) return;
-    for (int gy = 0; gy < GRID; gy++) {
-        for (int gx = 0; gx < GRID; gx++) {
+    const bool full = !canvas_valid || palette != canvas_palette;
+    int gx0 = 0, gy0 = 0, gx1 = GRID - 1, gy1 = GRID - 1;
+    if (!full) {
+        gx0 = GRID; gy0 = GRID; gx1 = -1; gy1 = -1;
+        for (int gy = 0; gy < GRID; gy++)
+            for (int gx = 0; gx < GRID; gx++)
+                if (cells[gy * GRID + gx] != canvas_cells[gy * GRID + gx]) {
+                    if (gx < gx0) gx0 = gx;
+                    if (gx > gx1) gx1 = gx;
+                    if (gy < gy0) gy0 = gy;
+                    if (gy > gy1) gy1 = gy;
+                }
+        if (gx1 < 0) return;
+    }
+    const int bw = (gx1 - gx0 + 1) * cell;
+    for (int gy = gy0; gy <= gy1; gy++) {
+        for (int gx = gx0; gx <= gx1; gx++) {
             uint8_t code = cells[gy * GRID + gx];
             uint16_t color = (palette && code < CLAWD_PALETTE_SIZE) ? palette[code] : COL_EMPTY;
-            uint16_t* p = &row_buf[gx * cell];
+            uint16_t* p = &row_buf[(gx - gx0) * cell];
             for (int i = 0; i < cell; i++) p[i] = color;
         }
         for (int d = 0; d < cell; d++)
-            memcpy(&canvas_buf[(gy * cell + d) * canvas_w], row_buf, canvas_w * 2);
+            memcpy(&canvas_buf[(gy * cell + d) * canvas_w + gx0 * cell], row_buf, bw * 2);
     }
-    if (canvas) lv_obj_invalidate(canvas);
+    memcpy(canvas_cells, cells, GRID * GRID);
+    canvas_palette = palette;
+    canvas_valid = true;
+    if (!canvas) return;
+    lv_area_t a;
+    lv_obj_get_coords(canvas, &a);
+    a.x2 = a.x1 + (gx1 + 1) * cell - 1;
+    a.y2 = a.y1 + (gy1 + 1) * cell - 1;
+    a.x1 += gx0 * cell;
+    a.y1 += gy0 * cell;
+    lv_obj_invalidate_area(canvas, &a);
 }
 #endif
 

@@ -22,7 +22,7 @@ Launch from the `firmware/` directory — the default scenario path
 
 | Key | Action |
 |---|---|
-| mouse / left-drag | touch: on the meters, he reacts (a rationed face peek, else a small act); from any other room, "show me the meters" |
+| mouse / left-drag | touch: on the meters, he reacts (a rationed face peek that stays up until you tap the face, else a small act); from any other room, "show me the meters" |
 | `space` | play/pause scenario playback |
 | `←` / `→` | step one scenario state (pauses playback) |
 | `1`–`9` | jump to scenario state N (pauses playback) |
@@ -133,6 +133,16 @@ SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
   meters each tap logs what it earned (`tap at x 420 -> peek`, `-> small
   waving`, `-> hurry home`, `-> absorbed`).
 - `SIM_MINIMAL=1` boots with the minimal-mode override on.
+- `SIM_CMDS="…;9000:perf"` prints the redraw cost of the last face rise,
+  face drop and streak (frames, fps, longest gap, pixels per frame), the same
+  `perf` serial command as on hardware. The sim's timings are desktop
+  timings; pixels per frame carries over to the panel.
+- `SIM_EDGE_WATCH=1` logs, with the director beat, every change to how many
+  non-black pixels the bottom 16 rows and right 16 columns show. A sliver or
+  a stray scrollbar at an edge shows up as a row count that isn't 0 (meters)
+  or the full width (face up).
+- `SIM_ROUND_EVEN=1` applies the CO5300's even-aligned flush rounding (2.16,
+  1.8, 2.06) to the sim's flushes, to reproduce what those panels redraw.
 
 Scenes are picked at random from the mood group, so step times after the
 show's scene shift a little between runs; read them from the trace. A
