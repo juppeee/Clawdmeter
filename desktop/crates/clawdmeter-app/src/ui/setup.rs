@@ -173,7 +173,7 @@ impl SetupView {
             3 => self.connected,
             4 => {
                 let s = self.settings.read(cx);
-                s.installed_hooks() > 0 && s.pending_hooks() == 0
+                s.installed_hooks() > 0 && s.installed_hooks() == s.hook_accounts()
             }
             _ => true,
         }
@@ -286,9 +286,9 @@ impl SetupView {
     }
 
     fn hooks(&self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
-        let (pending, installed) = {
+        let (installed, total) = {
             let s = self.settings.read(cx);
-            (s.pending_hooks(), s.installed_hooks())
+            (s.installed_hooks(), s.hook_accounts())
         };
         let mut d = div().flex().flex_col().gap(px(16.)).pt(px(12.)).child(Self::title("Add Claude Code hooks")).child(
             div().flex().justify_center().child(div().max_w(px(520.)).text_center().child(para(
@@ -297,7 +297,9 @@ impl SetupView {
                      notification or question text for alerts.",
             ))),
         );
-        if pending == 0 && installed > 0 {
+        // Only every account installed skips the list; an unreadable one
+        // stays in view with its error.
+        if installed > 0 && installed == total {
             let accounts =
                 if installed == 1 { "your account".to_string() } else { format!("all {installed} accounts") };
             d = d.child(div().flex().justify_center().child(pill(
@@ -324,16 +326,23 @@ impl SetupView {
         } else {
             ("Not connected. Pair in Bluetooth settings.", Tone::Plain)
         };
-        let (installed, pending) = {
+        let (installed, total, unreadable) = {
             let s = self.settings.read(cx);
-            (s.installed_hooks(), s.pending_hooks())
+            (s.installed_hooks(), s.hook_accounts(), s.unreadable_hooks())
         };
-        let total = installed + pending;
-        let hooks: (SharedString, Tone) = if installed > 0 {
-            let tone = if pending == 0 { Tone::Ok } else { Tone::Plain };
-            (format!("Hooks installed in {installed} of {total} accounts").into(), tone)
-        } else {
-            ("Hooks not installed. Add them from Hooks.".into(), Tone::Plain)
+        let hooks: (SharedString, Tone) = {
+            let unread = match unreadable {
+                0 => String::new(),
+                1 => " Couldn't read 1 account.".into(),
+                n => format!(" Couldn't read {n} accounts."),
+            };
+            match installed {
+                0 if unreadable == 0 => ("Hooks not installed. Add them from Hooks.".into(), Tone::Plain),
+                n => {
+                    let tone = if n == total { Tone::Ok } else { Tone::Plain };
+                    (format!("Hooks installed in {n} of {total} accounts.{unread}").into(), tone)
+                }
+            }
         };
         let row = |(text, tone): (SharedString, Tone)| {
             div().flex().items_center().gap(px(10.)).child(dot(t, tone)).child(div().text_size(px(14.)).child(text))

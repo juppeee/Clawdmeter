@@ -20,13 +20,13 @@ use futures::StreamExt as _;
 use gpui::{div, img, prelude::*, px, Context, EventEmitter, PathPromptOptions, SharedString, Window};
 
 use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_M, R_PILL, R_S};
-use super::widgets::{bar, button, caption, card, clawd, kv, notice, para, pill, ButtonKind, Tone};
+use super::widgets::{bar, button, caption, card, clawd, icon, kv, notice, para, pill, ButtonKind, Tone};
 use super::{command, live_status, run_blocking, Navigate, REFRESH};
 use crate::boards::{self, BoardInfo};
 use crate::ipc::{self, AppCommand, FirmwareRecord};
 use crate::Page;
 
-const STEPS: [&str; 5] = ["Connect", "Identify", "Firmware", "Flash", "Set up"];
+const STEPS: [&str; 5] = ["Connect", "Identify", "Firmware", "Flash", "Done"];
 
 /// Where images come from.
 #[derive(Clone)]
@@ -173,6 +173,8 @@ pub struct FlasherView {
     requested: bool,
     /// "Don't have one?": the supported boards with where to buy them.
     shop: bool,
+    /// The firmware step's file, source and port details are open.
+    details: bool,
     /// `None` while checking; `Err((message, no_release_yet))`.
     source: Option<Result<Source, (String, bool)>>,
     port: Option<String>,
@@ -266,6 +268,7 @@ impl FlasherView {
             active: false,
             requested: false,
             shop: false,
+            details: false,
             source: None,
             port: None,
             probing: false,
@@ -799,7 +802,8 @@ impl FlasherView {
             d = d.child(para(t, hint));
         }
         let manifest = self.source.as_ref().and_then(|s| s.as_ref().ok()).map(|s| s.manifest().clone());
-        let mut grid = div().flex().flex_wrap().gap(px(10.));
+        // Four even columns fit both the page and the wizard; more wrap.
+        let mut grid = div().grid().grid_cols(4).gap(px(10.));
         for (i, env) in self.candidates.clone().into_iter().enumerate() {
             let info = boards::board(&env);
             // Our short names read better side by side than the manifest's
@@ -822,7 +826,7 @@ impl FlasherView {
                     .flex_col()
                     .items_center()
                     .gap(px(4.))
-                    .w(px(146.))
+                    .min_w_0()
                     .pt(px(8.))
                     .px(px(10.))
                     .pb(px(12.))
@@ -939,17 +943,47 @@ impl FlasherView {
                         t,
                         vec![
                             ("Board", info.map(|b| b.name.to_owned()).unwrap_or(env.clone()).into()),
-                            (
-                                "Firmware",
-                                format!("{ver} · {}", board.as_ref().map(|b| b.file.clone()).unwrap_or_default())
-                                    .into(),
-                            ),
-                            ("Source", from),
+                            ("Firmware", ver.clone().into()),
                             ("Verification", state),
-                            ("USB", self.port.clone().unwrap_or_default().into()),
                         ],
                     )),
             );
+        // Where the image comes from and goes to: for diagnosis, not the
+        // decision.
+        let open = self.details;
+        let text = t.text;
+        d = d.child(
+            div()
+                .id("details")
+                .group("details")
+                .debug_selector(|| "details".into())
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .text_size(px(13.))
+                .text_color(t.dim)
+                .cursor_pointer()
+                .hover(|s| s.text_color(t.text))
+                .on_click(cx.listener(|v, _, _, cx| {
+                    v.details = !v.details;
+                    cx.notify();
+                }))
+                .child(
+                    icon(if open { "chevron-down" } else { "chevron-right" }, 16., t.dim)
+                        .group_hover("details", move |s| s.text_color(text)),
+                )
+                .child("Details"),
+        );
+        if open {
+            d = d.child(div().pl(px(22.)).child(kv(
+                t,
+                vec![
+                    ("File", board.as_ref().map(|b| b.file.clone()).unwrap_or_default().into()),
+                    ("Source", from),
+                    ("USB", self.port.clone().unwrap_or_default().into()),
+                ],
+            )));
+        }
         if let Some(Err(e)) = &self.image {
             d = d.child(notice(t, Tone::Bad, e.clone()));
         }
@@ -1047,13 +1081,13 @@ impl FlasherView {
             .child(div().font_family(FONT_DISPLAY).text_size(px(22.)).child("Firmware installed"))
             .child(div().max_w(px(440.)).text_center().child(para(
                 t,
-                "The board is restarting. If it is not already paired, choose Clawdmeter in your Bluetooth settings.",
+                if self.connected {
+                    "Bluetooth connected."
+                } else {
+                    "If the board isn't paired yet, choose Clawdmeter in your Bluetooth settings."
+                },
             )))
-            .child(if self.connected {
-                pill(t, "Connected", Tone::Ok)
-            } else {
-                pill(t, "Waiting for Bluetooth connection", Tone::Accent)
-            })
+            .when(!self.connected, |d| d.child(pill(t, "Waiting for Bluetooth connection", Tone::Accent)))
             .child(
                 div()
                     .flex()

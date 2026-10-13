@@ -161,7 +161,7 @@ impl Render for OverviewView {
         let now = clawdmeter_core::unix_now();
         let home = self.paths.home.clone();
         let (tone, title, sub) = match &self.snap {
-            None => (Tone::Plain, "Not running", "Start Clawdmeter to update usage.".to_string()),
+            None => (Tone::Plain, "Not running", not_running_text().to_string()),
             Some(s) => {
                 let sub = match (&s.account, s.age(now)) {
                     _ if s.logged_out => "Open Claude Code in a terminal and sign in.".into(),
@@ -198,7 +198,7 @@ impl Render for OverviewView {
             .children(refresh);
         let mut page = div().flex().flex_col().gap(px(20.)).child(header);
         let Some(s) = self.snap.clone() else {
-            return page.child(notice(&t, Tone::Plain, not_running_text()));
+            return page;
         };
 
         let session_note = (s.session_pct.is_some() && !s.window_started).then_some("Not started");

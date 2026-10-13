@@ -169,6 +169,16 @@ impl SettingsView {
         cx.notify();
     }
 
+    /// Accounts whose settings.json couldn't be read.
+    pub fn unreadable_hooks(&self) -> usize {
+        self.hooks.iter().filter(|h| matches!(h.status, HookStatus::Unreadable(_))).count()
+    }
+
+    /// Accounts the hooks page lists (every configured account).
+    pub fn hook_accounts(&self) -> usize {
+        self.hooks.len()
+    }
+
     /// Accounts whose hooks are set up.
     pub fn installed_hooks(&self) -> usize {
         self.hooks.iter().filter(|h| h.status == HookStatus::Installed).count()
@@ -436,9 +446,17 @@ impl SettingsView {
             .or_else(|| snap.as_ref().and_then(|s| s.device_firmware.clone()));
         let board = env.as_deref().and_then(boards::board);
         let name: SharedString = match (board, &env) {
-            (Some(b), _) => b.product.into(),
+            (Some(b), _) => b.name.into(),
             (None, Some(e)) => e.clone().into(),
             (None, None) => "Board not identified".into(),
+        };
+        // Without a live USB answer, the identity is what was last seen.
+        let cached = self.device.info.is_none() && env.is_some();
+        let detail: Option<SharedString> = match (board, cached) {
+            (Some(b), true) => Some(format!("{} · last detected", b.product).into()),
+            (Some(b), false) => Some(b.product.into()),
+            (None, true) => Some("Last detected".into()),
+            (None, false) => None,
         };
         let update = snap.as_ref().and_then(|s| s.update_available().map(str::to_owned));
         let (link_tone, link): (Tone, SharedString) = match snap.as_ref() {
@@ -478,15 +496,15 @@ impl SettingsView {
                 .flex_1()
                 .min_w_0()
                 .gap(px(8.))
-                .child(div().font_family(FONT_DISPLAY).text_size(px(19.)).child(name))
                 .child(
                     div()
                         .flex()
-                        .flex_wrap()
-                        .gap(px(6.))
-                        .child(pill(t, link, link_tone))
-                        .when_some(update.as_ref(), |d, _| d.child(pill(t, "Update available", Tone::Accent))),
+                        .flex_col()
+                        .gap(px(2.))
+                        .child(div().font_family(FONT_DISPLAY).text_size(px(20.)).child(name))
+                        .when_some(detail, |d, x| d.child(div().text_size(px(12.5)).text_color(t.mute).child(x))),
                 )
+                .child(div().flex().flex_wrap().gap(px(6.)).child(pill(t, link, link_tone)))
                 .child(div().text_size(px(13.)).text_color(t.dim).child(firmware))
                 .child(div().text_size(px(13.)).text_color(t.mute).child(usb))
                 .child(div().flex().pt(px(4.)).child(button(
@@ -648,8 +666,8 @@ impl SettingsView {
             )))
             .child(para(
                 t,
-                "Add a Claude Code config folder for each account you want to monitor. The device follows the \
-                 account whose session usage increased most recently.",
+                "The default Claude Code folder is ~/.claude. Add a config folder for each other account you want \
+                 to monitor. The device follows the account whose session usage increased most recently.",
             ));
         let active = self.snap.as_ref().and_then(|s| s.account.clone());
         let errors: Vec<ipc::AccountError> = self.snap.as_ref().map(|s| s.errors.clone()).unwrap_or_default();
@@ -706,7 +724,15 @@ impl SettingsView {
                     )),
             );
         }
-        pane = pane.child(list);
+        pane = pane.child(list).child(caption(
+            t,
+            if only_one {
+                "Removing a folder stops monitoring it; its files and installed hooks stay in place. The last \
+                 folder can't be removed."
+            } else {
+                "Removing a folder stops monitoring it; its files and installed hooks stay in place."
+            },
+        ));
         if self.snap.is_none() {
             pane = pane.child(notice(t, Tone::Plain, not_running_text()));
         }
@@ -723,6 +749,9 @@ impl SettingsView {
             ))
         });
         let busy = self.preview.is_some();
+        // With one account to change, the review button below is the only
+        // entry point; rows keep their own actions when there are several.
+        let single = self.pending_hooks() == 1;
         let mut list = div().flex().flex_col().rounded(px(R_M)).border_1().border_color(t.line);
         for (i, row) in self.hooks.iter().enumerate() {
             let (meta, chip, action): (String, (&str, Tone), Option<(&str, HookAction)>) = match &row.status {
@@ -777,6 +806,7 @@ impl SettingsView {
                         .child(div().text_size(px(12.5)).text_color(t.mute).child(meta)),
                 )
                 .child(pill(t, chip.0, chip.1));
+            let action = action.filter(|(_, a)| !(single && *a == HookAction::Install));
             if let Some((label, action)) = action {
                 let me = cx.entity().downgrade();
                 let dir = row.dir.clone();
@@ -883,11 +913,11 @@ impl SettingsView {
             let any_old = self.hooks.iter().any(|h| h.status.needs_install() && h.status != HookStatus::Missing);
             let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
             let n = pending.len();
-            let accounts = if n == 1 { "1 account".to_string() } else { format!("{n} accounts") };
-            let label = if any_old {
-                format!("Review updates for {accounts}")
-            } else {
-                format!("Review installation in {accounts}")
+            let label = match (any_old, n) {
+                (true, 1) => "Review update".to_string(),
+                (true, n) => format!("Review updates for {n} accounts"),
+                (false, 1) => "Review installation".to_string(),
+                (false, n) => format!("Review installation in {n} accounts"),
             };
             pane = pane.child(
                 div()
@@ -972,8 +1002,8 @@ impl SettingsView {
         pane = pane.child(field_stacked(
             t,
             "Usage checks",
-            "Checks every 3 minutes while working, then less often when quiet. Retry delays apply to all checks, \
-             including manual refresh.",
+            "Automatic checks every 3 minutes while working, then less often when quiet. Retry delays apply to \
+             every check.",
             segmented(t, "poll", &options, &poll, true, move |c, _, cx| {
                 let _ = me.update(cx, |v, cx| {
                     let paths = v.paths.clone();
@@ -993,6 +1023,28 @@ impl SettingsView {
                 });
             }),
         ));
+        // A missing CLI stops everything, so it isn't tucked under Advanced.
+        if self.snap.as_ref().is_some_and(|s| s.claude.is_none()) {
+            let cfgp = self.paths.config_file.clone();
+            let label = if cfgp.exists() { "Open config" } else { "Create config" };
+            pane = pane.child(
+                div().pt(px(12.)).child(
+                    notice(
+                        t,
+                        Tone::Warn,
+                        "Claude Code wasn't found, so usage can't be read. Set claude_path in the config file.",
+                    )
+                    .child(div().flex().pl(px(18.)).child(button(
+                        t,
+                        "fix-cli",
+                        label,
+                        ButtonKind::Small,
+                        true,
+                        move |_, _, cx| open_config(&cfgp, cx),
+                    ))),
+                ),
+            );
+        }
         let p = self.paths.clone();
         pane = pane.child(field(
             t,
@@ -1066,9 +1118,7 @@ impl SettingsView {
                 "Claude Code executable",
                 match &claude {
                     Some(c) => format!("Usage is read with {}.", tilde(c, &self.paths.home)),
-                    None if self.snap.is_some() => {
-                        "Claude Code wasn't found. Set claude_path in the config file.".into()
-                    }
+                    None if self.snap.is_some() => "Not found.".into(),
                     None => "Start Clawdmeter to detect Claude Code.".into(),
                 },
                 div(),
@@ -1087,14 +1137,40 @@ impl SettingsView {
                 t,
                 "Config file",
                 tilde(&cfgp.display().to_string(), &self.paths.home),
-                button(t, "open-cfg", "Open config", ButtonKind::Small, cfgp.exists(), move |_, _, cx| {
-                    cx.open_with_system(&cfgp)
-                }),
+                button(
+                    t,
+                    "open-cfg",
+                    if cfgp.exists() { "Open config" } else { "Create config" },
+                    ButtonKind::Small,
+                    true,
+                    move |_, _, cx| open_config(&cfgp, cx),
+                ),
             ));
             pane = pane.child(advanced);
         }
         pane
     }
+}
+
+/// What a new config file starts with: the keys people reach for, commented.
+const CONFIG_TEMPLATE: &str = "\
+# Clawdmeter settings: key = value. The app re-reads this file within a few seconds.
+# claude_path = /path/to/claude
+# config_dirs = ~/.claude, ~/.claude-work
+# heartbeat_interval = 60
+";
+
+/// Open the config file in the system editor, creating it first if needed.
+fn open_config(path: &std::path::Path, cx: &mut gpui::App) {
+    if !path.exists() {
+        let made =
+            path.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|_| std::fs::write(path, CONFIG_TEMPLATE));
+        if let Err(e) = made {
+            log::warn!("couldn't create {}: {e}", path.display());
+            return;
+        }
+    }
+    cx.open_with_system(path);
 }
 
 fn with_alpha(c: gpui::Rgba, a: f32) -> gpui::Hsla {
@@ -1184,6 +1260,24 @@ mod tests {
         view.read_with(cx, |v, _| {
             assert_eq!(v.hooks[0].status, HookStatus::Installed);
             assert!(v.preview.is_none());
+        });
+        let _ = std::fs::remove_dir_all(&paths.home);
+    }
+
+    #[gpui::test]
+    fn unreadable_accounts_are_counted_apart(cx: &mut TestAppContext) {
+        let paths = home("unreadable");
+        let (a, b) = (paths.home.join("acct"), paths.home.join("broken"));
+        std::fs::create_dir_all(&b).unwrap();
+        std::fs::write(b.join("settings.json"), "{ not json").unwrap();
+        std::fs::write(&paths.config_file, format!("config_dirs = {}, {}\n", a.display(), b.display())).unwrap();
+        let p = paths.clone();
+        let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Page::Hooks, false, cx));
+        click(cx, "install-all");
+        click(cx, "apply-hooks");
+        view.read_with(cx, |v, _| {
+            assert_eq!((v.installed_hooks(), v.unreadable_hooks(), v.hook_accounts()), (1, 1, 2));
+            assert_eq!(v.pending_hooks(), 0, "the broken file can't be fixed by installing");
         });
         let _ = std::fs::remove_dir_all(&paths.home);
     }
