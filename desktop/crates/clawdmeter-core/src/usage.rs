@@ -154,6 +154,20 @@ impl UsageError {
     pub fn is_auth(&self) -> bool {
         matches!(self, UsageError::NotLoggedIn(_) | UsageError::NotSubscription)
     }
+
+    /// One short sentence for the app's UI; `Display` keeps the details for logs.
+    pub fn user_message(&self) -> String {
+        match self {
+            UsageError::Spawn(_) => "Couldn't run the claude command. Is Claude Code installed?".into(),
+            UsageError::Timeout => "Claude Code took too long to answer. Retrying.".into(),
+            UsageError::BadOutput(_) => "Claude Code answered with something unexpected. Retrying.".into(),
+            UsageError::NotLoggedIn(_) => "Not logged in. Run claude in a terminal and log in.".into(),
+            UsageError::NotSubscription => "Not on a Claude subscription, so there are no limits to show.".into(),
+            UsageError::NoUsageLines(_) => {
+                "Claude Code isn't reporting usage limits for this account right now. Retrying.".into()
+            }
+        }
+    }
 }
 
 fn snippet(s: &str) -> String {

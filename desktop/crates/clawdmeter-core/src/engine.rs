@@ -362,7 +362,7 @@ impl Engine {
             errors: self
                 .accounts
                 .iter()
-                .filter_map(|(k, a)| a.last_error.as_ref().map(|e| (k.clone(), e.to_string())))
+                .filter_map(|(k, a)| a.last_error.as_ref().map(|e| (k.clone(), e.user_message())))
                 .collect(),
             attention: self.attention.active(),
             activity: self.activity.level(now),

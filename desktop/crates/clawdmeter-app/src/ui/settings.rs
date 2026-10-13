@@ -587,7 +587,7 @@ impl SettingsView {
             )))
             .child(para(
                 t,
-                "Each Claude Code config folder is an account (the CLAUDE_CONFIG_DIR you run claude with). \
+                "Each Claude Code config folder is an account: the CLAUDE_CONFIG_DIR you run claude with. \
                  Clawdmeter checks all of them; the device shows whichever you used most recently.",
             ));
         let active = self.snap.as_ref().and_then(|s| s.account.clone());
@@ -599,6 +599,8 @@ impl SettingsView {
             let err = errors.iter().find(|(p, _)| *p == ds).map(|(_, e)| e.clone());
             let is_active = active.as_deref() == Some(ds.as_str());
             let (meta, chip) = match (&err, is_active) {
+                // Messages ending in "Retrying." are transient; the rest need the user.
+                (Some(e), _) if e.ends_with("Retrying.") => (e.clone(), Some(pill(t, "Retrying", Tone::Warn))),
                 (Some(e), _) => (e.clone(), Some(pill(t, "Problem", Tone::Bad))),
                 (None, true) => ("Shown on the device".to_string(), Some(pill(t, "On device", Tone::Ok))),
                 (None, false) if self.snap.is_some() => ("Checked, not shown".to_string(), None),
