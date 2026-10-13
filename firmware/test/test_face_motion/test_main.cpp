@@ -49,20 +49,15 @@ static void rise_overshoots_then_dips_then_settles() {
     CHECK(face_motion_pose(FACE_MOVE_RISE, face_motion_rest_ms() + 20, &g).y > 0);
 }
 
-static void arms_out_on_the_rise_widening_to_full_bleed() {
+static void the_face_keeps_one_size() {
     for (const auto& s : SIZES) {
         FaceGeom g = geom(s[0], s[1], s[1]);
-        const int aw = face_arm_w(&g);
-        CHECK(aw % g.cell == 0 && face_arm_h(&g) % g.cell == 0);
-        CHECK(face_motion_pose(FACE_MOVE_RISE, 200, &g).margin == aw);
-        int last = aw;
-        for (uint32_t t = 0; t <= face_motion_duration(FACE_MOVE_RISE); t += 4) {
-            const int m = face_motion_pose(FACE_MOVE_RISE, t, &g).margin;
-            CHECK(m % g.cell == 0);
-            CHECK(m <= last);                // only ever widens
-            last = m;
-        }
-        CHECK(face_motion_pose(FACE_MOVE_RISE, 700, &g).margin == 0);
+        const FaceMove moves[] = {FACE_MOVE_RISE, FACE_MOVE_DROP};
+        for (FaceMove m : moves)
+            for (uint32_t t = 0; t <= face_motion_duration(m); t += 2) {
+                const FacePose p = face_motion_pose(m, t, &g);
+                CHECK(p.margin == 0 && p.arm_dy == 0 && p.stretch == 0);
+            }
     }
 }
 
@@ -77,31 +72,17 @@ static void drop_stays_full_width_the_whole_way() {
     }
 }
 
-static void eyes_stretch_rising_and_squash_on_landing() {
-    FaceGeom g = geom(480, 480, 480);
-    CHECK(face_motion_pose(FACE_MOVE_RISE, 50, &g).stretch > 100);
-    int squash = 0;
-    for (uint32_t t = 500; t < 700; t += 4) {
-        const int s = face_motion_pose(FACE_MOVE_RISE, t, &g).stretch;
-        if (s < squash) squash = s;
-    }
-    CHECK(squash <= -150);
-}
-
 static void drop_anticipates_then_falls_below_the_bezel() {
     for (const auto& s : SIZES) {
         FaceGeom g = geom(s[0], s[1], 0);
-        // A crouch (down, eyes squashed), then a hop up (eyes stretched).
-        int max_y = 0, min_y = 0, min_st = 0, max_st = 0;
+        // A crouch (down), then a hop up.
+        int max_y = 0, min_y = 0;
         for (uint32_t t = 0; t < 150; t += 2) {
             const FacePose p = face_motion_pose(FACE_MOVE_DROP, t, &g);
             if (p.y > max_y) max_y = p.y;
             if (p.y < min_y) min_y = p.y;
-            if (p.stretch < min_st) min_st = p.stretch;
-            if (p.stretch > max_st) max_st = p.stretch;
         }
         CHECK(max_y > 0 && min_y < 0);
-        CHECK(min_st < -50 && max_st > 50);
         // Then an ease-in fall: it only goes down, faster and faster.
         int prev = face_motion_pose(FACE_MOVE_DROP, 150, &g).y, prev_dy = 0;
         for (uint32_t t = 170; t <= face_motion_duration(FACE_MOVE_DROP); t += 20) {
@@ -131,9 +112,8 @@ int main() {
     UNITY_BEGIN();
     RUN_TEST(rise_starts_below_and_ends_dead_still_at_rest);
     RUN_TEST(rise_overshoots_then_dips_then_settles);
-    RUN_TEST(arms_out_on_the_rise_widening_to_full_bleed);
+    RUN_TEST(the_face_keeps_one_size);
     RUN_TEST(drop_stays_full_width_the_whole_way);
-    RUN_TEST(eyes_stretch_rising_and_squash_on_landing);
     RUN_TEST(drop_anticipates_then_falls_below_the_bezel);
     RUN_TEST(deterministic);
     return UNITY_END();

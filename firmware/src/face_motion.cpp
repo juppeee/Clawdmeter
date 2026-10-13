@@ -10,8 +10,6 @@
 #define RISE_OVER       44      // overshoot past rest, px@480
 #define SPRING_MS       300.0f  // settle period
 #define SPRING_TAU      110.0f  // settle decay
-#define WIDEN_FROM_MS   420     // presses to the glass: body widens to full bleed
-#define WIDEN_MS        180
 
 // Drop: crouch, hop, ease-in fall.
 #define DROP_CROUCH_MS  60
@@ -22,11 +20,9 @@
 #define DROP_CROUCH     6       // px@480: the crouch before the hop
 #define DROP_HOP        28      // px@480
 
-// Follow-through: eyes and arms trail the body.
+// Follow-through: the eyes trail the body.
 #define EYE_LAG_MS      40
-#define ARM_LAG_MS      70
 #define EYE_LAG_MAX     40      // px@480
-#define ARM_LAG_MAX     56
 
 #define ARM_W           48      // px@480: 6 cells wide, 7 tall
 #define ARM_H           56
@@ -102,45 +98,13 @@ static float body_y(FaceMove m, float t, const FaceGeom* g) {
 
 FacePose face_motion_pose(FaceMove m, uint32_t t_ms, const FaceGeom* g) {
     FacePose p = {};
-    const int c = cell_of(g);
-    const int margin = face_arm_w(g);
     const float t = (float)t_ms;
     const float y = body_y(m, t, g);
     p.y = iround(y);
     p.eye_dy = clampi(iround(body_y(m, t - EYE_LAG_MS, g) - y), -sc(g, EYE_LAG_MAX), sc(g, EYE_LAG_MAX));
 
-    if (m == FACE_MOVE_RISE) {
-        if (t_ms >= RISE_END_MS) { p.y = 0; p.eye_dy = 0; return p; }
-        p.arm_dy = clampi(iround(body_y(m, t - ARM_LAG_MS, g) - y), -sc(g, ARM_LAG_MAX), sc(g, ARM_LAG_MAX));
-        if (t < RISE_UP_MS) {
-            // Fast and stretched, relaxing as he slows into the apex.
-            const float u = t / RISE_UP_MS;
-            p.stretch = iround(220.0f * powf(1.0f - u, 0.8f));
-        } else {
-            // Lands in the dip: squash, then a small rebound stretch.
-            const float ts = t - RISE_UP_MS;
-            if (ts >= 40 && ts < 240)       p.stretch = -iround(240.0f * sinf(PI_F * (ts - 40) / 200.0f));
-            else if (ts >= 240 && ts < 360) p.stretch = iround(70.0f * sinf(PI_F * (ts - 240) / 120.0f));
-        }
-        // Arms out on a narrower body, which widens cell by cell to full
-        // bleed as he presses to the glass.
-        if (t_ms < WIDEN_FROM_MS) p.margin = margin;
-        else if (t_ms < WIDEN_FROM_MS + WIDEN_MS)
-            p.margin = (margin * (int)(WIDEN_FROM_MS + WIDEN_MS - t_ms) / WIDEN_MS + c - 1) / c * c;
-        if (p.margin > margin) p.margin = margin;
-        return p;
-    }
-
-    // Drop: full width all the way, no arms; the eyes squash and stretch
-    // through the crouch and hop, and stay stretched as he falls away.
-    if (t_ms < DROP_CROUCH_MS) {
-        p.stretch = -iround(140.0f * sinf(PI_F * t / DROP_CROUCH_MS));
-    } else if (t_ms < DROP_ANT_MS) {
-        const float v = (t - DROP_CROUCH_MS) / DROP_HOP_MS;
-        p.stretch = iround(140.0f * sinf(PI_F / 2 * v));
-    } else {
-        const float w = t_ms >= DROP_END_MS ? 1.0f : (t - DROP_ANT_MS) / DROP_FALL_MS;
-        p.stretch = iround(140.0f + 80.0f * w);
-    }
+    // The face keeps one size: no narrowing, no squash and stretch. Only its
+    // position moves, with the eyes trailing the body.
+    if (m == FACE_MOVE_RISE && t_ms >= RISE_END_MS) { p.y = 0; p.eye_dy = 0; }
     return p;
 }

@@ -17,7 +17,7 @@ below).
 | `firmware/src/mascot.{h,cpp}` | Clawd on the meters: the corner Clawd in his seat, plus the full-size sprite used for the lurk trip and the attention walk-on. Does in-room secondary action (idle acts, lurk trips) when the director allows it. |
 | `firmware/src/splash.{h,cpp}` | The stage room: a full-screen 60×60-cell stage with one performer who stands, walks, or performs a scene. |
 | `firmware/src/face.{h,cpp}` | The #198 face: a field on `lv_layer_top()` with the eyes as small LVGL rectangles on it. It is the screensaver, the held peek, and the curtain that rooms change behind. |
-| `firmware/src/face_motion.{h,cpp}` | The face's rise and drop as a pure function of time (vertical only: overshoot and settle, arms, squash and stretch, follow-through; see "The face's motion"), unit-tested in `test/test_face_motion`. |
+| `firmware/src/face_motion.{h,cpp}` | The face's rise and drop as a pure function of time (vertical only, one size: overshoot and settle, anticipation, follow-through; see "The face's motion"), unit-tested in `test/test_face_motion`. |
 | `firmware/src/streak.{h,cpp}` | The orange streak: a field that sweeps right to left and clips the stage so the meters show behind it. |
 | `firmware/src/field.{h,cpp}` | A flat-colour shape on an overlay layer (a rectangle plus two small extra rectangles) that redraws only the strips that change colour (see "Redraw cost and frame rate"). The face and the streak are fields. |
 | `firmware/src/perf.{h,cpp}` | The `perf` serial command: refresh count, timing and pixels sent for the last face rise, its settle, face drop and streak. |
@@ -203,8 +203,7 @@ also wakes the screensaver, which covers the slow-clock-only case.
 | Principle | Implementation |
 |---|---|
 | Anticipation | Pointing before a show and on a prompt, a blink before the face drops on a wake, the face's crouch-and-hop before it drops, a beat before the stage run-off, a turn toward the edge (walking intro frames) before every exit. |
-| Squash and stretch | The face's eyes: stretched while it moves fast, squashed as it lands against the glass. |
-| Follow-through, overlapping action | The face's eyes and arms lag its body, vertically, so each reaches rest at its own moment. |
+| Follow-through, overlapping action | The face's eyes lag its body, vertically, so they reach rest a beat later. |
 | Timing | Taps act on `LV_EVENT_PRESSED`. `splash_release()` snaps to the idle pose in the same frame. |
 | Secondary action | `clawd_jitter` for idle gaps, `clawd_pick_no_repeat` for acts and scenes, `face_plan_next` for irregular and double blinks and glances. |
 | Staging | The meters never animate while he performs: the stage and face cover them, and there's one actor at a time. |
@@ -227,47 +226,36 @@ tilt, lean or sideways drift. A real tilt would mean `transform_rotation` on
 a full-screen object, rendered through a full-screen ARGB layer every frame
 (about 0.9 MB on 480×480): it kills the frame rate and can't be allocated on
 the no-PSRAM C6 boards. Faking it as a stepped shear of the top edge aliases
-into a visible staircase on the panel. So every deformation is a flat
-rectangle that moves up or down, or changes width:
+into a visible staircase on the panel.
 
-- **Arms** (rise only) are two chunky nubs (6×7 cells on 480) at Clawd's arm
-  height (the official still has them in the middle third of the body,
-  sticking out about a fifth of its width). While he rises, the body is one
-  arm narrower than the panel on each side and the arms fill that gap. When
-  he presses up to the glass the body widens, cell by cell, to full bleed and
-  the arms slide out past the bezel.
-- **Squash and stretch** are on the eyes only: taller and narrower (area
-  kept) while he moves fast, shorter and wider for a few frames when he
-  settles onto the glass, squashed in the drop's crouch.
-- **Follow-through** is vertical lag: the eyes trail the body by 40 ms and
-  the arms by 70 ms (clamped), so they keep going when the body stops and
-  catch up after.
+**One size.** The face never changes size: the body is always full bleed and
+the eyes keep their shape. Narrowing the body (arms out) or squashing the eyes
+read on the panel as the face resizing, so the character lives in its
+position alone:
+
+- **Follow-through** is vertical lag: the eyes trail the body by 40 ms
+  (clamped), so they keep going when the body stops and catch up after.
 
 **The rise** (peek, show curtain, screensaver), 860 ms in all:
 
 1. 0–500 ms, *up with slow-out*: ease-out from below the bezel to 44 px (on
-   480) past the rest position, arms out. The eyes start stretched and relax
-   as he slows.
-2. ~420–600 ms, *presses to the glass*: the body widens to full bleed, the
-   arms leave.
-3. 500–860 ms, *settle*: an underdamped spring (period 300 ms, decay 110 ms)
+   480) past the rest position.
+2. 500–860 ms, *settle*: an underdamped spring (period 300 ms, decay 110 ms)
    brings him back down through rest at ~595 ms into a small dip (about
-   12 px of black at the top edge) and back. The body, the eyes and the arms
-   each reach rest at a different moment. The eyes squash as he lands in the
-   dip and spring back with a small stretch.
+   12 px of black at the top edge) and back. The eyes reach rest a beat
+   after the body.
 
 `face_moving()` stays true through the settle, so nothing behind the curtain
 changes while the dip shows a sliver of the room. The director's next step
 (a blink, a glance) starts once he's still.
 
 **The drop** (wake, show curtain, calm dip, peek over), 510 ms, full width
-the whole way (no arms, no narrowing, so it never reads as shrinking):
+the whole way:
 
-1. 0–150 ms, *anticipation*: a quick crouch (6 px down, eyes squash), then a
-   little hop up (28 px, eyes stretch).
+1. 0–150 ms, *anticipation*: a quick crouch (6 px down), then a little hop
+   up (28 px).
 2. 150–510 ms, *falls with slow-in*: ease-in straight down past the bezel.
-   The eyes stay stretched and lag a little, riding up the body as it
-   accelerates away.
+   The eyes lag a little, riding up the body as it accelerates away.
 
 **Budget.** The body is a flat rectangle, so each frame invalidates its exact
 old XOR new: the rows its top edge moved through, plus the side strips while
