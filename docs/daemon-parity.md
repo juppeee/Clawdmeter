@@ -42,8 +42,8 @@ Clawdmeter does not read OAuth tokens or issue a model request itself.
 Config lives at `~/.config/clawdmeter/config` on Linux and
 macOS, `%LOCALAPPDATA%\Clawdmeter\config` on Windows; `key = value`, `#`
 comments, last key wins, case-insensitive keys (`clawdmeter-core/src/config.rs`).
-Files from `~/.config/claude-usage-monitor/` migrate into the current state
-folder; destination files take precedence and runtime locks are not moved.
+At startup, a one-time migration moves files from
+`~/.config/claude-usage-monitor/` into the current state folder; destination files take precedence and runtime locks are not moved.
 The app re-reads config every 5 s and the settings window edits it in place,
 keeping comments and unknown keys.
 

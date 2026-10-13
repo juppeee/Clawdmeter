@@ -142,7 +142,8 @@ Testing the same hardware helps more than a duplicate port. See the
 
 On Linux and macOS, config and state live in `~/.config/clawdmeter/`.
 On Windows, they live in `%LOCALAPPDATA%\Clawdmeter\`.
-The `config` file uses `key = value` lines. The app reloads it every few
+The config file is `~/.config/clawdmeter/config` on Linux and macOS, or
+`%LOCALAPPDATA%\Clawdmeter\config` on Windows. It uses `key = value` lines. The app reloads it every few
 seconds and preserves comments and unknown keys when saving.
 
 | Key | Default | Effect |
@@ -195,8 +196,10 @@ device address to try first.
 
 ## Migrating from a legacy daemon
 
-The desktop app replaces the bash and Python daemons. It migrates files
-from `~/.config/claude-usage-monitor/` into the current state folder. Files
+The desktop app replaces the bash and Python daemons. At startup, it
+performs a one-time migration of config, logs, hook state, and the saved
+device address from `~/.config/claude-usage-monitor/` into the current state
+folder. Files
 already at the destination win; conflicting files and runtime locks stay
 in the legacy folder.
 
