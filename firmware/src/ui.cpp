@@ -48,7 +48,7 @@ struct Layout {
     const lv_font_t* title_font;     // screen title / clock
     const lv_font_t* pct_font;       // big percentage number
     const lv_font_t* ent_pct_font;   // enterprise spending number
-    const lv_font_t* pill_font;      // "Current" / "Weekly" pill
+    const lv_font_t* pill_font;      // "Session" / "Weekly" pill
     const lv_font_t* reset_font;     // "Resets in ..." line
     const lv_font_t* pace_font;      // enterprise "Under/On/Over pace" line
     const lv_font_t* anim_font;      // animated status line
@@ -60,7 +60,7 @@ struct Layout {
     int16_t batt_w;                  // battery icon width, for position math
 
     // Pairing hint
-    int16_t pair_y1, pair_y2, pair_y3;
+    int16_t pair_y1, pair_y2, pair_y3, pair_y4;
 
     // Bluetooth screen
     int16_t bt_info_panel_h;
@@ -106,6 +106,7 @@ static void compute_layout(const BoardCaps& c) {
     L.pair_y1 = 40;
     L.pair_y2 = 120;
     L.pair_y3 = 160;
+    L.pair_y4 = 230;
 
     if (c.height >= 460) {
         // Large layout — tuned for 480x480 (AMOLED-2.16).
@@ -171,6 +172,7 @@ static void compute_layout(const BoardCaps& c) {
         L.pair_y1 = 12;
         L.pair_y2 = 56;
         L.pair_y3 = 80;
+        L.pair_y4 = 112;
         L.bt_info_panel_h = 90;
         L.bt_reset_zone_h = 60;
         L.bt_title_font    = &font_tiempos_34;
@@ -206,6 +208,10 @@ static int      clock_fmt = 24;   // 12 or 24, set from the daemon payload
 static int      clock_last_min = -1;   // last rendered minute; avoids redrawing the title every tick
 static lv_obj_t* usage_group;   // the two usage panels — shown when connected
 static lv_obj_t* pair_group;    // pairing hint — shown when disconnected
+static lv_obj_t* pair_lines[4]; // its lines: heading, two steps, the hold note
+static PairHint  pair_hint = PAIR_HINT_NORMAL;
+static uint32_t  pair_hint_since = 0;
+#define PAIR_CLEARED_SHOW_MS 8000   // "Ready to pair" stays this long
 static lv_obj_t* bar_session;
 static lv_obj_t* lbl_session_pct;
 static lv_obj_t* lbl_session_label;
@@ -399,7 +405,7 @@ static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text
     lv_obj_t* panel = make_panel(parent, L.margin, y, L.content_w, L.usage_panel_h);
 
     *out_pct = lv_label_create(panel);
-    lv_label_set_text(*out_pct, "---%");
+    lv_label_set_text(*out_pct, "--");
     lv_obj_set_style_text_font(*out_pct, L.pct_font, 0);
     lv_obj_set_style_text_color(*out_pct, COL_TEXT, 0);
     lv_obj_set_pos(*out_pct, 0, 0);
@@ -420,7 +426,41 @@ static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text
 }
 
 // Pairing hint — shown when disconnected so the screen isn't empty and the
-// user knows how to (re)pair. Wording matches the 3-second release gesture.
+// user knows how to (re)pair. Boards with a PWR button name the 3-second
+// release gesture (main.cpp pair_tick); boards without one (LCD-4) pair from
+// the computer, and a 5 s touch hold here clears an old pairing
+// (pair_hold.h). The lines change while that hold runs and after a clear.
+static void apply_pair_text(void) {
+    if (!pair_lines[0]) return;
+    const bool pwr = board_caps().has_pwr_button;
+    const char* l1 = pwr ? "Pair again" : "Pair via Bluetooth";
+    const char* l2 = pwr ? "Hold PWR for 3s" : "Choose Clawdmeter";
+    const char* l3 = pwr ? "Then release" : "On your computer";
+    const char* l4 = pwr ? "" : "Paired before? Hold here 5s";
+    if (pair_hint == PAIR_HINT_HOLDING) {
+        l4 = "Keep holding...";
+    } else if (pair_hint == PAIR_HINT_CLEARED) {
+        l1 = "Ready to pair";
+        l2 = "Choose Clawdmeter";
+        l3 = "On your computer";
+        l4 = "Old pairing cleared";
+    }
+    lv_label_set_text(pair_lines[0], l1);
+    lv_label_set_text(pair_lines[1], l2);
+    lv_label_set_text(pair_lines[2], l3);
+    lv_label_set_text(pair_lines[3], l4);
+    lv_obj_set_style_text_color(pair_lines[3], pair_hint == PAIR_HINT_NORMAL ? COL_DIM : COL_ACCENT, 0);
+}
+
+static lv_obj_t* make_pair_line(const lv_font_t* font, lv_color_t color, int16_t y) {
+    lv_obj_t* l = lv_label_create(pair_group);
+    lv_label_set_text(l, "");
+    lv_obj_set_style_text_font(l, font, 0);
+    lv_obj_set_style_text_color(l, color, 0);
+    lv_obj_align(l, LV_ALIGN_TOP_MID, 0, y);
+    return l;
+}
+
 static void build_pair_group(lv_obj_t* parent) {
     pair_group = lv_obj_create(parent);
     lv_obj_set_size(pair_group, L.scr_w, L.scr_h - L.content_y);
@@ -431,25 +471,22 @@ static void build_pair_group(lv_obj_t* parent) {
     lv_obj_clear_flag(pair_group, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(pair_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    lv_obj_t* l1 = lv_label_create(pair_group);
-    lv_label_set_text(l1, "To pair");
-    lv_obj_set_style_text_font(l1, L.bt_status_font, 0);
-    lv_obj_set_style_text_color(l1, COL_TEXT, 0);
-    lv_obj_align(l1, LV_ALIGN_TOP_MID, 0, L.pair_y1);
-
-    lv_obj_t* l2 = lv_label_create(pair_group);
-    lv_label_set_text(l2, "hold the power button");
-    lv_obj_set_style_text_font(l2, L.bt_device_font, 0);
-    lv_obj_set_style_text_color(l2, COL_DIM, 0);
-    lv_obj_align(l2, LV_ALIGN_TOP_MID, 0, L.pair_y2);
-
-    lv_obj_t* l3 = lv_label_create(pair_group);
-    lv_label_set_text(l3, "for 3 seconds, then release");
-    lv_obj_set_style_text_font(l3, L.bt_device_font, 0);
-    lv_obj_set_style_text_color(l3, COL_DIM, 0);
-    lv_obj_align(l3, LV_ALIGN_TOP_MID, 0, L.pair_y3);
+    pair_lines[0] = make_pair_line(L.bt_status_font, COL_TEXT, L.pair_y1);
+    pair_lines[1] = make_pair_line(L.bt_device_font, COL_DIM, L.pair_y2);
+    pair_lines[2] = make_pair_line(L.bt_device_font, COL_DIM, L.pair_y3);
+    pair_lines[3] = make_pair_line(L.bt_credit_2_font, COL_DIM, L.pair_y4);
+    apply_pair_text();
 
     lv_obj_add_flag(pair_group, LV_OBJ_FLAG_HIDDEN);  // ui_update_ble_status decides
+}
+
+bool ui_pair_hint_visible(void) { return view_state == 0; }
+
+void ui_set_pair_hint(PairHint hint) {
+    if (hint == pair_hint) return;
+    pair_hint = hint;
+    pair_hint_since = lv_tick_get();
+    apply_pair_text();
 }
 
 static void init_usage_screen(lv_obj_t* scr) {
@@ -480,7 +517,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_clear_flag(usage_group, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(usage_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    panel_session = make_usage_panel(usage_group, L.content_y, "Current",
+    panel_session = make_usage_panel(usage_group, L.content_y, "Session",
                      &lbl_session_pct, &lbl_session_label,
                      &bar_session, &lbl_session_reset);
 
@@ -492,7 +529,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
 
     lbl_spending_desc = lv_label_create(panel_session);
-    lv_label_set_text(lbl_spending_desc, "of your monthly budget");
+    lv_label_set_text(lbl_spending_desc, "of spending limit");
     lv_obj_set_style_text_font(lbl_spending_desc, L.reset_font, 0);
     lv_obj_set_style_text_color(lbl_spending_desc, COL_DIM, 0);
     lv_obj_set_pos(lbl_spending_desc, 0, L.usage_reset_y);
@@ -617,7 +654,7 @@ void ui_update(const UsageData* data) {
         if (panel_weekly) lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_set_style_text_font(lbl_session_pct, L.pct_font, 0);
-        lv_label_set_text(lbl_session_label, "Current");
+        lv_label_set_text(lbl_session_label, "Session");
         lv_obj_clear_flag(lbl_session_reset, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_spending_desc,   LV_OBJ_FLAG_HIDDEN);
@@ -704,6 +741,8 @@ bool ui_meters_live(void) { return view_state == 2; }
 
 void ui_tick_anim(void) {
     update_view_state();
+    if (pair_hint == PAIR_HINT_CLEARED && lv_tick_get() - pair_hint_since >= PAIR_CLEARED_SHOW_MS)
+        ui_set_pair_hint(PAIR_HINT_NORMAL);
     const bool still = minimal_mode();   // minimal: nothing moves but the numbers
 
     uint32_t now = lv_tick_get();
@@ -733,8 +772,8 @@ void ui_tick_anim(void) {
 
     if (still) {
         // One glyph, one word per state; redrawn only when it changes.
-        const char* text = !s_ble_connected ? "Waiting"
-                         : view_state == 1 ? (data_received ? "Stale" : "No data") : "Connected";
+        const char* text = !s_ble_connected ? "No link"
+                         : view_state == 1 ? (data_received ? "Data old" : "No data") : "Connected";
         if (text != still_shown) {
             still_shown = text;
             static char sbuf[40];
@@ -758,9 +797,9 @@ void ui_tick_anim(void) {
     // Status text by priority. Whimsical messages only when connected & settled.
     const char* text;
     if (!s_ble_connected) {
-        text = "Waiting";              // advertising / waiting for a host connection
+        text = "No link";              // advertising / waiting for a host connection
     } else if (view_state == 1) {      // stale — alternate so it reads as alive AND not live
-        text = (anim_msg_idx & 1) ? (data_received ? "Stale" : "No data") : "Listening";
+        text = (anim_msg_idx & 1) ? (data_received ? "Data old" : "No data") : "Listening";
     } else if (now - connected_at_ms < 5000) {
         text = "Connected";
     } else {

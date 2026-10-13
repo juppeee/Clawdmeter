@@ -145,7 +145,8 @@ void sim_pump(void) {
     }
 }
 
-// SIM_TAPS="ms@x,y;ms@x,y" — a 120 ms finger press at each time.
+// SIM_TAPS="ms@x,y;ms@x,y+hold" — a finger press at each time, 120 ms
+// long unless `+hold` gives its length in ms (a touch hold).
 bool sim_scripted_touch(uint16_t* x, uint16_t* y) {
     static const char* taps = NULL;
     static bool loaded = false;
@@ -160,8 +161,10 @@ bool sim_scripted_touch(uint16_t* x, uint16_t* y) {
         int tx = atoi(atp + 1);
         const char* cm = strchr(atp, ',');
         int ty = cm ? atoi(cm + 1) : 0;
-        if (now >= at && now < at + 120) { *x = (uint16_t)tx; *y = (uint16_t)ty; return true; }
         const char* semi = strchr(p, ';');
+        const char* plus = strchr(atp, '+');
+        unsigned long len = (plus && (!semi || plus < semi)) ? strtoul(plus + 1, NULL, 10) : 120;
+        if (now >= at && now < at + len) { *x = (uint16_t)tx; *y = (uint16_t)ty; return true; }
         p = semi ? semi + 1 : NULL;
     }
     return false;

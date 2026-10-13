@@ -19,6 +19,7 @@
 #include "idle_cfg.h"
 #include "brightness.h"
 #include "perf.h"
+#include "pair_hold.h"
 
 #include "hal/board_caps.h"
 #include "hal/display_hal.h"
@@ -66,6 +67,10 @@ static void rounder_cb(lv_event_t* e) {
 //   false → touch never counts as activity and is fully swallowed while the
 //           panel is dark, so pets/sleeves can't wake it overnight and the
 //           director can't act on taps nobody can see.
+// A finger is on the panel (after the wake filter below); read by the
+// touch-hold re-pair on boards without a PWR button.
+static bool touch_down = false;
+
 static void my_touch_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     uint16_t x, y;
     bool pressed;
@@ -96,6 +101,7 @@ static void my_touch_cb(lv_indev_t* indev, lv_indev_data_t* data) {
         pressed = false;
     }
 
+    touch_down = pressed;
     if (pressed) {
         data->point.x = x;
         data->point.y = y;
@@ -113,6 +119,16 @@ static bool parse_json(const char* json, UsageData* out) {
         return false;
     }
     return true;
+}
+
+// Forget every bonded host and advertise again, so another computer (or
+// this one, after removing the device) can pair. The PWR hold gesture, the
+// touch hold on boards without PWR, and the `unpair` serial command all end
+// here.
+static void clear_pairing(const char* why) {
+    Serial.printf("Pair: clearing bonds (%s), advertising\n", why);
+    ble_clear_bonds();
+    ui_set_pair_hint(PAIR_HINT_CLEARED);
 }
 
 // ---- Serial command buffer ----
@@ -186,6 +202,10 @@ static void check_serial_cmd() {
             else if (strcmp(cmd_buf, "buzz") == 0)  sound_hal_play_reset();
             else if (strcmp(cmd_buf, "info") == 0)  send_info();
             else if (strcmp(cmd_buf, "perf") == 0)  perf_print();
+            else if (strcmp(cmd_buf, "unpair") == 0) {
+                clear_pairing("serial");
+                Serial.println("{\"unpair\":true}");
+            }
             else if (strncmp(cmd_buf, "minimal", 7) == 0) minimal_cmd(cmd_buf + 7);
             else if (strncmp(cmd_buf, "clawd ", 6) == 0) {
                 const bool ok = director_debug(cmd_buf + 6);
@@ -286,8 +306,7 @@ static void pair_tick(void) {
 
     if (power_hal_pwr_released()) {
         if (pair_state == PAIR_ARMED) {
-            Serial.println("Pair: released in window — clearing bonds, advertising");
-            ble_clear_bonds();
+            clear_pairing("PWR hold");
         } else {
             Serial.println("Pair: released too early — cancelled");
         }
@@ -302,6 +321,32 @@ static void pair_tick(void) {
     } else if (pair_state == PAIR_ARMED && held >= PAIR_DISARM_AFTER_LONG_MS) {
         pair_state = PAIR_IDLE;  // power-off territory; don't pair
         Serial.println("Pair: disarmed (holding toward power-off)");
+    }
+}
+
+// Boards without a PWR button: a 5 s touch hold on the pairing hint clears
+// the bonds (pair_hold.h). Only counts while the hint is what you see.
+static PairHold touch_hold = { PAIR_HOLD_UP, false, 0 };
+
+static void touch_pair_tick(void) {
+    if (board_caps().has_pwr_button) return;
+    // Taps on the hint don't make Clawd peek (the face would cover it).
+    director_set_pairing_touch(ui_pair_hint_visible());
+    const bool enabled = ui_pair_hint_visible() && director_room() == ROOM_METERS && !idle_is_asleep();
+    switch (pair_hold_step(&touch_hold, enabled, touch_down, millis())) {
+    case PAIR_HOLD_HOLDING:
+        Serial.println("Pair: touch hold, keep holding to clear the pairing");
+        ui_set_pair_hint(PAIR_HINT_HOLDING);
+        break;
+    case PAIR_HOLD_CANCEL:
+        Serial.println("Pair: touch hold released early, cancelled");
+        ui_set_pair_hint(PAIR_HINT_NORMAL);
+        break;
+    case PAIR_HOLD_FIRE:
+        clear_pairing("touch hold");
+        break;
+    case PAIR_HOLD_NONE:
+        break;
     }
 }
 
@@ -373,6 +418,7 @@ void loop() {
         }
 
         pair_tick();
+        touch_pair_tick();
     }
 
     ble_state_t bs = ble_get_state();

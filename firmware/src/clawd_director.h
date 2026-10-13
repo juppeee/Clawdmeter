@@ -36,6 +36,11 @@ void director_alert_clear(void);            // the session moved on
 // tapping the aquarium: the face comes up, curious, for a while (a tap on it
 // sends it back); anywhere else it means "show me the meters".
 void director_tap(int x);
+// While on, the panel is the pairing control (the touch-hold re-pair on
+// boards without a PWR button): a tap on the meters still counts as you
+// being here and dismisses an alert, but Clawd doesn't peek, so the hint
+// stays in view for the hold.
+void director_set_pairing_touch(bool on);
 void director_button(void);        // a physical button press: you're here
 void director_stage_next(void);    // PWR while the stage is up: next scene, same room
 

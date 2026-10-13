@@ -42,6 +42,7 @@ static bool     notice_wake = false;  // B_FACE_HOME: blink first (he noticed yo
 
 // Attention
 static bool     attention_on = false;
+static bool     pairing_touch = false;        // director_set_pairing_touch
 static uint32_t attention_since = 0;
 static AttnFrom attn_from = ATTN_FROM_HOME;   // what it interrupted
 static uint32_t attn_mark = 0;                // last_engagement right after the alert
@@ -235,7 +236,11 @@ void director_tap(int x) {
     if (attention_on) { end_attention(ATTN_END_TAP); return; }   // a dismissing tap does nothing else
     resume_screensaver = false;                   // "show me the meters" wins
     if (minimal) return;
-    if (beat == B_HOME || beat == B_CORNER) { tap_home(x); return; }
+    if (beat == B_HOME || beat == B_CORNER) {
+        if (pairing_touch) return;                // the hint is the control now
+        tap_home(x);
+        return;
+    }
     if (beat == B_PEEK) {
         // The face is up (or coming up) looking at you: he blinks and drops
         // right away. Before it shows (hop, ducking out) the tap is
@@ -248,6 +253,8 @@ void director_tap(int x) {
     }
     to_meters(false);
 }
+
+void director_set_pairing_touch(bool on) { pairing_touch = on; }
 
 void director_button(void) {
     engage();
@@ -662,7 +669,7 @@ bool director_debug(const char* name) {
         if (!minimal) to_meters(false);
         return true;
     }
-    if (strcmp(name, "attention") == 0)   { director_alert("Test: Clawd needs you"); return true; }
+    if (strcmp(name, "attention") == 0)   { director_alert("Clawdmeter test alert"); return true; }
     if (minimal) return true;             // nothing else exists in minimal mode
     if (strcmp(name, "joy") == 0) {
         joy_pending = true;

@@ -378,7 +378,7 @@ void splash_init(lv_obj_t *parent) {
 #endif
 
     label_status = lv_label_create(splash_container);
-    lv_label_set_text(label_status, "no animations loaded\n\nrun tools/convert_official_clawd.js");
+    lv_label_set_text(label_status, "Animations missing\nRebuild firmware");
     lv_obj_set_style_text_font(label_status, &font_styrene_28, 0);
     lv_obj_set_style_text_color(label_status, lv_color_hex(0xb0aea5), 0);
     lv_obj_set_style_text_align(label_status, LV_TEXT_ALIGN_CENTER, 0);

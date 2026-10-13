@@ -22,6 +22,11 @@ struct BoardCaps {
                              // corner Clawd, nothing else animates (e-ink, slow
                              // panels). Shared code must read minimal_mode()
                              // (minimal_mode.h), which applies the user override.
+    bool    has_pwr_button;  // a PWR-role button reaches the firmware (AXP PKEY,
+                             // expander pin or GPIO): brightness, next scene,
+                             // hold-to-pair. Without one (LCD-4: KEY/PWR is a
+                             // hardware reset) a 5 s touch hold on the pairing
+                             // hint clears the bonds instead (pair_hold.h).
 };
 
 const BoardCaps& board_caps(void);

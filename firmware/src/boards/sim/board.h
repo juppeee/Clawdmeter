@@ -29,7 +29,8 @@
 // Headless / CI: SDL_VIDEODRIVER=dummy SIM_AUTOSHOT_MS=<ms> saves a
 // screenshot (SIM_AUTOSHOT_PATH, default sim-autoshot.bmp) after <ms> and
 // exits. SIM_SHOTS="ms:path,ms:path" saves several and exits after the last;
-// SIM_TAPS="ms@x,y;ms@x,y" presses the panel at those times; SIM_FAST=1
+// SIM_TAPS="ms@x,y;ms@x,y+hold" presses the panel at those times (120 ms, or
+// `hold` ms); SIM_NO_PWR=1 plays a board without a PWR button; SIM_FAST=1
 // compresses the director's minutes into seconds (sim/director.jsonl);
 // SIM_MINIMAL=1 boots with minimal mode on. SIM_CMDS="ms:cmd;ms:cmd" types
 // serial commands at those times (`pwr`, `prompt`, `stop`, `alert` are the

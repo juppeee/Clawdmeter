@@ -16,6 +16,16 @@ void ui_update_battery(int percent, bool charging, bool usb_power);  // percent 
 // the pairing hint or the stale-data idle view.
 bool ui_meters_live(void);
 
+// The pairing hint (shown while disconnected) is on screen.
+bool ui_pair_hint_visible(void);
+
+enum PairHint {
+    PAIR_HINT_NORMAL,    // how to pair on this board
+    PAIR_HINT_HOLDING,   // a touch hold toward clearing the pairing is running
+    PAIR_HINT_CLEARED,   // bonds were just cleared: ready to pair (reverts by itself)
+};
+void ui_set_pair_hint(PairHint hint);
+
 // Attention message on the status line (scrolls when long); NULL clears it
 // and the whimsical status line resumes.
 void ui_set_alert_text(const char* message);

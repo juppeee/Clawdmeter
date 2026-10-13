@@ -35,6 +35,7 @@ is compiled differently for them; set them directly in `caps.cpp`.
 | Field          | Conventional value when absent | Purpose |
 |----------------|---------|---------------|
 | `minimal_ui`   | `false` | Minimal display: the meters plus a still corner Clawd, no stage, face, streak or lurk trip. Set `true` on e-ink or panels too slow to animate. It is only the board's *default*: the user can override it either way (persisted in NVS, `minimal on\|off\|auto` on the serial console, the desktop app's Device page over USB). Shared code must call `minimal_mode()` from `minimal_mode.h`, never read `caps.minimal_ui` directly, so the override always wins. The director (`clawd_director.cpp`) applies it: one room, corner Clawd on the official still frame, a held pointing frame plus a non-scrolling message for attention, a tap dismisses the alert, and the status line stops spinning. Toggling it at runtime resets Clawd to his seat. |
+| `has_pwr_button` | `false` | A PWR-role button reaches the firmware (AXP PKEY, IO-expander pin or GPIO): brightness, next scene on the stage, hold ~3 s and release to pair. `false` when there is none (LCD-4, whose KEY/PWR is a hardware reset): the pairing hint then says to pair from the computer, and a 5 s touch hold on it clears the bonds (`pair_hold.h`). The `unpair` serial command clears them on every board. |
 
 ## Build-flag macros
 

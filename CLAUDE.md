@@ -71,6 +71,7 @@ ESP32-C6 sibling of the S3 1.8: same 368×448 SH8601 panel + FocalTech touch, di
 - Touch: **GT911** via I2C (SDA=15, SCL=7), polled (wiki INT=GPIO 16 unused). Probe 0x5D then 0x14.
 - IO expander: **addr 0x24** (fallback 0x20) on the same I2C bus — must init before `gfx->begin()` (output 0xFF, config 0x3A). Backlight is expander pin 2.
 - No PMU / IMU. Buttons: GPIO 0 only (BOOT → Space/PTT). KEY/PWR is EN/RST (hardware reset). GPIO 18 is display R3.
+- No PWR button (`has_pwr_button = false`): the pairing hint says to pair from the computer, and a 5 s touch hold on it clears the bonds (`pair_hold.{h,cpp}`, native-tested; `SIM_NO_PWR=1` in the sim). The `unpair` serial command (reply `{"unpair":true}`) clears them on any board.
 - RGB tearing fix: pass `bounce_buffer_size_px = LCD_WIDTH * 10` to `Arduino_ESP32RGBPanel`. Do not call `rgbpanel->getFrameBuffer()` after `gfx->begin()`.
 
 ## Architecture
@@ -174,7 +175,8 @@ z minimal mode · s screenshot BMP · esc quit.
 
 Env vars: `SIM_FAST=1` (minutes → seconds via `clawd_tuning_fast()`),
 `SIM_TRACE=1` (per-step director trace), `SIM_SHOTS="ms:path,…"` (screenshots,
-exits after the last), `SIM_TAPS="ms@x,y;…"`, `SIM_CMDS="ms:cmd;…"` (scripted
+exits after the last), `SIM_TAPS="ms@x,y;…"` (`ms@x,y+hold_ms` for a touch hold),
+`SIM_NO_PWR=1` (a board without a PWR button, like LCD-4), `SIM_CMDS="ms:cmd;…"` (scripted
 serial commands; `pwr`, `prompt`, `stop`, `alert` stand for the button/keys),
 `SIM_MINIMAL=1`, `SIM_LCD_W`/`SIM_LCD_H` (other panel sizes; use a separate
 `PLATFORMIO_BUILD_DIR` per size, never the scratchpad root),
@@ -200,7 +202,7 @@ hardware boards, not shared code).
 
 The firmware has serial commands: `screenshot` (dumps the LVGL framebuffer;
 `./screenshot.sh out.png [port]` turns it into a PNG sized to the panel),
-`info` (env/version/rev/link JSON), `minimal on|off|auto`, `buzz`, and
+`info` (env/version/rev/link JSON), `minimal on|off|auto`, `buzz`, `unpair` (clear bonds, re-advertise), and
 `clawd <show|screensaver|attention|joy|lurk|home>` to force a beat. **Use
 `clawd <beat>` + `screenshot` on every UI iteration** and Read the PNG; there
 is no need to edit the boot screen in `main.cpp` any more. C6 boards have no
@@ -286,7 +288,7 @@ behind `FlashHardware`. **Tests must never run a real `systemctl`,
 9. **Per-board pre-init is `board_init()`.** Each board's `board_init.cpp` brings up `Wire` and any reset-gating IO expander BEFORE `display_hal_init()`. Skipping the IO expander release on AMOLED-1.8 leaves SH8601 + FT3168 in reset and they silently fail to probe. Same for LCD-4: expander @ 0x24 must run before `gfx->begin()` or the ST7701 stays dark.
 10. **No `#ifdef BOARD_*` in shared code.** If you're about to add one, you probably want a `BoardCaps` field or a per-board file instead. See `docs/porting/capability-flags.md`.
 11. **LCD-4 RGB bounce buffers.** `Arduino_RGB_Display` DMA-scans PSRAM. Pass `bounce_buffer_size_px = LCD_WIDTH * 10` so ESP-IDF allocates SRAM bounce buffers. Do not call `rgbpanel->getFrameBuffer()` after `gfx->begin()` — it constructs a second RGB panel and crashes.
-12. **LCD-4 has only one user button (GPIO 0 / BOOT).** GPIO 18 is display R3. KEY/PWR is EN/RST (hardware reset). No hold-to-pair, no brightness cycling, and the stage is only reachable through situations (a tap means "meters").
+12. **LCD-4 has only one user button (GPIO 0 / BOOT).** GPIO 18 is display R3. KEY/PWR is EN/RST (hardware reset). No brightness cycling, re-pairing is a 5 s touch hold on the pairing hint, and the stage is only reachable through situations (a tap means "meters").
 13. **AMOLED-1.8: XCA9554 EXIO2 must stay HIGH.** Pulling it low takes the FT3168 off the I2C bus (IDF reports `ESP_ERR_INVALID_STATE`, which looks like an I2S/driver wedge). Amp enable is GPIO 46 only.
 14. **One Clawd on screen, ever.** Corner sprite, full-size sprite and stage performer are never visible together; beats wait for `mascot_away()` / `splash_performer_visible()`. The stage only opens behind the face. Don't add a second creature (the old stale-data cloud is gone).
 15. **"No data" is not a 0 % sample.** `signals` only feeds `ok && !rp` payloads to the rate ring and reset detector; keep it that way or the reset chime fires falsely.
