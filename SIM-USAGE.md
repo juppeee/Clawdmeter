@@ -1,124 +1,101 @@
-# Desktop simulator (`-e sim`) — usage
+# Firmware simulator
 
-The native desktop simulator runs the full firmware loop in an SDL2 window
-standing in for the 480×480 AMOLED — `main.cpp`, `ui.cpp`, `splash.cpp`, idle
-fade, pair gesture, JSON parsing, and usage-rate/chime logic all run
-unmodified. Only `ble.cpp`/`chime.cpp` are swapped for stubs. Sources live in
-`firmware/src/boards/sim/` (HAL against SDL2 + Arduino shims in `shim/`), with
-scenario data in `firmware/sim/`.
+The simulator runs the firmware loop in an SDL2 window, with simulated
+Bluetooth input and audio. It exercises the meters, Clawd's director,
+touch input, idle behavior, payload parsing, and usage-rate logic without
+a board. The default window is 480×480.
 
-## Build & run
+## Build and run
+
+Install SDL2 development files (`sudo apt install libsdl2-dev` on Debian
+or Ubuntu; `brew install sdl2` on macOS), then run:
 
 ```bash
-sudo apt install libsdl2-dev        # one-time (macOS: brew install sdl2)
 pio run -d firmware -e sim
-cd firmware && .pio/build/sim/program
+cd firmware
+.pio/build/sim/program
 ```
 
-Launch from the `firmware/` directory — the default scenario path
-(`sim/scenario.jsonl`) is resolved relative to it.
+Run from `firmware/`: scenario paths are relative to that directory.
+The simulator HAL and Arduino shims live in `firmware/src/boards/sim/`.
 
 ## Controls
 
-| Key | Action |
-|---|---|
-| mouse / left-drag | touch: on the meters (live, stale or pairing), the face comes up curious and stays until you tap it or its curiosity runs out (5 min; 12 s with `SIM_FAST`); from any other room, "show me the meters" |
-| `space` | play/pause scenario playback |
-| `←` / `→` | step one scenario state (pauses playback) |
-| `1`–`9` | jump to scenario state N (pauses playback) |
-| `d` | toggle BLE connected/disconnected |
-| `b` (hold) | PRIMARY button (BOOT — HID Space PTT on hardware) |
-| `n` (hold) | SECONDARY button (HID Shift+Tab on hardware) |
-| `p` | PWR button (short press; hold ~3s + release = pair gesture) |
-| `c` | toggle charging |
-| `u` | toggle no battery / USB power only (shows the plug-zap icon) |
-| `-` / `=` | battery down / up 5% |
-| `e` / `t` | inject a hook event: prompt (`e:"p"`) / stop (`e:"s"`) |
-| `a` | inject the activity level, cycling 0 → 1 → 2 → 3 |
-| `m` | inject an attention alert / clear it |
-| `z` | toggle minimal mode |
-| `s` | save screenshot BMP to the current directory |
-| `esc` / window close | quit |
-
-Full, authoritative map: `firmware/src/boards/sim/board.h`.
+| Input | Action |
+| --- | --- |
+| Mouse click or left-drag | Touch the screen. On the meters, bring up Clawd's face; tap again to return. On a show or screensaver, return to the meters. A waking tap only wakes the panel. |
+| Space | Pause or resume scenario playback. |
+| Left / Right | Step to a scenario state and pause playback. |
+| 1–9 | Jump to the corresponding state, if present, and pause. |
+| D | Toggle the simulated Bluetooth connection. |
+| B / N, held | Primary / secondary hardware button. |
+| P | PWR button. Hold about 3 seconds and release for the pairing gesture. |
+| C | Toggle charging. |
+| U | Toggle USB-only power with no battery. |
+| − / = | Lower / raise battery level by 5 percentage points. |
+| E / T | Inject a prompt / stop event. |
+| A | Cycle activity from 0 through 3. |
+| M | Toggle an attention alert. |
+| Z | Toggle minimal display. |
+| S | Save a BMP screenshot in the current directory. |
+| Escape or window close | Quit. |
 
 ## Scenarios
 
-`firmware/sim/scenario.jsonl` plays in a loop — one JSON object per line, the
-daemon payload plus two optional keys:
+`firmware/sim/scenario.jsonl` is the default. Each line is a device payload,
+with optional `name` (window title) and `hold_ms` (default 3000). Lines
+beginning with `#` are comments. Playback loops. A missing file falls back
+to built-in states.
 
-- `"name"` — shown in the window title
-- `"hold_ms"` — time on this state (default 3000)
-
-Lines starting with `#` are comments. Lines containing an `"ss"` array are
-**session payloads** (issue #135 wire format) and go out on the session
-characteristic path; everything else is a quota payload.
-
-Session row format:
-
-```
-[sid, label, state, ctx%, elapsed_s, model, tool, ntools, nagents, tdone, ttotal, tok]
+```json
+{"name":"steady use","hold_ms":10000,"s":42,"sr":180,"w":33,"wr":7900,"ok":true,"a":2,"e":"p","es":2,"n":1}
 ```
 
-States: 0 starting · 1 idle · 2 thinking · 3 responding · 4 running-tool ·
-5 compacting · 6 needs-permission · 7 asking-you · 8 needs-input · 9 error.
-`tok` is context tokens in 1k units (190 = 190k); `-1`/absent = unknown.
+Use `SIM_SCENARIO=sim/my-scenario.jsonl` to choose a file. The payload goes
+through the same parser and signal handling as hardware. `a` is activity
+0–3; `e` is `p` (prompt), `s` (stop), or `b` (return after a gap); `es` is
+the event sequence; `n` is the active-session count. The first `es` sets a
+baseline. Each later change fires an event, including a change when the
+scenario loops. `rp:1` marks a replay and excludes it from usage-rate math.
+See the [payload reference](README.md#ble-protocol) for usage fields.
 
-Fast-clock fields from the hook-aware daemon work in scenarios too, since
-they go through the same `payload_parse()` → `signals_ingest()` path as on
-hardware: `a` (activity 0-3, lifts the mood group), `e` + `es` (latest hook
-event `p`/`s`/`b` and its sequence number; the first `es` seen is only a
-baseline, each later change fires once), `n` (active sessions) and `rp: 1`
-(heartbeat replay, skipped by the rate math). The console logs
-`hook event 'p' (#2)` and `usage rate: group 0 -> 3` as they land. Note the
-scenario loop wraps `es` back to its first value, which counts as a change.
+## Director walkthrough
 
-The injection keys overlay those fields on the current state's payload and
-send it through the same path, so you can poke Clawd by hand: `a` three
-times then wait for a show, `e` to make him notice, `m` for the big Clawd.
+From `firmware/`:
 
-Override the scenario file with `SIM_SCENARIO=<path>`. If the file is missing,
-a small built-in state list is used.
+```bash
+SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl .pio/build/sim/program
+```
 
-## Headless screenshots (CI-friendly)
+`SIM_FAST=1` compresses the director's minute-scale timers into seconds.
+The walkthrough covers a prompt reaction, show, long-turn wave,
+screensaver, wake, attention alert, and reset celebration. Typical event
+times are about 14, 53, 90, 97, and 115 seconds for show, screensaver,
+wake, attention, and reset. Scene selection can shift later steps; use
+`SIM_TRACE=1` for the actual timestamps.
+
+The interruption scenario covers a shortened lurk trip, an alert during
+the screensaver, and button input:
+
+```bash
+SIM_FAST=1 SIM_SCENARIO=sim/director-resume.jsonl \
+  SIM_CMDS="2500:clawd lurk;5200:prompt;34000:alert;67500:pwr;80000:prompt" \
+  .pio/build/sim/program
+```
+
+Character rules and expected transitions are in
+[clawd-director.md](docs/clawd-director.md).
+
+## Scripted input and screenshots
+
+For one headless capture:
 
 ```bash
 SDL_VIDEODRIVER=dummy SIM_AUTOSHOT_MS=6000 .pio/build/sim/program
 ```
 
-Saves `sim-autoshot.bmp` (override with `SIM_AUTOSHOT_PATH`) after the given
-delay and exits. Combine with `SIM_SCENARIO` pointing at a single-state file
-to capture any specific screen.
-
-## Clawd walkthrough (rooms and beats)
-
-`firmware/sim/director.jsonl` walks through every beat of the director
-(`docs/clawd-director.md`): notice → show → long-turn wave → screensaver
-(face, calm scene) → prompt wakes it → attention → clear → fresh window. Real
-timings are minutes (a show needs 5 minutes of activity level 3, the
-screensaver 10 quiet minutes), so run it with `SIM_FAST=1`, which compresses
-them to seconds:
-
-```bash
-cd firmware
-SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl .pio/build/sim/program
-```
-
-With `SIM_FAST` the show starts at ~14 s, the screensaver at ~53 s, the wake
-at ~90 s, attention at ~97 s and the reset jump at ~115 s. With `SIM_TRACE=1`
-the sim prints a timestamped trace of every beat and step, and
-`SIM_CMDS="ms:cmd;…"` types serial commands at set times (`pwr`, `prompt`,
-`stop`, `alert`, `link` (the `d` key: BLE link off / on), `clawd <beat>`,
-including `clawd peek <x>` for the tap-on-the-meters peek at x):
-
-```
-[14014] director: home -> show
-[18655] director:   show step 3
-...
-[53011] director: home -> screensaver
-```
-
-Headless capture of several moments, plus scripted taps:
+The simulator saves `sim-autoshot.bmp` and exits. Set `SIM_AUTOSHOT_PATH`
+to choose another destination. For multiple captures and a touch event:
 
 ```bash
 SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
@@ -126,33 +103,33 @@ SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
   SIM_TAPS="25000@300,250" .pio/build/sim/program
 ```
 
-- `SIM_SHOTS="ms:path,..."` saves a screenshot at each time (ascending) and
-  exits after the last.
-- `SIM_TAPS="ms@x,y;..."` holds a 120 ms press at each time. A tap at 25 s
-  lands on the show's scene and runs the streak back to the meters. On the
-  meters each tap logs how the peek starts (`tap at x 420 -> peek (hop)`
-  from his seat, `-> peek (heads out)` when he's already moving or out); on
-  the peek's face it logs `-> peek over`, and a face whose curiosity ran out
-  logs `peek over (curiosity)`.
-- `SIM_MINIMAL=1` boots with the minimal-mode override on.
-- `SIM_CMDS="…;9000:perf"` prints the redraw cost of the last face rise,
-  face drop and streak (frames, fps, longest gap, pixels per frame), the same
-  `perf` serial command as on hardware. The sim's timings are desktop
-  timings; pixels per frame carries over to the panel.
-- `SIM_EDGE_WATCH=1` logs, with the director beat, every change to how many
-  non-black pixels the bottom 16 rows and right 16 columns show. A sliver or
-  a stray scrollbar at an edge shows up as a row count that isn't 0 (meters)
-  or the full width (face up).
-- `SIM_ROUND_EVEN=1` applies the CO5300's even-aligned flush rounding (2.16,
-  1.8, 2.06) to the sim's flushes, to reproduce what those panels redraw.
+| Variable | Format and behavior |
+| --- | --- |
+| `SIM_SHOTS` | `ms:path,ms:path`; ascending times, exit after the last shot. |
+| `SIM_TAPS` | `ms@x,y;ms@x,y`; a 120 ms press at each time. |
+| `SIM_CMDS` | `ms:command;ms:command`; serial commands, including `clawd peek <x>`. `pwr`, `prompt`, `stop`, `alert`, and `link` inject their corresponding input. |
+| `SIM_MINIMAL=1` | Start with minimal display enabled. |
+| `SIM_TRACE=1` | Log director transitions and steps. |
+| `SIM_EDGE_WATCH=1` | Log non-black pixel counts in the bottom 16 rows and right 16 columns to expose stray edge rendering. |
+| `SIM_ROUND_EVEN=1` | Apply CO5300-style even-aligned flush rounding. |
 
-Scenes are picked at random from the mood group, so step times after the
-show's scene shift a little between runs; read them from the trace. A
-captured set lives in `screenshots/director/`.
+Use `SIM_CMDS="9000:perf"` to print redraw costs for the last face and
+streak transitions. Desktop timings do not predict panel frame rates;
+pixels per frame are useful for comparing rendering work.
 
-## Caveat
+## Other display sizes
 
-The sim mirrors the S3 2.16 geometry but renders with desktop LVGL and fake
-data. It's ideal for iterating UI layouts, but panel-level behavior — column
-offsets, rotation, flush rounding — lives in the hardware board folders, so
-always do a final check on real hardware before merging panel-related changes.
+`SIM_LCD_W` and `SIM_LCD_H` are compile-time defines, not runtime variables.
+Use a separate build directory for each size:
+
+```bash
+PLATFORMIO_BUILD_DIR=/tmp/clawdmeter-sim-240 \
+PLATFORMIO_BUILD_FLAGS="-DSIM_LCD_W=240 -DSIM_LCD_H=240" \
+pio run -d firmware -e sim
+cd firmware
+/tmp/clawdmeter-sim-240/sim/program
+```
+
+The simulator checks shared layout and behavior. It cannot validate a
+physical panel's column offsets, bus timing, touch mapping, or rotation.
+Check those on the target board before merging a port or display-driver change.

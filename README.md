@@ -1,160 +1,220 @@
 # Clawdmeter
 
-> Also check out [Beam](https://github.com/notaharness/beam)! A CLI that lets you pair your machines using a passkey and [@Tailscale's tailcat](https://tailscale.com/blog/tailcat).
+<img src="assets/readme/waving.gif" width="120" align="right" alt="Clawd waving">
 
-<img src="assets/readme/waving.gif" width="120" align="right" alt="">
+Clawdmeter puts your Claude Code usage on a small screen on your desk.
+An ESP32 board shows your session and weekly limits. A desktop app reads
+usage through Claude Code and sends it over Bluetooth.
 
-A small ESP32 dashboard I made for my desk to keep an eye on Claude Code usage.
+Clawd lives on the device. With Claude Code hooks installed, he reacts to
+prompts, performs after a busy stretch, and gets your attention when a
+session needs an answer. When things go quiet, he settles into a screensaver.
 
-It runs on a [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=149786) and a few other boards, and pairs over Bluetooth with a small desktop app. The screen shows your session and weekly usage, and Clawd lives in the corner: he notices when you send a prompt, puts on a show when you've been busy for a while, dozes off as a face when nothing is happening, and walks on to wave at you when a Claude Code session is waiting for an answer. The side buttons send Space and Shift+Tab over BLE HID for Claude Code's voice mode and mode toggle.
+<img width="1179" height="994" alt="Clawdmeter showing usage" src="https://github.com/user-attachments/assets/83e54aea-0932-428f-94aa-b3ede3a360aa" />
 
-<img width="1179" height="994" alt="Usage meter" src="https://github.com/user-attachments/assets/83e54aea-0932-428f-94aa-b3ede3a360aa" />
+## Get started
 
-## What it does
-
-|                     Meters                      |                      Show                       |                       Screensaver                       |                       Attention                       |
-| :---------------------------------------------: | :---------------------------------------------: | :-----------------------------------------------------: | :---------------------------------------------------: |
-| ![Meters](screenshots/director/01-home-meters.png) | ![Show](screenshots/director/09-show-scene.png) | ![Screensaver](screenshots/director/15-screensaver-face.png) | ![Attention](screenshots/director/20-attention-waves.png) |
-| Session and weekly usage, Clawd in his seat | After five busy minutes | After ten quiet ones | A session needs you |
-
-- **The device boots to the meters** and always comes back to them. A tap anywhere means "show me the meters".
-- **Clawd reacts to what you do.** With the hooks installed (one click in the app), he points when you send a prompt, waves after a long turn, and plays one of Anthropic's official Clawd animations when you've been working hard. His mood follows how fast your session usage moved over the last 15 minutes.
-- **Attention alerts.** When a session is waiting on a permission prompt or a question, a full-size Clawd walks on, waves and points, and the message scrolls on the status line. He leaves when you answer, when you tap the screen, or after 2 minutes. Turn on the beep in the app if you want a sound too.
-- **Reset chime.** Optionally, a chime when your 5-hour session limit resets.
-- **Stale data looks stale.** If the numbers stop arriving, the meters dim and the status line says so.
-
-How the rooms and beats work is written up in [`docs/clawd-director.md`](docs/clawd-director.md).
-
-## Hardware
-
-### Supported boards
-
-The desktop app's flasher recognises each of these and the setup wizard links to them.
-
-| | Board | |
-| :-: | --- | --- |
-| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_216.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=149786) | 480×480 AMOLED, 3 buttons, speaker. The original. |
-| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_216_c6.svg" height="90" alt=""> | [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm?&aff_id=149786) | 480×480 AMOLED on the ESP32-C6 (no PSRAM, so Clawd stands still in the corner). |
-| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_18.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=149786) | 368×448 AMOLED, 2 buttons, speaker. |
-| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_18_c6.svg" height="90" alt=""> | [Waveshare ESP32-C6-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm?&aff_id=149786) | 368×448 AMOLED on the ESP32-C6. |
-| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_206.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-AMOLED-2.06](https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm?&aff_id=149786) | 410×502 AMOLED in a watch case. |
-| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_lcd_154.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33869&aff_id=149786) | 240×240 IPS, 3 buttons, speaker. The smallest. |
-| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_lcd_4.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-LCD-4](https://www.waveshare.com/esp32-s3-touch-lcd-4.htm) | 480×480 IPS, 4 inches, one button. |
-
-> Please check if a pull request exists for your alternative hardware port before opening a new one, providing QA feedback and testing on the same hardware is more valuable than duplicate pull requests.
-
-**Porting to another board:** the firmware is a thin HAL with per-board folders under `firmware/src/boards/`. Drop in a new folder and a new PlatformIO env; the shared code never needs to change. See [`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md) for the walk-through and [`docs/porting/hal-contract.md`](docs/porting/hal-contract.md) for the interfaces a port must implement.
-
-## Getting started
-
-You need Claude Code installed and signed in to a subscription (Pro, Max, Team or Enterprise). The app reads your usage with `claude -p /usage`, which answers locally and costs nothing.
+You need a supported board, a USB data cable, Bluetooth, and Claude Code
+installed and signed in to an account that reports usage limits.
 
 ### 1. Install the desktop app
 
-Download the archive for your OS from the [latest release](https://github.com/HermannBjorgvin/Clawdmeter/releases/latest):
+Download your OS archive from the [latest release](https://github.com/HermannBjorgvin/Clawdmeter/releases/latest).
 
-- **Linux** (`clawdmeter-<version>-linux-x86_64.tar.gz`): unpack and put `clawdmeter` somewhere on your `PATH`, e.g. `~/.local/bin`. It needs BlueZ and a D-Bus session; the tray icon needs a StatusNotifierItem host (KDE, most Wayland/X11 panels; on GNOME the AppIndicator extension). Without one, the app shows its window instead, and closing the window quits.
-- **macOS** (`clawdmeter-<version>-macos-universal.tar.gz`): unpack and move `Clawdmeter.app` to `/Applications`. The app isn't notarized, so the first time right-click it and choose **Open**. macOS then asks for Bluetooth access; allow it.
-- **Windows** (`clawdmeter-<version>-windows-x86_64.zip`): unpack `clawdmeter.exe` somewhere permanent, e.g. `%LOCALAPPDATA%\Programs\Clawdmeter`, and run it. SmartScreen may warn about an unknown publisher the first time.
+| OS | Install |
+| --- | --- |
+| Linux | Unpack `clawdmeter-<version>-linux-x86_64.tar.gz` and put `clawdmeter` on your `PATH`, such as `~/.local/bin`. Bluetooth requires BlueZ and a D-Bus session. The tray needs a StatusNotifierItem host; GNOME needs the AppIndicator extension. |
+| macOS | Unpack `clawdmeter-<version>-macos-universal.tar.gz` and move `Clawdmeter.app` to `/Applications`. The app is not notarized. On first launch, right-click and choose **Open**, then allow Bluetooth access. |
+| Windows | Unpack `clawdmeter-<version>-windows-x86_64.zip` into a permanent folder and run `clawdmeter.exe`. SmartScreen may flag the unsigned app on first launch. |
 
-Run it with no arguments. It lives in the tray (menu bar on macOS): the menu shows the connection, the account and both meters, plus **Refresh now**, **Mute attention beep**, **Open Clawdmeter**, **Flash firmware…** (**Update firmware to vX…** when there's a new release), **Settings…** and **Quit** (which stops the daemon; the device keeps showing its last numbers until they go stale).
+Launch Clawdmeter to open setup. The app stays in the tray or macOS menu
+bar. Without a tray, it uses a window; closing that window quits the app.
 
-Everything else happens in one window with a sidebar: **Overview** (link, meters, refresh, mute), **Device**, **Flash**, **Accounts**, **Hooks** and **Background**. The tray's items open it on the right page, or bring it to the front if it's already open. The first time you run the app, the window opens on a short setup wizard that walks through the next three steps; skip it whenever you like, and rerun it with **Run setup again** at the bottom of the sidebar.
+The window has six pages: **Overview**, **Device**, **Flash**, **Accounts**,
+**Hooks**, and **Settings**. You can skip setup and return through **Run
+setup again**.
 
-![The Overview page](desktop/docs/screenshots/overview.png)
+![Overview](desktop/docs/screenshots/overview.png)
 
-### 2. Flash the board
+### 2. Install firmware
 
-Plug the board in over USB-C and open the **Flash** page (the setup wizard starts there too). The flasher asks the chip what it is, offers the matching board image from the latest release, and writes it; your Bluetooth pairing survives the update. A board that already runs the latest release is left alone unless you ask. On Linux your user needs access to the serial port (the flasher tells you which group to join if it doesn't).
+Connect the board over USB and follow setup, or open **Flash**. The app
+identifies the chip, asks you to choose a board when needed, downloads the
+matching firmware, and verifies its checksum before writing. Check the
+board selection before starting. Keep the cable connected during the write.
 
-![Picking the board](desktop/docs/screenshots/flash-identify.png)
+A firmware update preserves Bluetooth pairing. If the board already runs
+the latest release, you can continue without writing it again. On Linux,
+the flasher reports serial-port permission problems and how to resolve them.
 
-**Browser fallback:** each release also has one merged image per board, `<env>-<version>.bin`. In Chrome or Edge, open [Espressif's web flasher](https://espressif.github.io/esptool-js/), connect to the board, add that file at address `0x0`, and click **Program**.
+![Choose a board](desktop/docs/screenshots/flash-identify.png)
 
-### 3. Pair it
+For a browser-based flash, download the board's merged `<env>-<version>.bin`
+from the release. In Chrome or Edge, open [Espressif's web flasher](https://espressif.github.io/esptool-js/),
+connect the board, select the image at address `0x0`, and choose **Program**.
 
-The device is a Bluetooth keyboard as far as your computer is concerned, so pair it once like any keyboard. That also makes the buttons work.
+### 3. Pair over Bluetooth
 
-- **Linux:** `bluetoothctl`, then `scan on`, `pair <MAC>` and `trust <MAC>` when "Clawdmeter" shows up (or use your desktop's Bluetooth settings).
-- **macOS:** System Settings → Bluetooth → **Connect** next to "Clawdmeter".
-- **Windows:** Settings → Bluetooth & devices → Add device → Bluetooth → "Clawdmeter".
+Pair **Clawdmeter** in your computer's Bluetooth settings. It appears as a
+keyboard because its buttons send key presses.
 
-The app only ever talks to a Clawdmeter your computer is paired with, never to one that happens to be nearby. To pair with a different computer, hold the PWR button for 3 seconds and release: the device forgets its bond and advertises again.
+- Linux: use the desktop Bluetooth settings, or run `bluetoothctl`, then
+  `scan on`, `pair <MAC>`, and `trust <MAC>`.
+- macOS: System Settings → Bluetooth → **Connect** next to Clawdmeter.
+- Windows: Settings → Bluetooth & devices → Add device → Bluetooth → Clawdmeter.
 
-### 4. Install the hooks
+For normal operation, the app looks for an OS-known Clawdmeter rather than
+connecting to arbitrary nearby devices. On boards with a software-controlled
+PWR button, hold it for about 3 seconds, then release to clear the device's
+Bluetooth bonds. The LCD-4's PWR key resets the board; it does not clear pairing.
 
-Open the **Hooks** page and click **Install in N accounts**. You see the exact change to each account's `settings.json` and confirm it with **Save changes**; the old file is kept as `settings.json.bak`. There's also a **Send a test alert** button. The hooks run `clawdmeter hook …`, which appends one line to a log and exits; nothing from your prompts or tool calls is recorded. Without hooks the meters still work, but Clawd can't react to you and attention alerts don't fire.
+### 4. Add Claude Code hooks
+
+Open **Hooks**, select the accounts to update, and review the changes to
+`settings.json` before saving. Existing files are backed up to
+`settings.json.bak`. Other hooks remain in place.
+
+Hooks let Clawd react to activity and show alerts. The local event log
+contains timestamps, event types, and session IDs. Alerts also store the
+notification message or the first question from `AskUserQuestion`, which
+is sent to the device. Prompt text and full tool-call payloads are not
+written to the event log.
+
+Usage meters work without hooks. Use **Send a test alert** to check the
+app-to-device alert path; it does not test whether Claude Code invoked a hook.
 
 ### 5. Start at login
 
-**Background → Start at login** adds a login item: an XDG autostart entry on Linux, a LaunchAgent on macOS, an `HKCU\…\Run` value on Windows.
+Enable **Settings → Start at login** to launch the tray app when you sign in.
+The app uses XDG autostart on Linux, a LaunchAgent on macOS, and a user Run
+entry on Windows.
 
-## Settings
+## On the device
 
-Everything on the app's settings pages is stored in a plain config file, `~/.config/claude-usage-monitor/config` (`%LOCALAPPDATA%\Clawdmeter\config` on Windows). You can edit it by hand; the app re-reads it within a few seconds and keeps your comments.
+| Meters | Show | Screensaver | Attention |
+| --- | --- | --- | --- |
+| ![Meters](screenshots/director/01-home-meters.png) | ![Show](screenshots/director/09-show-scene.png) | ![Screensaver](screenshots/director/15-screensaver-face.png) | ![Attention](screenshots/director/20-attention-waves.png) |
+| Session and weekly usage | After sustained activity | After a quiet stretch | A session needs an answer |
 
-| Key | Default | What it does |
+The device boots to the meters. Tap a show or screensaver to return to them.
+Tap the meters to bring Clawd's face up to the glass; tap again to send him
+back. A tap that wakes a sleeping panel only wakes it.
+
+Attention alerts end when you answer, tap the screen, or reach the two-minute
+timeout. C6 boards show the message without the full-size Clawd. Optional
+beeps and reset chimes work on boards with an implemented audio output.
+**Minimal display** keeps the meters and a still Clawd, with no animated scenes.
+
+If updates stop, the meters dim. The last reading is retained rather than
+replaced with zero. See [Clawd's director](docs/clawd-director.md) for timing
+and character rules.
+
+### Buttons
+
+| Button | Action |
+| --- | --- |
+| BOOT | Hold to send Space to the focused window, for Claude Code voice input. GPIO 0 on S3; GPIO 9 on C6. |
+| Secondary, where fitted | Send Shift+Tab to the focused window. S3 2.16: GPIO 18; C6 2.16: GPIO 10; LCD-1.54: GPIO 5. |
+| PWR, where software-controlled | Short press: next scene on the stage, brightness elsewhere. Hold about 3 seconds and release: clear pairing. |
+
+The LCD-4 has one user button, BOOT. Its PWR key is a hardware reset.
+
+## Supported boards
+
+| | Board | |
+| :-: | --- | --- |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_216.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-s3-touch-amoled-2.16.htm?&aff_id=149786) | 480×480 AMOLED, 3 buttons, speaker. Original board. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_216_c6.svg" height="90" alt=""> | [Waveshare ESP32-C6-Touch-AMOLED-2.16](https://www.waveshare.com/esp32-c6-touch-amoled-2.16.htm?&aff_id=149786) | 480×480 AMOLED on the ESP32-C6 (no PSRAM; animated corner Clawd, text-only attention alerts). |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_18.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-s3-touch-amoled-1.8.htm?&aff_id=149786) | 368×448 AMOLED, 2 buttons, speaker. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_18_c6.svg" height="90" alt=""> | [Waveshare ESP32-C6-Touch-AMOLED-1.8](https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm?&aff_id=149786) | 368×448 AMOLED on the ESP32-C6. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_amoled_206.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-AMOLED-2.06](https://www.waveshare.com/esp32-s3-touch-amoled-2.06.htm?&aff_id=149786) | 410×502 AMOLED in a watch case. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_lcd_154.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-LCD-1.54](https://www.waveshare.com/esp32-s3-lcd-1.54.htm?sku=33869&aff_id=149786) | 240×240 IPS, 3 buttons, speaker. Smallest supported display. |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_lcd_4.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-LCD-4](https://www.waveshare.com/esp32-s3-touch-lcd-4.htm?&aff_id=149786) | 480×480 IPS, 4 inches, one button. |
+
+
+Waveshare links include the owner's affiliate code.
+
+Before starting a port, check for an existing pull request for that board.
+Testing the same hardware helps more than a duplicate port. See the
+[porting guide](docs/porting/adding-a-board.md) and [HAL contract](docs/porting/hal-contract.md).
+
+## Settings and files
+
+On Linux and macOS, config and state live in `~/.config/clawdmeter/`.
+On Windows, they live in `%LOCALAPPDATA%\Clawdmeter\`.
+The `config` file uses `key = value` lines. The app reloads it every few
+seconds and preserves comments and unknown keys when saving.
+
+| Key | Default | Effect |
 | --- | --- | --- |
-| `config_dirs` | `~/.claude` | Claude Code config folders to poll, comma-separated. With several (say a personal and a work plan), the device shows the one whose usage moved most recently. |
-| `chime` | `off` | `on` = chime when the 5-hour session resets (boards with a speaker: S3 AMOLED-2.16 and 1.8, LCD-1.54). |
-| `beep` | `off` | `on` = beep with attention alerts. |
-| `clock` | `off` | `auto`, `12` or `24` shows a clock in place of the "Usage" title. |
-| `poll_interval` | unset | Seconds between `/usage` polls of the shown account while you work (at least 120). Unset, polling follows your activity: right after a prompt, every 3 minutes while Claude works, every 15 minutes when it's quiet. Other accounts are checked every 10 minutes. |
-| `heartbeat_interval` | `60` | Seconds between keep-alive writes, so the device knows the numbers are current. |
-| `claude_path` | found on `PATH` | Full path to `claude`, if the app can't find it. |
-| `update_check` | `on` | Daily check for new firmware. |
-| `release_repo` | `HermannBjorgvin/Clawdmeter` | Where the flasher looks for releases. |
-| `onboarding_done` | unset | Set to `true` once the setup wizard is finished or skipped (**Run setup again** in the sidebar brings it back). |
+| `config_dirs` | `~/.claude` | Comma-separated Claude Code config folders. The app selects the account whose session usage increased most recently. `CLAUDE_CONFIG_DIR` supplies the default when this key is absent. |
+| `chime` | `off` | Play a reset chime on supported audio hardware. |
+| `beep` | `off` | Play a sound with attention alerts on supported audio hardware. Tray mute lasts until restart. |
+| `clock` | `off` | `auto`, `12`, or `24` replaces the device's Usage title with a clock. |
+| `poll_interval` | automatic | Override working and no-hooks polling intervals, in seconds. The scheduler enforces at least 120 seconds per account. Quiet and other-account schedules still apply. |
+| `heartbeat_interval` | `60` | Resend cached readings between usage checks. This does not fetch usage. Keep the default unless diagnosing the connection. |
+| `claude_path` | found on `PATH` | Full path to the Claude Code executable, if detection fails. |
+| `update_check` | `on` | Check for firmware releases daily. |
+| `release_repo` | `HermannBjorgvin/Clawdmeter` | GitHub repository used for firmware releases. |
+| `onboarding_done` | unset | `true` after setup is finished or skipped. |
 
-Logs are in `~/.config/claude-usage-monitor/daemon.log`; the **Background** page has a button to open it.
+The tray app writes `daemon.log` in the state folder and keeps the previous
+run as `daemon.log.1`. **Settings** links to the log and config file.
+
+### Refresh timing
+
+The app runs `claude --output-format json -p /usage` for each account.
+It parses Claude Code's usage output; Clawdmeter does not make its own
+model request or read OAuth credentials directly.
+
+With hooks, the shown account is checked after a prompt, every 3 minutes
+while working, and about 10 seconds after a turn stops. Checks fall to every
+5 minutes during the first 10 quiet minutes, then every 15 minutes. Without
+hooks, checks run every 5 minutes. Other accounts are checked every 10 minutes.
+
+Every trigger, including manual refresh, respects a two-minute minimum gap
+and any retry delay. Transient failures delay retries by 10, 20, then 30
+minutes. A failed check never becomes a zero reading. Heartbeats stop once
+the selected reading is stale, allowing the device to show the loss of fresh data.
 
 ### Command line
 
 ```text
-clawdmeter                      tray app (the normal way to run it)
-clawdmeter --daemon             headless: no tray, no windows (servers)
-clawdmeter --once               poll /usage once and print the payload, no Bluetooth
-clawdmeter --window [PAGE]      open the app window (overview, device, flash, accounts, hooks, background, setup)
-clawdmeter --ports              list attached ESP32 USB ports
-clawdmeter --info PORT          ask the firmware on PORT for its board and version
-clawdmeter hook MODE [event]    the Claude Code hook (alert, clear or event)
+clawdmeter                      Run the tray app
+clawdmeter --daemon             Run without a tray or window
+clawdmeter --once               Read usage once and print the payload; no Bluetooth
+clawdmeter --window [PAGE]       Open overview, device, flash, accounts, hooks, settings, or setup
+clawdmeter --ports              List attached Espressif USB ports
+clawdmeter --info PORT          Read the board and firmware version over USB
+clawdmeter hook MODE [event]    Handle a Claude Code hook: alert, clear, or event
 ```
 
-`CLAWDMETER_LOG=debug` turns up logging, `CLAWDMETER_NO_TRAY=1` shows the app window instead of a tray icon, and `CLAWDMETER_BLE_ADDRESS=AA:BB:…` tells the app which paired device to try first.
+`CLAWDMETER_LOG=debug` enables debug logs. `CLAWDMETER_NO_TRAY=1` uses a
+window instead of a tray icon. `CLAWDMETER_BLE_ADDRESS` selects the paired
+device address to try first.
 
-## Upgrading from the old daemons
+## Migrating from a legacy daemon
 
-Earlier versions ran a bash daemon (Linux), a Python daemon (macOS) or a Python tray (Windows), set up with `install.sh`, `install-mac.sh` or `install-windows.ps1`. The app replaces all three and keeps your config file, your paired device and the hook state files.
+The desktop app replaces the bash and Python daemons. It migrates files
+from `~/.config/claude-usage-monitor/` into the current state folder. Files
+already at the destination win; conflicting files and runtime locks stay
+in the legacy folder.
 
-1. Install the app as above. If an old daemon is still set to start at login, the app logs a warning, and the **Background** page shows a **Turn it off** button. It stops the old service and removes its login entry:
-   - Linux: `systemctl --user disable --now claude-usage-daemon` and deletes `~/.config/systemd/user/claude-usage-daemon.service`.
-   - macOS: `launchctl unload -w` and deletes `~/Library/LaunchAgents/com.user.claude-usage-daemon.plist`.
-   - Windows: deletes the `HKCU\Software\Microsoft\Windows\CurrentVersion\Run\Clawdmeter` value if it still points at `pythonw.exe`. Quit the old tray icon yourself (or log out), since it may still be running.
+1. Install the desktop app. If **Settings** reports a legacy service,
+   disable it there so only one process talks to the device. On Windows,
+   also quit the Python tray or sign out to stop the running process.
+2. Open **Hooks** and update entries that use `attention-hook.sh`. Review
+   the file changes before saving.
+3. Remove the legacy checkout's `daemon/.venv` if you no longer need it.
 
-   Running both at once makes them fight over the device.
-2. The **Hooks** page shows hooks that still run `attention-hook.sh` as out of date. **Update N accounts** rewrites them to `clawdmeter hook …` in place, after the same preview.
-3. Delete your old checkout's `daemon/.venv` if you had one. Nothing else is left behind.
+See [daemon parity](docs/daemon-parity.md) for platform details and retained behavior.
 
-## How it works
+## Data flow
 
-<img src="assets/readme/magnifier.gif" width="150" align="right" alt="">
-
-1. **The slow clock.** The app runs `claude --output-format json -p /usage` for each account. Claude Code reads your limits from Anthropic's usage endpoint without sending a message, so polling can't start a window or spend anything. The app parses the session and weekly percentages and reset times (or the spend limit, for spend-capped accounts). That endpoint is rate-limited per account, so the app polls sparingly (at most every 2 minutes per account) and, when Claude Code comes back without numbers, leaves that account alone for 10 minutes or more while the device keeps showing the last values.
-2. **The fast clock.** The Claude Code hooks append `<time> <event> <session>` to `~/.config/claude-usage-monitor/events.log`. The app follows that file and turns it into an activity level, the latest event and the number of active sessions. A prompt also triggers a fresh `/usage` poll.
-3. **Attention.** On a Notification or AskUserQuestion, the hook writes the message to an `attention` file; the next prompt or tool call in that session clears it.
-4. **The link.** The app finds the paired device over Bluetooth LE and writes one JSON payload to its data characteristic whenever something changes, plus a heartbeat every minute.
-5. **The device.** The firmware parses the payload, updates the meters, and hands the signals to Clawd's director, which decides what he does next.
-6. **The buttons** are independent of all this: they're HID keyboard reports to whatever window has focus.
-
-## Physical buttons
-
-| Button | Function |
-| --- | --- |
-| **BOOT** (GPIO 0 on S3 boards, GPIO 9 on C6) | Hold to send Space (Claude Code voice-mode push-to-talk). |
-| **Secondary** (GPIO 18 on the S3 2.16, GPIO 10 on the C6 2.16, GPIO 5 on the LCD-1.54; the other boards have none) | Send Shift+Tab (Claude Code mode toggle). |
-| **PWR** | On the stage: next scene. Elsewhere: cycle brightness. Hold 3 s and release: pairing mode. |
-
-Every press also wakes Clawd from the screensaver. The LCD-4 has only BOOT; its PWR key is a hardware reset.
+Usage readings and hook events reach the app independently. The app selects
+an account, builds a JSON payload, and writes it to the device over Bluetooth
+LE. The firmware updates the meters and passes activity to Clawd's director.
+Keyboard button reports use the separate HID service.
 
 ## BLE protocol
 
@@ -182,79 +242,73 @@ The host writes one JSON object (at most 512 bytes) to RX; every write is a comp
 | `acct` | `pro`, or `ent` for a spend-capped account: `s` is then the spend %, and `tp` (% of the billing period elapsed), `pd` (period length in days) and `rd` (reset date, e.g. `"Nov 1"`) fill the second card. |
 | `t`, `tf` | Local wall-clock epoch and 12/24-hour format, when the clock is on. |
 | `c` | `1` = the reset chime may sound. |
-| `ok` | `false` alone = no data (every account logged out). |
+| `ok` | `false` alone = no usable account data; do not treat this as a zero reading. |
 | `b`, `m`, `x` | Attention: beep, message (ASCII), end the alert. |
 | `a`, `e`, `es`, `n` | Fast clock: activity 0–3, latest hook event (`p` prompt, `s` stop, `b` back after a gap) and its sequence number, active sessions. |
 | `rp` | `1` = a heartbeat replay, not a fresh poll; the rate math skips it. |
 
-## Building from source
+## Build from source
 
-**Firmware** ([PlatformIO](https://docs.platformio.org/en/latest/core/installation/index.html)):
+Firmware uses PlatformIO. Select the environment for your board:
 
 ```bash
-pio run -d firmware -e waveshare_amoled_216                                 # build one board
+pio run -d firmware -e waveshare_amoled_216
 pio run -d firmware -e waveshare_amoled_216 -t upload --upload-port /dev/ttyACM0
-pio run -d firmware                                                         # every board + the simulator
-pio test -d firmware -e native                                              # host unit tests
+pio test -d firmware -e native
 ```
 
-The board envs are listed in `firmware/platformio.ini`. On macOS the port is `/dev/cu.usbmodem*`, on Windows `COMn`.
+Environments are listed in `firmware/platformio.ini`. macOS ports use
+`/dev/cu.usbmodem*`; Windows ports use `COMn`. A bare `pio run -d firmware`
+builds the default hardware environments and simulator.
 
-**Desktop app** (Rust stable, 1.90 or newer):
+The desktop app uses Rust 1.90 or newer. Install the Linux packages listed
+in [the build dependency action](.github/actions/linux-desktop-deps/action.yml), then:
 
 ```bash
 cd desktop
-cargo run -p clawdmeter-app --release            # the tray app
+cargo run -p clawdmeter-app --release
 cargo test --workspace
 ```
 
-On Debian/Ubuntu install the build dependencies first:
+The workspace separates usage/configuration (`clawdmeter-core`), Bluetooth
+(`clawdmeter-ble`), firmware downloads and flashing (`clawdmeter-flash`), and
+the tray, GPUI window, and hook integration (`clawdmeter-app`).
 
-```bash
-sudo apt install pkg-config clang libclang-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-dev \
-  libwayland-dev libx11-dev libx11-xcb-dev libxcb1-dev libvulkan-dev libfontconfig1-dev libfreetype-dev
-```
+## Development and releases
 
-The workspace has four crates: `clawdmeter-core` (config, `/usage` parsing, the hook files, cadence, payload; no I/O beyond files and the `claude` subprocess), `clawdmeter-ble` (the Bluetooth link), `clawdmeter-flash` (release download and flashing) and `clawdmeter-app` (the tray, the GPUI windows, the hook subcommand and installer, and the `clawdmeter` binary). Screenshots of the windows are in [`desktop/docs/screenshots/`](desktop/docs/screenshots/).
+Use the [firmware simulator](SIM-USAGE.md) to review layouts and Clawd's
+behavior without hardware. Font generation is documented in
+[fonts.md](docs/fonts.md). Desktop reference images are in
+[desktop/docs/screenshots](desktop/docs/screenshots/).
 
-## Development
+The [release workflow](.github/workflows/release.yml) accepts tags in the
+form `vMAJOR.MINOR.PATCH`, with an optional prerelease suffix. It builds
+merged board images for address `0x0`, desktop archives, checksums, a
+`manifest.json` for the app, and ESP Web Tools manifests. Tags with a
+hyphen publish prereleases, which the normal update check ignores.
 
-<img src="assets/readme/crab.gif" width="120" align="right" alt="">
-
-- **Desktop simulator:** iterate on the UI without hardware. An SDL2 window runs the full firmware loop with scenario playback (`pio run -d firmware -e sim`, then `cd firmware && .pio/build/sim/program`). `SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl` walks through every Clawd beat in two minutes. See [`SIM-USAGE.md`](SIM-USAGE.md).
-- **Clawd's behaviour:** [`docs/clawd-director.md`](docs/clawd-director.md).
-- **Splash animations:** Anthropic's official Clawd sprites, archived with provenance notes in [`research/clawd-official/`](research/clawd-official/); `node tools/convert_official_clawd.js` regenerates `firmware/src/splash_animations.h`. See [`tools/README.md`](tools/README.md).
-- **Icons:** Lucide PNGs convert to LVGL C arrays with `tools/png_to_lvgl.js`. See [`tools/README.md`](tools/README.md).
-- **Fonts:** the pre-compiled LVGL fonts and the LVGL 9 patching they need: [`docs/fonts.md`](docs/fonts.md).
-- **Porting:** [`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md) and [`docs/porting/hal-contract.md`](docs/porting/hal-contract.md).
-- **History:** [`docs/daemon-parity.md`](docs/daemon-parity.md) maps what the old bash and Python daemons did to where the app does it.
-
-## Releasing
-
-Push a version tag; CI does the rest.
-
-```bash
-git tag v1.9.0 && git push origin v1.9.0
-```
-
-[`.github/workflows/release.yml`](.github/workflows/release.yml) then:
-
-1. Builds every hardware env in `firmware/platformio.ini` (everything except `platform = native`) with `-DCLAWD_VERSION="v1.9.0"`.
-2. Merges bootloader, partition table, `boot_app0` and app into one image per board, `<env>-v1.9.0.bin`, flashed at offset `0x0` ([`tools/ci/merge_firmware.py`](tools/ci/merge_firmware.py)).
-3. Builds the desktop app with `CLAWDMETER_VERSION=1.9.0` for Linux x86_64, macOS (a universal, ad-hoc signed `Clawdmeter.app`) and Windows.
-4. Publishes a GitHub Release with the images, the app archives, `SHA256SUMS`, a `manifest.json` (env, chip, flash size, display name, sha256 per board; [`tools/ci/make_manifest.py`](tools/ci/make_manifest.py)) that the app's flasher reads, and one ESP Web Tools manifest per board, `webtools-<env>.json`.
-
-A tag with a hyphen (`v1.9.0-rc.1`) publishes a prerelease, which the app's update check ignores. Adding a board needs a `DISPLAY_NAMES` entry in `make_manifest.py`; the tooling tests in `tools/ci/tests/` fail without one. The tag must look like `vMAJOR.MINOR.PATCH` with an optional `-suffix`, or the release run stops before building anything.
-
-Every PR that touches `firmware/` or `tools/ci/` also builds all boards and uploads the merged images as workflow artifacts, runs the host unit tests and captures a simulator screenshot. PRs that touch `desktop/` run fmt, clippy and the workspace tests on Linux, and the core tests on macOS and Windows.
+A new board needs a display-name entry in `tools/ci/make_manifest.py` as
+well as its firmware environment and desktop board assets. Firmware CI
+builds the boards, runs native tests, and captures the simulator. Desktop
+CI runs formatting, linting, and workspace tests on Linux, plus core tests
+on macOS and Windows.
 
 ## Credits
 
 - Pixel-art Clawd animations are Anthropic's official mascot art (claude.ai/code, Claude Code desktop), archived and converted by the tooling in `tools/` and `research/clawd-official/`.
-- The original macOS daemon and flash helper were ported by [Chris Davidson (@lorddavidson)](https://github.com/lorddavidson). Thanks Chris!
+- The original macOS daemon and flash helper were ported by [Chris Davidson (@lorddavidson)](https://github.com/lorddavidson).
 - Lucide icon set ([lucide.dev](https://lucide.dev), MIT) for the Bluetooth, battery and USB glyphs.
-- Anthropic brand fonts (Tiempos Text, Styrene B); see the licensing warning below.
+- Anthropic brand fonts (Tiempos Text, Styrene B); see the asset notice below.
 
-## Licensing gray area warning
+## Asset licensing
 
-The software in this repository uses and adheres to the Anthropic brand guidelines and uses the same proprietary fonts that Anthropic has a license for but this software uses without permission as well as using assets from Anthropic such as the copyrighted Clawd mascot so even though the code in this repo is non-proprietary I will not license it myself under a copyleft license since this repo includes proprietary fonts and copyrighted assets. Please be aware of this if you fork or copy the code from this repo. **You have been warned!**
+This repository includes Anthropic's proprietary fonts and copyrighted
+Clawd artwork. The project does not have permission to redistribute those
+assets. The owner has not assigned a copyleft license to this repository;
+do not assume that its code and bundled assets share a license. Review the
+asset rights before copying or redistributing them.
+
+## Related project
+
+[Beam](https://github.com/notaharness/beam) pairs machines using a passkey
+and [Tailscale's tailcat](https://tailscale.com/blog/tailcat).

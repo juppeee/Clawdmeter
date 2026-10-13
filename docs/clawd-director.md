@@ -198,7 +198,7 @@ event, any activity level above 0 (tool calls are hook events too), a tap, a
 button, an alert, or a real sample where session % went up. Usage going up
 also wakes the screensaver, which covers the slow-clock-only case.
 
-## Illusion-of-life principles, where they live
+## Animation principles and implementation
 
 | Principle | Implementation |
 |---|---|
@@ -302,14 +302,14 @@ command, `z` in the sim):
 
 ## Buttons
 
-- BOOT (Space) and SECONDARY (Shift+Tab): unchanged. They now also count as
+- BOOT (Space) and SECONDARY (Shift+Tab): unchanged. They also count as
   engagement and wake the screensaver.
 - PWR short press: on the stage it swaps to the next scene and stays in the
   room. During a show that's the next scene in the show's group; during a
   screensaver calm dip it's the other calm scene, never a lively one, and the
   screensaver carries on. Everywhere else it cycles brightness and counts as
   engagement (waking the screensaver face). Hold to pair is unchanged.
-- The tap toggle between splash and usage is gone: the stage is earned. On
+- The stage is earned rather than opened by tapping. On
   the LCD-4, which has only BOOT, a tap no longer opens the splash.
 
 ## Tunables

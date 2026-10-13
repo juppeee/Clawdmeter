@@ -1,28 +1,22 @@
-# Legacy daemon parity
+# Desktop app and legacy daemon parity
 
-The desktop app (`desktop/`, binary `clawdmeter`) replaces three host daemons
-that had drifted apart: the Linux bash daemon (`daemon/claude-usage-daemon.sh`),
-the macOS Python daemon (`daemon/claude_usage_daemon.py`) and the Windows
-Python tray (`daemon/claude_usage_daemon_windows.py`, `tray_windows.py`,
-`autostart_windows.py`, `icon_assets.py`), plus their installers
-(`install.sh`, `install-mac.sh`, `install-windows.ps1`) and flash helpers
-(`flash.sh`, `flash-mac.sh`). Those files are gone from the tree; they are in
-git history before the commit that removed them.
+This reference maps the retired Linux bash daemon, macOS Python daemon,
+and Windows Python tray to the Rust desktop app. Legacy sources and
+installers remain in git history. Rust paths below are relative to
+`desktop/crates/`.
 
-This is the inventory of what they did, read from their code rather than
-their tests, and where the app does it now. Paths in the Rust column are
-under `desktop/crates/`.
+Use the README for installation. This document records migration details,
+protocol behavior, and differences that matter when diagnosing an upgrade.
 
 Legend: **L** bash (Linux), **M** Python (macOS), **W** Python (Windows).
 "—" means that daemon didn't do it.
 
 ## Usage source
 
-The deliberate change: the old daemons sent a one-token Haiku request with
-the user's OAuth token and read the `anthropic-ratelimit-unified-*` response
-headers. The app runs `claude --output-format json -p /usage` per account,
-which answers locally (zero tokens, no window started) and leaves all token
-handling to Claude Code.
+The legacy daemons sent a one-token Haiku request and read usage from
+response headers. The app runs `claude --output-format json -p /usage`
+per account and parses its output. Claude Code owns authentication;
+Clawdmeter does not read OAuth tokens or issue a model request itself.
 
 | Behaviour | Old daemons | Rust | Notes |
 |---|---|---|---|
@@ -37,18 +31,20 @@ handling to Claude Code.
 | Enterprise spend % | `round(overage-utilization × 100)` as `s` | `Spend limit: $X / $Y spent <period> (N%)` or `Spend limit: N% used` → `s` | Format taken from the `/usage` command in Claude Code 2.1.296. Spend amounts aren't sent. |
 | Billing period (`tp`, `pd`, `rd`) | Period = one calendar month before the overage reset (day clamped), host-local; `tp` clamped 0–100; `{tp:0, pd:30, rd:""}` on a missing or garbage reset | `payload::billing_period`: same rule, plus `today` = 1 day and `this week` = 7 days when the line names the period | Ported cases: month clamping, January rollover, before/after clamps, host-local date. |
 | Seat-based Enterprise / Team | Same 5h/7d headers as Pro | Same `Current …` lines | Week-only output (no session line) works: `sr = -1`. |
-| Account with no limits in `/usage` | Whatever the headers said | A miss (`UsageError::NoUsageLines`, or `RateLimited` when Claude Code's debug log shows a 429); the account backs off; the device shows stale after three misses or once the last good reading is over 20 min old | This is what a rate-limited usage endpoint looks like: Claude Code drops the `Current …` lines and remembers the 429 for ~600 s per token. Nothing is invented. |
+| Account with no limits in `/usage` | Whatever the headers said | A miss (`UsageError::NoUsageLines`, or `RateLimited` when Claude Code's debug log shows a 429); the account backs off; the device shows stale after three misses or once the last good reading is over 20 min old | This is what a rate-limited usage endpoint looks like: Claude Code drops the `Current …` lines and remembers the 429 for ~600 s per token. Missing usage stays missing. |
 | Logged out / expired token | M, W: `{"ok":false}` when every dir fails auth · L: logged, nothing sent | `{"ok":false}` once per poll when every account fails with a login or not-a-subscription error (`engine.rs`) | |
-| Transient failure (network, 429, 5xx) | M, W: silent retry · L: logged | Per-account backoff (`clawdmeter-core/src/backoff.rs`): 10 min after a miss, then 20, then 30 (cap), reset on success; device refresh requests and "Refresh now" don't bypass it. The account keeps its last values (and stays shown) and goes stale after three misses in a row, or once its last good reading is over 20 min old. Settings › Accounts shows "Retrying" with the wait | Misses never feed the rate math. The 10-minute floor is Claude Code's own 429 memory; a longer "not asking again for Ns" from `<config dir>/debug/latest` wins. A missing CLI or a login problem doesn't back off; it retries after 2 min. |
+| Transient failure (network, 429, 5xx) | M, W: silent retry · L: logged | Per-account backoff (`clawdmeter-core/src/backoff.rs`): 10 min after a miss, then 20, then 30 (cap), reset on success; device refresh requests and "Refresh now" don't bypass it. The account keeps its last values (and stays shown) and goes stale after three misses in a row, or once its last good reading is over 20 min old. Accounts shows "Retrying" with the wait | Misses never feed the rate math. The 10-minute floor is Claude Code's own 429 memory; a longer "not asking again for Ns" from `<config dir>/debug/latest` wins. A missing CLI or a login problem doesn't back off; it retries after 2 min. |
 | Several accounts (`config_dirs`) | L, M; W: one account | Every listed dir is polled; the plan whose session % rose most recently is shown, else the highest (`selector.rs`) | Ported tests: startup pick, switch on rise, sticky, reset is not activity, larger rise wins. |
 | Default account | `~/.claude` (W: `CLAUDE_CONFIG_DIR` when set) | `~/.claude`, or `$CLAUDE_CONFIG_DIR` when the config has no `config_dirs` (`Settings::apply_env_config_dir`) | Only the daemon applies the env default; the settings window shows and saves the file's value. |
 
 ## Config file
 
-Same file and format: `~/.config/claude-usage-monitor/config` on Linux and
+Config lives at `~/.config/clawdmeter/config` on Linux and
 macOS, `%LOCALAPPDATA%\Clawdmeter\config` on Windows; `key = value`, `#`
 comments, last key wins, case-insensitive keys (`clawdmeter-core/src/config.rs`).
-The app re-reads it every 5 s and the settings window edits it in place,
+Files from `~/.config/claude-usage-monitor/` migrate into the current state
+folder; destination files take precedence and runtime locks are not moved.
+The app re-reads config every 5 s and the settings window edits it in place,
 keeping comments and unknown keys.
 
 | Key | Old daemons | Rust | Notes |
@@ -86,7 +82,7 @@ keeping comments and unknown keys.
 | Behaviour | Old daemons | Rust | Notes |
 |---|---|---|---|
 | Hook command | `daemon/attention-hook.sh alert\|clear\|event` (needs `jq`) | `clawdmeter hook alert\|clear\|event [event]` (`clawdmeter-app/src/hooks/mod.rs`) | Same files byte for byte; no bash or jq, so it runs on Windows. One deliberate difference: an empty stdin or a session id containing `/`, `\` or `..` writes nothing (the script wrote an empty `attention`, or touched a file outside the state dir). |
-| Hook installation | Hand-edited `settings.json` (README) | Settings › Hooks: per-account preview, `.bak`, migrates `attention-hook.sh` entries (`clawdmeter-app/src/hooks/install.rs`) | |
+| Hook installation | Hand-edited `settings.json` (README) | Hooks: per-account preview, `.bak`, migrates `attention-hook.sh` entries (`clawdmeter-app/src/hooks/install.rs`) | |
 | Alert file (`attention`, `{"m","s"}`) | L, M; W: — | `clawdmeter-core/src/attention.rs` | Older than 60 s when first seen: dropped. Bare `touch`: alert without a message. |
 | Repeat alert from the waiting session | L, M: ignored | Ignored | AskUserQuestion notifies twice. |
 | `clear-<sid>` | Ends the alert only for the alerting session and only when newer (ns mtimes) | Same | |
@@ -94,7 +90,7 @@ keeping comments and unknown keys.
 | Alert write | L: inside an aged replay · M: inside a fresh poll | Inside a replay (`rp:1`), or the poll if one is due | |
 | Message too long for one write | M: trims `m`, then drops it | Same (`Payload::encode`, 500-byte cap; firmware buffer is 512) | |
 | Leftover alert files on connect | L, M: deleted | Deleted | |
-| Fast clock (`events.log` → `a`, `e`/`es`, `n`) | The hook wrote `events.log`; no daemon read it | `clawdmeter-core/src/events.rs` | New. |
+| Fast clock (`events.log` → `a`, `e`/`es`, `n`) | The hook wrote `events.log`; no daemon read it | `clawdmeter-core/src/events.rs` | Activity input for the director. |
 
 ## Bluetooth
 
@@ -119,12 +115,12 @@ keeping comments and unknown keys.
 
 | Behaviour | Old daemons | Rust | Notes |
 |---|---|---|---|
-| Linux | `install.sh`: dependency check, systemd user unit `claude-usage-daemon.service` | Settings › Background: XDG autostart entry for the tray, or `clawdmeter.service` for `--daemon` (`clawdmeter-core/src/autostart.rs`) | |
+| Linux | `install.sh`: dependency check, systemd user unit `claude-usage-daemon.service` | Settings: XDG autostart entry for the tray, or `clawdmeter.service` for `--daemon` (`clawdmeter-core/src/autostart.rs`) | |
 | macOS | `install-mac.sh`: venv, LaunchAgent `com.user.claude-usage-daemon`, Bluetooth prompt priming, blueutil | LaunchAgent `com.clawdmeter.app` (same KeepAlive / ThrottleInterval). The release ships `Clawdmeter.app` with `NSBluetoothAlwaysUsageDescription` so the prompt appears and the agent isn't killed | |
 | Windows | `install-windows.ps1`: venv, `HKCU\…\Run\Clawdmeter` → `pythonw tray_windows.py`; refused `\\wsl$` paths | Same Run value name pointing at `clawdmeter.exe`; `is_enabled` only counts it when it's ours | No Python, so no WSL path issue. |
-| Old daemon still installed | — | Logged at start-up; Settings › Background › "Turn it off" stops it and removes its unit / plist / Run value (`autostart::disable_legacy`) | A running Python tray keeps running until quit or logout. |
+| Old daemon still installed | — | Logged at start-up; Settings › "Turn it off" stops it and removes its unit / plist / Run value (`autostart::disable_legacy`) | A running Python tray keeps running until quit or logout. |
 | Single instance | W: named mutex | Lock file on every OS (`clawdmeter-app/src/ipc.rs`) | |
-| Installer config prompts (accounts, clock, chime, beep) | `install.sh`, `install-mac.sh` | Settings › Accounts / Alerts | The old installers auto-detected `~/.claude*` dirs; the app asks the user to add folders. |
+| Installer config prompts (accounts, clock, chime, beep) | `install.sh`, `install-mac.sh` | Accounts / Device | The old installers auto-detected `~/.claude*` dirs; the app asks the user to add folders. |
 
 ## Tray, logs, flashing
 
@@ -133,14 +129,14 @@ keeping comments and unknown keys.
 | Tray | W only: green/amber/red bubble, "Connected · last update HH:MM", Start at login, Quit | Every OS: status, account and both meters, Refresh now, Mute attention beep, Update firmware, Flash a new device, Settings, Quit (`clawdmeter-app/src/tray/`) | |
 | Error notification | W: toast when entering the error state | None; the tray state and status window show it | |
 | Daemon thread crash | W: supervised, restarted with backoff | Release builds abort on panic; the LaunchAgent and `clawdmeter.service` restart it, the XDG entry and Run value don't | |
-| Log file | L: journal · M: `~/Library/Logs/claude-usage-daemon.{out,err}.log` · W: `%LOCALAPPDATA%\Clawdmeter\daemon.log`, 512 KB × 3 | Tray: `~/.config/claude-usage-monitor/daemon.log` (previous run kept as `.log.1`) · `--daemon`: stderr (journal) · LaunchAgent: `~/Library/Logs/clawdmeter.log` | No size cap within one run. |
-| Token never logged | W: tested | Nothing to log | |
-| Flashing | `flash.sh` / `flash-mac.sh`: `pio run -t upload` by env name | Flasher window: release image per board, chip and flash-size detection (`clawdmeter-flash`); `pio run -t upload` for source builds | |
+| Log file | L: journal · M: `~/Library/Logs/claude-usage-daemon.{out,err}.log` · W: `%LOCALAPPDATA%\Clawdmeter\daemon.log`, 512 KB × 3 | Tray: `~/.config/clawdmeter/daemon.log` (previous run kept as `.log.1`) · `--daemon`: stderr (journal) · LaunchAgent: `~/Library/Logs/clawdmeter.log` | No size cap within one run. |
+| Token never logged | W: tested | The app does not read tokens directly | |
+| Flashing | `flash.sh` / `flash-mac.sh`: `pio run -t upload` by env name | Flash page: release image per board, chip and flash-size detection (`clawdmeter-flash`); `pio run -t upload` for source builds | |
 
 ## Tests that moved
 
-Every legacy test either has a Rust counterpart or covered something that no
-longer exists:
+The Rust suites cover the retained behavior. Tests of removed implementation
+details do not need direct counterparts:
 
 - Ported: interval parsing and `POLL_INTERVAL` (`config.rs`), payload aging
   and heartbeat timing (`payload.rs`, `cadence.rs`), attention file handling
