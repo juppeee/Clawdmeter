@@ -48,10 +48,29 @@ the corresponding capabilities accurately.
    snapshots; inspect the physical display. Simulator captures supplement
    hardware checks but do not replace them.
 
-For release integration, add the board to `tools/ci/make_manifest.py`'s
-`DISPLAY_NAMES`, the desktop `boards.rs` catalog, and the embedded asset list
-in `ui/mod.rs`. Supply board art and a product link. Add the board to the
-README and confirm that the release manifest and desktop matching agree.
+## Include the board in the app and docs
+
+A new port must include:
+
+- An original SVG at
+  `desktop/crates/clawdmeter-app/assets/boards/<env>.svg`. Draw the real
+  product in a 3/4 view, matching the existing illustrations. Use product
+  photos as reference, not as copied or embedded artwork.
+- An entry with the display name and buy link in
+  `desktop/crates/clawdmeter-app/src/boards.rs`, plus the SVG registration
+  in `desktop/crates/clawdmeter-app/src/ui/mod.rs`.
+- An entry with the display name and buy link in the README's
+  **Supported boards** table. Waveshare product links must include
+  `?aff_id=149786` (or `&aff_id=149786` when a query already exists).
+  Other vendors use a plain product link. Apply this to the app entry too.
+- A display-name entry in `tools/ci/make_manifest.py`'s `DISPLAY_NAMES`.
+  Confirm that the environment, release manifest, and app catalog agree.
+
+In the PR, include the buy link and preferably a photo of the actual board
+running Clawdmeter. If no photo is available, say so. State the exact board
+and revision tested on hardware and what you verified; simulator captures
+are not hardware testing. Use the PR template for the hardware-testing and
+human-involvement notes.
 
 ## Common failures
 

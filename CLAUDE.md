@@ -3,9 +3,11 @@
 ESP32-S3 / ESP32-C6 firmware for a desk-side Claude Code usage monitor, plus
 the Rust desktop app (`desktop/`) that feeds it over BLE. Each
 supported board lives in its own `firmware/src/boards/<name>/` folder and is
-selected via PlatformIO's `build_src_filter`. Adding a board means dropping in
-a new folder + a new `[env:...]` block — shared code (`main.cpp`, `ui.cpp`,
-the director modules) never sees board-specific code. See [`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md).
+selected via PlatformIO's `build_src_filter`. A new port needs a board folder,
+a PlatformIO environment, original SVG board art, and app/README catalog
+entries with a display name and buy link. Shared code (`main.cpp`, `ui.cpp`,
+the director modules) stays board-independent. See
+[`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md).
 
 Seven ports today (two SoC families, five panel sizes):
 
@@ -219,7 +221,21 @@ Rust workspace (edition 2021, MSRV 1.88 for the library crates, 1.90 for `clawdm
 
 **One window, one process.** GPUI 0.2.2 ends its event loop when the last window closes on Linux/Windows, so the tray process never runs GPUI: the window is a `clawdmeter --window [PAGE]` child. `ui/app.rs` is its root: a sidebar (Overview, Device, Flash, Accounts, Hooks, Settings) or the setup wizard (`ui/setup.rs`) filling the window. Pages are `crate::Page` (`Page::parse` also takes the old `background`/`flasher`/`status`/`alerts` names). Only one window process runs (`<state>/window.lock`); the tray, or a second `--window` launch, appends `show <page>` to `<state>/window-commands` and the window switches page and raises itself. Child views ask for another page by emitting `ui::Navigate`. The flasher (`ui/flasher.rs`) only touches USB while it's on screen (`set_active`), the Device page only probes while shown, and the sidebar locks while a board is being written, so nothing competes for the serial port. The wizard reuses the flasher (`FlashMode::Setup`: no step header, up-to-date boards can skip) and the Hooks page (`SettingsView::show(Page::Hooks, embedded)`). First run = no `onboarding_done` and no cached BLE address; the tray opens the window on `setup` then.
 
-Board art: `crates/clawdmeter-app/assets/boards/<env>.svg`, original 3/4-view drawings matched to Waveshare's product photos (case colour, bezel, button and port placement; flat colours, Clawd + meters on screen), bundled by `ui::Assets` and drawn with `img("boards/<env>.svg")`. Use `img()` for those: `svg()` renders a monochrome mask, which is what the Lucide icons in `assets/icons/` (ISC, `LICENSE` there) want: `widgets::icon(name, size, color)`. GPUI's `svg()` never inherits a text colour, so pass one (and `group_hover` for hover). A new board needs an SVG, a `BOARDS` row (product name, buy link) and an `ASSETS` entry in `ui/mod.rs`; `boards::tests` checks all three.
+**Board art and catalog entries are required for new ports.** Create an
+original SVG at `desktop/crates/clawdmeter-app/assets/boards/<env>.svg`:
+a 3/4 view drawn from the real product, matching the existing illustrations.
+Product photos are reference material, not artwork to copy or embed. Add
+the display name and buy link to `desktop/crates/clawdmeter-app/src/boards.rs`
+and the README's **Supported boards** table, and register the SVG in
+`desktop/crates/clawdmeter-app/src/ui/mod.rs`. Waveshare links include
+`?aff_id=149786` (use `&aff_id=149786` with an existing query); other vendors
+use plain product links. The PR should include the buy link and preferably
+a photo of the board running Clawdmeter; state if a photo is unavailable.
+
+Board art is bundled by `ui::Assets` and drawn with
+`img("boards/<env>.svg")`. Use `img()`, not `svg()`: `svg()` renders a
+monochrome mask; `img()` loads the embedded SVG through resvg in full colour.
+`boards::tests` checks the board table and asset registration.
 
 Look: neutral greys in the Claude desktop app's family (`ui/theme.rs`), Clawd orange only for Clawd and primary actions; notices are neutral unless they report a problem. Window frames (`ui/decorations.rs`): native everywhere the platform draws one (macOS/Windows title bar, X11 WM frame, Wayland xdg-decoration on KDE/Sway/…); on a Wayland compositor without xdg-decoration (GNOME) the app asks for client decorations and `ui::chrome` draws an Adwaita-style header bar. gpui 0.2.2 records "server" even when the compositor has no decoration manager, so `decorations::wanted()` probes the Wayland registry itself. `CLAWDMETER_DECORATIONS=client|server` overrides (screenshots of the header bar under X11).
 
@@ -267,6 +283,29 @@ UI tests use `gpui` `test-support` (`#[gpui::test]`); hardware is faked
 behind `FlashHardware`. **Tests must never run a real `systemctl`,
 `launchctl` or `reg`** against the developer's machine (use the injectable
 `autostart::disable_legacy_with`).
+
+## Pull requests
+
+Write for a reviewer seeing the change for the first time. Use
+[the PR template](.github/pull_request_template.md).
+
+- Describe the end state: behavior, structure, and relevant file paths.
+  Skip the session history, abandoned approaches, and checks already gated
+  by CI. Keep the description proportional to the change.
+- Include screenshots or pictures when UI or device output changes.
+  For device output, use serial captures from `./screenshot.sh` or photos.
+  Label simulator captures as simulator output. Add a Mermaid diagram when
+  it makes flow, state, or architecture easier to understand.
+- Include **Hardware testing**: name the exact boards/revisions tested on
+  real hardware and what was verified, or write **not tested on hardware**.
+- Include **Human involvement**: state how much the human author reviewed
+  and QA'd. For example: “Agent-written; human reviewed the diff and tested
+  pairing and touch on an ESP32-S3-Touch-AMOLED-2.16.” If none, write
+  **not reviewed by a human**. Never infer human review from an approval to
+  proceed; report only confirmed involvement.
+- For a new board, include its buy link and preferably an in-person photo
+  of it running Clawdmeter. State if no photo is available. The original
+  SVG and app/README catalog entries are part of the port, not follow-up work.
 
 ## CI / release
 
