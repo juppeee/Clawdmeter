@@ -43,6 +43,7 @@ static uint8_t  glance_phase = 0;
 static uint32_t glance_until = 0;
 static int      glance_target = 0;
 static int      glance_cur = 0;
+static uint32_t glance_hold = 0;      // 0: a resting glance's random hold
 static uint32_t next_act_at = 0;
 static ClawdRng rng;
 
@@ -196,6 +197,16 @@ void face_set_resting(bool on) {
     if (on) next_act_at = millis() + 800;
 }
 
+static void glance_to(int target);
+
+void face_look_at_x(int x, uint32_t hold_ms) {
+    if (!visible) return;
+    glance_hold = hold_ms ? hold_ms : 1;
+    glance_phase = 1;
+    glance_target = peek_glance_px(x, W, glance_px * 3 / 2);
+    glance_to(glance_target);
+}
+
 static void glance_exec(void* var, int32_t v) {
     (void)var;
     glance_cur = v;
@@ -206,7 +217,7 @@ static void glance_done(lv_anim_t* a) {
     (void)a;
     if (glance_phase == 1) {
         glance_phase = 2;
-        glance_until = millis() + clawd_rng_range(&rng, 700, 1600);
+        glance_until = millis() + (glance_hold ? glance_hold : clawd_rng_range(&rng, 700, 1600));
     } else {
         glance_phase = 0;
     }
@@ -249,8 +260,8 @@ void face_tick(void) {
     switch (p.act) {
     case FACE_BLINK:         face_blink(false); break;
     case FACE_DOUBLE_BLINK:  face_blink(true); break;
-    case FACE_GLANCE_LEFT:   glance_phase = 1; glance_target = -glance_px; glance_to(glance_target); break;
-    case FACE_GLANCE_RIGHT:  glance_phase = 1; glance_target = glance_px;  glance_to(glance_target); break;
+    case FACE_GLANCE_LEFT:   glance_hold = 0; glance_phase = 1; glance_target = -glance_px; glance_to(glance_target); break;
+    case FACE_GLANCE_RIGHT:  glance_hold = 0; glance_phase = 1; glance_target = glance_px;  glance_to(glance_target); break;
     }
     next_act_at = now + p.gap_ms;
 }

@@ -20,6 +20,10 @@ void clawd_tuning_defaults(ClawdTuning* t) {
     t->react_pending_ms = 15 * SEC;   // the walk back from a lurk is ~6 s at 2.5x
     t->blink_min_ms     = 2 * SEC;
     t->blink_max_ms     = 6 * SEC;
+    t->peek_cooldown_ms = 60 * SEC;
+    t->peek_look_min_ms = 1600;       // + rise, blink and the look back ≈ 2.5–3.3 s up
+    t->peek_look_max_ms = 2400;
+    t->peek_double_pct  = 30;
 }
 
 void clawd_tuning_fast(ClawdTuning* t) {
@@ -34,6 +38,7 @@ void clawd_tuning_fast(ClawdTuning* t) {
     t->alert_timeout_ms = 20 * SEC;
     t->long_turn_ms     = 10 * SEC;
     t->joy_pending_ms   = 30 * SEC;
+    t->peek_cooldown_ms = 20 * SEC;
 }
 
 ClawdTuning& clawd_tuning(void) {
@@ -147,6 +152,39 @@ bool attention_resumes_screensaver(AttnFrom from, AttnEnd how, bool engaged) {
 
 bool reaction_still_due(uint32_t queued_at, uint32_t now, const ClawdTuning* t) {
     return (uint32_t)(now - queued_at) <= t->react_pending_ms;
+}
+
+// ─── A tap on the meters ─────────────────────────────────────────────────────
+void peek_gate_clear(PeekGate* g) { memset(g, 0, sizeof(*g)); }
+
+void peek_gate_mark(PeekGate* g, uint32_t now) {
+    g->peeked = true;
+    g->last_peek = now;
+}
+
+TapReact clawd_tap_react(const PeekGate* g, const TapInput* in, const ClawdTuning* t) {
+    if (in->minimal || !in->home) return TAP_NONE;
+    if (in->corner == CORNER_BUSY) return TAP_NONE;     // mid-reaction: absorb, never queue
+    if (in->corner == CORNER_OUT)  return TAP_HURRY;
+    const bool cooled = !g->peeked || (uint32_t)(in->now - g->last_peek) >= t->peek_cooldown_ms;
+    return (cooled && in->meters_live) ? TAP_PEEK : TAP_SMALL;
+}
+
+const char* const CLAWD_TAP_ACTS[] = { "jumping", "waving", "dancing" };
+const int         CLAWD_TAP_ACT_COUNT = sizeof(CLAWD_TAP_ACTS) / sizeof(CLAWD_TAP_ACTS[0]);
+
+const char* clawd_tap_act(const char* last, ClawdRng* r) {
+    const int i = clawd_pick_no_repeat(CLAWD_TAP_ACTS, CLAWD_TAP_ACT_COUNT, last, r);
+    return i < 0 ? CLAWD_TAP_ACTS[0] : CLAWD_TAP_ACTS[i];
+}
+
+int peek_glance_px(int tap_x, int width, int max_px) {
+    const int half = width / 2;
+    if (half <= 0) return 0;
+    int g = (tap_x - half) * max_px / half;
+    if (g > max_px)  g = max_px;
+    if (g < -max_px) g = -max_px;
+    return g;
 }
 
 // ─── Corner seat ─────────────────────────────────────────────────────────────

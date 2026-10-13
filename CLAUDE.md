@@ -109,7 +109,9 @@ any board-private hardware drivers (e.g. `io_expander.{h,cpp}` on AMOLED-1.8).
 PlatformIO's `build_src_filter` includes shared code + one board's folder per env.
 
 **Boot and behaviour.** The device boots to the meters (`director_init`). A tap
-anywhere means "show me the meters" (streak home from the stage, face drops).
+anywhere means "show me the meters" (streak home from the stage, face drops);
+a tap *on* the meters is tapping the aquarium (corner reaction, and at most
+once a minute the `peek` beat: he ducks out and the face looks toward the tap).
 The stage is earned: a show after 5 min of activity level 3 (≤ 1 per 15 min,
 scene from the usage-only base group floored at Active), a screensaver after
 10 quiet min (face; calm-scene dips), attention on `m`. Full state machine,

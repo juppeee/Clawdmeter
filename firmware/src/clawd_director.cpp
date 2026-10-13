@@ -12,6 +12,7 @@
 #include <Arduino.h>
 #include <lvgl.h>
 #include <string.h>
+#include <stdlib.h>
 
 // ─── Beats ───────────────────────────────────────────────────────────────────
 // Each beat is a short script of steps. A step issues commands to the actors
@@ -27,9 +28,10 @@ enum Beat {
     B_FACE_HOME,     // face drops into the meters, he hurries to his seat
     B_STREAK_HOME,   // stage releases, he runs off, streak reveals the meters
     B_ATTENTION,     // the big Clawd fetches you
+    B_PEEK,          // a tap on the meters: hop, duck out, the face looks, he's back
 };
 static const char* const BEAT_NAMES[] = {
-    "home", "corner", "show", "screensaver", "face-home", "streak-home", "attention",
+    "home", "corner", "show", "screensaver", "face-home", "streak-home", "attention", "peek",
 };
 
 static Beat     beat = B_HOME;
@@ -63,6 +65,13 @@ static bool        joy_pending = false;
 static uint32_t    joy_at = 0;
 static bool        minimal = false;
 static ClawdRng    rng;
+
+// A tap on the meters (the aquarium)
+static PeekGate    peek_gate;
+static int         peek_x = 0;                // where the peek's tap landed
+static const char* last_tap_act = NULL;       // small reactions never repeat
+static lv_indev_t* touch_indev = NULL;
+static const uint8_t PEEK_STEP_DROPPING = 6;  // run_peek: the face is on its way down
 
 static uint32_t now_ms(void) { return millis(); }
 
@@ -198,11 +207,62 @@ void director_alert(const char* message) {
 void director_alert_clear(void) { end_attention(ATTN_END_CLEAR); }
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
-void director_tap(void) {
+static void start_peek(int x) {
+    // The startled hop opens on its crouch, so he reacts on the next frame.
+    if (!mascot_act("jumping", 1, true, 150)) return;
+    last_tap_act = "jumping";
+    peek_gate_mark(&peek_gate, now_ms());
+    peek_x = x;
+    go(B_PEEK);
+}
+
+// A tap while he's home on the meters: tapping the aquarium. The full peek is
+// rationed (clawd_tap_react); otherwise a small corner reaction, or nothing
+// if he's already reacting (taps never queue).
+static void tap_home(int x) {
+    TapInput in;
+    in.now = now_ms();
+    in.home = beat == B_HOME;
+    in.minimal = minimal;
+    in.corner = mascot_free() ? CORNER_FREE : mascot_out() ? CORNER_OUT : CORNER_BUSY;
+    in.meters_live = ui_meters_live();
+    const TapReact r = clawd_tap_react(&peek_gate, &in, &clawd_tuning());
+    const char* act = NULL;
+    switch (r) {
+    case TAP_PEEK:
+        start_peek(x);
+        break;
+    case TAP_SMALL:
+        act = clawd_tap_act(last_tap_act, &rng);
+        if (mascot_act(act, 1, true)) { last_tap_act = act; go(B_CORNER); }
+        break;
+    case TAP_HURRY:
+        mascot_hurry_home();            // "oh, you're there": he cuts the trip short
+        break;
+    case TAP_NONE:
+        break;
+    }
+    Serial.printf("[%lu] director: tap at x %d -> %s%s\n", (unsigned long)in.now, x,
+                  r == TAP_PEEK ? "peek" : r == TAP_SMALL ? "small " : r == TAP_HURRY ? "hurry home" : "absorbed",
+                  act ? act : "");
+}
+
+void director_tap(int x) {
     engage();
     if (attention_on) { end_attention(ATTN_END_TAP); return; }   // a dismissing tap does nothing else
     resume_screensaver = false;                   // "show me the meters" wins
     if (minimal) return;
+    if (beat == B_HOME) { tap_home(x); return; }
+    if (beat == B_PEEK) {
+        // The face is up looking at you: he blinks and drops right away.
+        // Before it's up (hop, ducking out) or once it's dropping, the tap
+        // is absorbed: nothing queues.
+        const bool drop = face_visible() && step < PEEK_STEP_DROPPING;
+        if (drop) to_meters(true);
+        Serial.printf("[%lu] director: tap at x %d -> %s\n", (unsigned long)now_ms(), x,
+                      drop ? "peek over" : "absorbed");
+        return;
+    }
     to_meters(false);
 }
 
@@ -220,7 +280,9 @@ void director_stage_next(void) {
 
 static void indev_cb(lv_event_t* e) {
     (void)e;
-    director_tap();
+    lv_point_t p = { 0, 0 };
+    if (touch_indev) lv_indev_get_point(touch_indev, &p);
+    director_tap(p.x);
 }
 
 void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {
@@ -292,6 +354,7 @@ void director_init(void) {
     face_init();
     streak_init();
     show_gate_clear(&show_gate);
+    peek_gate_clear(&peek_gate);
     turn_clear(&turn);
     clawd_rng_seed(&rng, now_ms() ^ 0xD1EC7u);
     last_engagement = now_ms();
@@ -300,8 +363,8 @@ void director_init(void) {
     go(B_HOME);
     // Every press on the panel, wherever it lands, is a tap for the
     // director. PRESSED (not CLICKED) so the reaction starts on the next frame.
-    lv_indev_t* indev = lv_indev_get_next(NULL);
-    if (indev) lv_indev_add_event_cb(indev, indev_cb, LV_EVENT_PRESSED, NULL);
+    touch_indev = lv_indev_get_next(NULL);
+    if (touch_indev) lv_indev_add_event_cb(touch_indev, indev_cb, LV_EVENT_PRESSED, NULL);
 }
 
 DirectorRoom director_room(void) {
@@ -516,6 +579,46 @@ static void run_attention(uint32_t now) {
     go(B_HOME);
 }
 
+// A tap on the meters, once the cooldown allows it (start_peek already
+// started the startled hop). One Clawd: he ducks out through the nearest edge
+// (his seat is by the left edge, so it's a few steps) before the face comes
+// up, and walks back in once it has dropped.
+static void run_peek(uint32_t now) {
+    if (!settled(now)) return;
+    const ClawdTuning& t = clawd_tuning();
+    switch (step) {
+    case 0:  // the hop has landed: he ducks out, quick
+        mascot_leave(300);
+        next_step();
+        break;
+    case 1:  // gone: the face rises (ease-out)
+        if (!mascot_away()) return;
+        face_rise();
+        next_step();
+        break;
+    case 2:  // up: he looks where you tapped
+        face_look_at_x(peek_x, clawd_rng_range(&rng, t.peek_look_min_ms, t.peek_look_max_ms));
+        next_step(320);
+        break;
+    case 3:  // ...and blinks at it (sometimes twice)
+        face_blink(clawd_rng_chance(&rng, t.peek_double_pct));
+        next_step();
+        break;
+    case 4:  // the look comes back to you; a beat of eye contact
+        if (face_busy()) return;
+        next_step(350);
+        break;
+    case 5:  // down behind the bezel (ease-in)
+        face_drop();
+        next_step();                  // == PEEK_STEP_DROPPING
+        break;
+    default: // back to his seat from the edge he left by
+        mascot_return(-1, 150);
+        go(B_CORNER);
+        break;
+    }
+}
+
 static void run_corner(uint32_t now) {
     if (react_anim) {
         if (!reaction_still_due(react_at, now, &clawd_tuning())) {
@@ -561,18 +664,33 @@ void director_tick(void) {
     case B_FACE_HOME:   run_face_home(now); break;
     case B_STREAK_HOME: run_streak_home(now); break;
     case B_ATTENTION:   run_attention(now); break;
+    case B_PEEK:        run_peek(now); break;
     }
 }
 
 // ─── QA ──────────────────────────────────────────────────────────────────────
 bool director_debug(const char* name) {
-    if (strcmp(name, "home") == 0)        { director_tap(); return true; }
+    if (strcmp(name, "home") == 0) {
+        // "Show me the meters" (a tap anywhere but home, without the peek).
+        engage();
+        if (attention_on) { end_attention(ATTN_END_TAP); return true; }
+        resume_screensaver = false;
+        if (!minimal) to_meters(false);
+        return true;
+    }
     if (strcmp(name, "attention") == 0)   { director_alert("Test: Clawd needs you"); return true; }
     if (minimal) return true;             // nothing else exists in minimal mode
     if (strcmp(name, "joy") == 0) {
         joy_pending = true;
         joy_at = now_ms();
         return true;
+    }
+    if (strncmp(name, "peek", 4) == 0) {  // the full peek now, cooldown or not; `clawd peek <x>`
+        if (beat != B_HOME || !mascot_free()) return false;
+        const int x = name[4] == ' ' ? atoi(name + 5) : lv_display_get_horizontal_resolution(NULL) * 3 / 4;
+        engage();
+        start_peek(x);
+        return beat == B_PEEK;
     }
     if (strcmp(name, "lurk") == 0) {      // a lurk trip now (to QA cutting it short)
         if (beat != B_HOME) return false;

@@ -253,6 +253,13 @@ bool mascot_seated(void)  { return img && mode == M_SEATED; }
 bool mascot_away(void)    { return !img || mode == M_AWAY; }
 bool mascot_busy(void)    { return img && mode != M_SEATED && mode != M_AWAY && mode != M_HELD; }
 bool mascot_acting(void)  { return img && mode == M_ACT; }
+bool mascot_free(void) {
+    return img && !minimal && (mode == M_SEATED || (mode == M_ACT && act_auto));
+}
+bool mascot_out(void) {
+    return img && !minimal &&
+           (mode == M_LURK || mode == M_AWAY || (mode == M_WALK && after != AFTER_BIG));
+}
 bool mascot_in_attention(void) {
     return attn || mode == M_BIG_IN || mode == M_BIG_ACT || mode == M_BIG_OUT ||
            mode == M_HELD || (mode == M_WALK && after == AFTER_BIG);
@@ -272,7 +279,7 @@ void mascot_autonomy(bool on) {
     if (on && mode == M_SEATED) seated_since = millis();
 }
 
-bool mascot_act(const char* name, uint8_t times) {
+bool mascot_act(const char* name, uint8_t times, bool snappy, uint16_t speed_pct) {
     if (!img || minimal) return false;
     if (!(mode == M_SEATED || (mode == M_ACT && act_auto))) return false;
     const ClawdAnim* a = clawd_anim(name);
@@ -282,6 +289,8 @@ bool mascot_act(const char* name, uint8_t times) {
         if (f && feet_y - f->h * cell >= 0) a = f;
     }
     start_frames(a);
+    if (snappy && a->frame_count > 1) frame = 1;
+    speed = speed_pct ? speed_pct : 100;   // not whatever the last walk ran at
     act_left = times ? times : 1;
     act_auto = false;
     facing = +1;
@@ -431,6 +440,7 @@ static void seated_tick(uint32_t now) {
     const ClawdAnim* a = clawd_anim(act);
     if (!a) { seated_since = now; return; }
     start_frames(a);
+    speed = 100;
     act_left = 1;
     act_auto = true;
     mode = M_ACT;

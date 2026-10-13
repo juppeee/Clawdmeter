@@ -193,6 +193,95 @@ static void test_corner_seat_leaves_headroom_for_the_jump(void) {
     TEST_ASSERT_EQUAL_INT(38, corner_seat_feet(38, 60, 30, 2));   // never raised
 }
 
+// ─── A tap on the meters ─────────────────────────────────────────────────────
+static TapInput tap_at(uint32_t now) {
+    TapInput in = { now, true, false, CORNER_FREE, true };
+    return in;
+}
+
+static void test_first_tap_earns_the_peek_then_small_reactions(void) {
+    PeekGate g; peek_gate_clear(&g);
+    TapInput in = tap_at(5 * SEC);
+    TEST_ASSERT_EQUAL_INT(TAP_PEEK, clawd_tap_react(&g, &in, &T));
+    peek_gate_mark(&g, 5 * SEC);
+    in.now = 15 * SEC;
+    TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
+    in.now = 5 * SEC + T.peek_cooldown_ms - 1;
+    TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
+    in.now = 5 * SEC + T.peek_cooldown_ms;
+    TEST_ASSERT_EQUAL_INT(TAP_PEEK, clawd_tap_react(&g, &in, &T));
+    // About a minute: rationed so the face keeps meaning.
+    TEST_ASSERT_TRUE(T.peek_cooldown_ms >= 45 * SEC && T.peek_cooldown_ms <= 120 * SEC);
+}
+
+static void test_cooldown_starts_only_when_a_peek_starts(void) {
+    // Small reactions never push the next peek back.
+    PeekGate g; peek_gate_clear(&g);
+    peek_gate_mark(&g, 0);
+    TapInput in = tap_at(30 * SEC);
+    for (int i = 0; i < 20; i++) {
+        in.now = 30 * SEC + i * 500;
+        TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
+    }
+    in.now = T.peek_cooldown_ms;
+    TEST_ASSERT_EQUAL_INT(TAP_PEEK, clawd_tap_react(&g, &in, &T));
+    // Wraps safely.
+    peek_gate_mark(&g, 0xFFFFF000u);
+    in.now = 0x00000100u;
+    TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
+}
+
+static void test_rapid_taps_are_absorbed_not_queued(void) {
+    PeekGate g; peek_gate_clear(&g);
+    TapInput in = tap_at(0);
+    in.corner = CORNER_BUSY;                       // mid-reaction or walking home
+    TEST_ASSERT_EQUAL_INT(TAP_NONE, clawd_tap_react(&g, &in, &T));
+    in.corner = CORNER_OUT;                        // out on a lurk trip: he comes back
+    TEST_ASSERT_EQUAL_INT(TAP_HURRY, clawd_tap_react(&g, &in, &T));
+}
+
+static void test_tap_keeps_its_meaning_outside_home_and_minimal(void) {
+    PeekGate g; peek_gate_clear(&g);
+    TapInput in = tap_at(0);
+    in.home = false;                               // show / screensaver / attention: director's to_meters
+    TEST_ASSERT_EQUAL_INT(TAP_NONE, clawd_tap_react(&g, &in, &T));
+    in = tap_at(0);
+    in.minimal = true;                             // minimal: he stays still
+    TEST_ASSERT_EQUAL_INT(TAP_NONE, clawd_tap_react(&g, &in, &T));
+    in = tap_at(0);
+    in.meters_live = false;                        // the face would hide the pairing / stale hint
+    TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
+}
+
+static void test_small_tap_reactions_vary(void) {
+    ClawdRng r; clawd_rng_seed(&r, 7);
+    bool seen[8] = { false };
+    const char* last = "jumping";                  // the peek's hop
+    for (int i = 0; i < 100; i++) {
+        const char* a = clawd_tap_act(last, &r);
+        TEST_ASSERT_TRUE(strcmp(a, last) != 0);
+        for (int k = 0; k < CLAWD_TAP_ACT_COUNT; k++)
+            if (strcmp(a, CLAWD_TAP_ACTS[k]) == 0) seen[k] = true;
+        last = a;
+    }
+    for (int k = 0; k < CLAWD_TAP_ACT_COUNT; k++) TEST_ASSERT_TRUE(seen[k]);
+    TEST_ASSERT_TRUE(CLAWD_TAP_ACT_COUNT >= 2);
+}
+
+static void test_peek_looks_toward_the_tap(void) {
+    TEST_ASSERT_EQUAL_INT(0, peek_glance_px(240, 480, 30));
+    TEST_ASSERT_EQUAL_INT(30, peek_glance_px(480, 480, 30));
+    TEST_ASSERT_EQUAL_INT(-30, peek_glance_px(0, 480, 30));
+    TEST_ASSERT_EQUAL_INT(15, peek_glance_px(360, 480, 30));
+    TEST_ASSERT_EQUAL_INT(30, peek_glance_px(900, 480, 30));     // clamped
+    TEST_ASSERT_EQUAL_INT(0, peek_glance_px(10, 0, 30));         // degenerate width
+    // The far eye still travels 1.5x on a peek glance.
+    int l, rr;
+    face_eye_offsets(peek_glance_px(0, 480, 20), &l, &rr);
+    TEST_ASSERT_EQUAL_INT(-30, l);
+    TEST_ASSERT_EQUAL_INT(-20, rr);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_show_needs_five_sustained_minutes_of_level_3);
@@ -212,5 +301,11 @@ int main(int, char**) {
     RUN_TEST(test_attention_ends_home_when_you_showed_up);
     RUN_TEST(test_reaction_waits_for_him_to_hurry_home);
     RUN_TEST(test_corner_seat_leaves_headroom_for_the_jump);
+    RUN_TEST(test_first_tap_earns_the_peek_then_small_reactions);
+    RUN_TEST(test_cooldown_starts_only_when_a_peek_starts);
+    RUN_TEST(test_rapid_taps_are_absorbed_not_queued);
+    RUN_TEST(test_tap_keeps_its_meaning_outside_home_and_minimal);
+    RUN_TEST(test_small_tap_reactions_vary);
+    RUN_TEST(test_peek_looks_toward_the_tap);
     return UNITY_END();
 }

@@ -25,12 +25,17 @@ bool mascot_seated(void);            // in his seat, between acts
 bool mascot_away(void);              // fully off screen
 bool mascot_busy(void);              // walking, acting, lurking or fetching you
 bool mascot_acting(void);            // playing an act in his seat
+bool mascot_free(void);              // seated, or in an idle act of his own (a new act may cut in)
+bool mascot_out(void);               // out of his seat on his own: lurk trip, walk, away
 
 void mascot_autonomy(bool on);       // idle acts + lurk trips while seated
 // Play `anim` in the seat `times` times (noticing, a wave, jumping happy).
 // Interrupts an idle act; refused (false) while he's walking or away. An act
 // too tall for the headroom above the seat plays a shorter official act.
-bool mascot_act(const char* anim, uint8_t times);
+// snappy: skip the idle lead-in frame (every act opens on the idle pose, held
+// ~330 ms) so a reaction to a tap shows on the next frame. speed_pct scales
+// the authored timing (a startle plays a little quick).
+bool mascot_act(const char* anim, uint8_t times, bool snappy = false, uint16_t speed_pct = 100);
 void mascot_leave(uint16_t speed_pct);                 // walk off the nearest edge
 void mascot_return(int from_side, uint16_t speed_pct); // -1 left / +1 right edge → seat
 // Something to react to while he's out of his seat: cut a lurk trip short

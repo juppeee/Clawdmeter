@@ -10,7 +10,7 @@
 int main(void) {
     printf(
         "Clawdmeter simulator\n"
-        "  mouse          touch (a tap means: show me the meters)\n"
+        "  mouse          touch (on the meters he reacts; elsewhere: show me the meters)\n"
         "  space          play/pause scenario    left/right step    1-9 jump\n"
         "  d              toggle BLE link\n"
         "  b / n (hold)   BOOT / secondary button    p  PWR button\n"

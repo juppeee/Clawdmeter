@@ -1,5 +1,6 @@
 #pragma once
 #include <stdbool.h>
+#include <stdint.h>
 
 // The #198 face: Clawd up close, resting on the glass. Clawd-orange full
 // field, two tall dark eyes; a blink is the solid-cell > < squint; on a glance
@@ -24,3 +25,7 @@ bool face_busy(void);          // moving, blinking or glancing
 
 void face_blink(bool twice);   // the noticing beat; also used as the curtain blink
 void face_set_resting(bool on);// irregular blinks + glances while up
+// Look toward screen x (a tap): the eyes glance proportionally (up to 1.5x
+// the resting glance, far eye 1.5x on top), hold for hold_ms, then come back
+// to you. face_busy() until they're back.
+void face_look_at_x(int x, uint32_t hold_ms);

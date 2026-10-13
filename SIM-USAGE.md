@@ -22,7 +22,7 @@ Launch from the `firmware/` directory — the default scenario path
 
 | Key | Action |
 |---|---|
-| mouse / left-drag | touch (a tap means "show me the meters", from any room) |
+| mouse / left-drag | touch: on the meters, he reacts (a rationed face peek, else a small act); from any other room, "show me the meters" |
 | `space` | play/pause scenario playback |
 | `←` / `→` | step one scenario state (pauses playback) |
 | `1`–`9` | jump to scenario state N (pauses playback) |
@@ -108,7 +108,8 @@ With `SIM_FAST` the show starts at ~14 s, the screensaver at ~53 s, the wake
 at ~90 s, attention at ~97 s and the reset jump at ~115 s. With `SIM_TRACE=1`
 the sim prints a timestamped trace of every beat and step, and
 `SIM_CMDS="ms:cmd;…"` types serial commands at set times (`pwr`, `prompt`,
-`stop`, `alert`, `clawd <beat>`):
+`stop`, `alert`, `clawd <beat>`, including `clawd peek <x>` for the
+tap-on-the-meters peek without waiting out its cooldown):
 
 ```
 [14014] director: home -> show
@@ -128,7 +129,9 @@ SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
 - `SIM_SHOTS="ms:path,..."` saves a screenshot at each time (ascending) and
   exits after the last.
 - `SIM_TAPS="ms@x,y;..."` holds a 120 ms press at each time. A tap at 25 s
-  lands on the show's scene and runs the streak back to the meters.
+  lands on the show's scene and runs the streak back to the meters. On the
+  meters each tap logs what it earned (`tap at x 420 -> peek`, `-> small
+  waving`, `-> hurry home`, `-> absorbed`).
 - `SIM_MINIMAL=1` boots with the minimal-mode override on.
 
 Scenes are picked at random from the mood group, so step times after the

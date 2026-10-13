@@ -4,7 +4,7 @@
 // 480×480 AMOLED so shared code (main.cpp, ui.cpp, splash.cpp) can be
 // developed without hardware. No pins here, just geometry and the key map.
 //
-//   mouse / left-drag    touch (a tap means "show me the meters")
+//   mouse / left-drag    touch (on the meters he reacts; elsewhere "show me the meters")
 //   space                play/pause scenario playback
 //   left / right         step one scenario state (pauses playback)
 //   1..9                 jump to scenario state N (pauses playback)

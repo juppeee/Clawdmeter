@@ -3,15 +3,16 @@
 This is the firmware side of design system v0.4, sections 05–10: one Clawd who
 lives on the meters, performs on the stage, and comes up to the glass to check
 on you. The behaviour depends on the situation (hook events, usage moving, a
-session reset, attention), not on gestures. A tap means one thing everywhere:
-show me the meters.
+session reset, attention), not on gestures. A tap means one thing everywhere
+else: show me the meters. On the meters themselves a tap is tapping the
+aquarium: he reacts (see "A tap on the meters" below).
 
 ## Modules
 
 | File | Role |
 |---|---|
 | `firmware/src/clawd_director.{h,cpp}` | Owns the rooms and runs the beats. It is the only module that decides what Clawd does next. |
-| `firmware/src/clawd_policy.{h,cpp}` | Pure decision rules, unit-tested in `test/test_clawd_policy`: show gate and show group, screensaver gate, where attention returns to, how long a reaction waits for him, the corner seat's headroom, turn tracker, no-repeat picker, jitter, the resting face's rhythm, and all tunables (`ClawdTuning`). |
+| `firmware/src/clawd_policy.{h,cpp}` | Pure decision rules, unit-tested in `test/test_clawd_policy`: show gate and show group, screensaver gate, where attention returns to, how long a reaction waits for him, the corner seat's headroom, turn tracker, no-repeat picker, jitter, the resting face's rhythm, what a tap on the meters earns (peek gate, small reactions, where the face looks), and all tunables (`ClawdTuning`). |
 | `firmware/src/mascot.{h,cpp}` | Clawd on the meters: the corner Clawd in his seat, plus the full-size sprite used for the lurk trip and the attention walk-on. Does in-room secondary action (idle acts, lurk trips) when the director allows it. |
 | `firmware/src/splash.{h,cpp}` | The stage room: a full-screen 60×60-cell stage with one performer who stands, walks, or performs a scene. |
 | `firmware/src/face.{h,cpp}` | The #198 face: LVGL rectangles on `lv_layer_top()`. It is both the screensaver and the curtain that rooms change behind. |
@@ -72,8 +73,9 @@ passed. Beat changes always print; every step prints too after
 | `corner` | notice, wave, joy, or after a transition | Waits for the commanded corner act or walk to finish, then `home`. |
 | `show` | `a == 3` held for 5 min; at most one per 15 min; hooks seen; meters live | Points at the bar (or, if he's out on a lurk trip, heads straight out), walks off at 1.5×, face rises, blinks, stage is set behind it, face drops, walks on from the right at 1.5×, one scene (loop held 16 s, so about 20 s), waves, walks off right, face rises, blinks, meters are set behind it, face drops, corner walks back to his seat. |
 | `screensaver` | 10 min with no engagement; needs hooks seen or a window that hasn't started; meters live | Walks off through the nearest edge (a lurk trip finishes its peek first), face rises and rests (blinks every 2–6 s, about one in five a double, glances where the far eye travels 1.5×). Every 3–5 min: the stage is set behind the face with Clawd at home, the face drops, one calm scene plays (magnifier or walking, alternating), the face rises, the meters are set behind it, and he rests again. |
-| `face-home` | tap, prompt, button or attention while the face is up | If woken by a prompt, he blinks first (noticing), then the stage closes behind the face, the face drops into the meters, and the corner hurries home at 1.5×. |
+| `face-home` | tap, prompt, button or attention while the face is up | If woken by a prompt or tapped during a peek, he blinks first (noticing), then the stage closes behind the face, the face drops into the meters, and the corner hurries home at 1.5×. |
 | `streak-home` | tap, prompt or attention while on the stage | The scene releases to the idle pose on the spot, waits 150 ms, runs off right at 3×. The streak starts as soon as his last cell leaves the stage: 380 ms, ease in-out, the stage clipped to its left. Then the stage closes and the corner walks home at 1.5×. |
+| `peek` | a tap on the meters while home, at most one per 60 s (below) | Startled hop (`jumping` from its crouch, 1.5×), ducks out through the nearest edge at 3×, face rises, eyes glance toward the tap's x and hold 1.6–2.4 s, a blink (30 % double), the look comes back to you, 350 ms of eye contact, face drops, corner walks back to his seat at 1.5×. |
 | `attention` | `m` (alert) in a payload | The corner walks off at 2×, the big Clawd (12 px cells) walks on at 2×, then waves and points alternately. A tap, `x` (clear) or 2 min sends the big one off left. Interrupts a show or the screensaver through `face-home` / `streak-home`, and then returns to where it left off (below). |
 
 **Which scene a show plays.** The trigger (activity 3) lifts the live mood
@@ -115,6 +117,42 @@ Small reactions on the meters, from `home` or `corner`:
   If he's out on a trip he hurries back for it; if he's in another room it
   waits up to 5 min for him to sit down. It outranks the wave.
 
+### A tap on the meters (the aquarium)
+
+While the director is home on the meters, a tap gets a reaction on the next
+frame (`clawd_tap_react`):
+
+- **The peek**, when the last one was at least `peek_cooldown_ms` (60 s) ago
+  and the meters are live: the `peek` beat above. One Clawd: the corner Clawd
+  ducks out through the nearest edge before the face starts to rise. His seat
+  is a few steps from the left edge, so that's under a second at 3×, and it
+  keeps the "enter and leave through an edge" rule. Letting the rising face
+  cover his seat instead would put the face and the corner sprite on screen
+  together for most of the rise, since the seat is at the top. The cooldown
+  starts when a peek starts, so small reactions never push the next one back.
+- **A small corner reaction** otherwise (in the cooldown, or stale / pairing
+  meters, where the face would hide the hint): `jumping`, `waving` or
+  `dancing`, never the same twice running, with the peek's hop counting as
+  `jumping`. Every tap act starts on frame 1 (its crouch), not on the idle
+  frame that every act opens with (held 330–580 ms), so the reaction shows
+  on the next frame.
+- **He's out** on a lurk trip: he hurries back to his seat (the same path a
+  prompt takes), and nothing else.
+- **Nothing** while a reaction is already playing, he's walking home, or the
+  peek's hop or exit is under way. Taps are absorbed, never queued.
+- **A tap while the peek's face is up**: he blinks and the face drops
+  (`face-home` with the noticing blink), then he walks back to his seat. Once
+  the face is already dropping, the tap is absorbed.
+
+Unchanged: a tap during attention dismisses it, and a tap on the stage or the
+screensaver face still means "show me the meters". In minimal mode the tap
+does nothing (he stays on the still frame). On the C6 it all works: the face
+is LVGL rectangles and the corner sprite has its internal-RAM buffer. A tap
+that wakes a dark panel is swallowed by `idle_consume_wake_press` (it never
+reaches LVGL), so the waking tap only wakes the panel. Every tap counts as
+presence: the press edge resets the idle timer, and `director_tap` counts it
+as engagement for the screensaver clock.
+
 **The seat leaves headroom for the jump.** Jumping happy rises 12 cells above
 the idle pose (30 cells tall). `ui.cpp` lowers the seat's feet line just enough
 for it to clear the top edge by 2 px without touching the first panel
@@ -139,7 +177,7 @@ also wakes the screensaver, which covers the slow-clock-only case.
 | Staging | The meters never animate while he performs: the stage and face cover them, and there's one actor at a time. |
 | Slow in, slow out | `lv_anim_path_ease_out` for the rising face, `ease_in` for the drop, `ease_in_out` for the streak. Walks begin on intro frames and end on the outro. |
 | Exaggeration | Wave for a long turn, show for a busy stretch, jumping happy for a reset, the big Clawd for attention. |
-| Appeal | The face appears only for the screensaver and as the show's curtain. |
+| Appeal | The face appears only for the screensaver, as the show's curtain, and for a tap on the meters at most once a minute. |
 
 ## Minimal mode
 
@@ -185,8 +223,9 @@ command, `z` in the sim):
 `ClawdTuning` in `clawd_policy.h` holds all the timings: show after 5 min,
 cooldown 15 min, show scene loop 16 s, quiet 10 min, calm dip every 3–5 min,
 calm scene loop 10 s, alert timeout 2 min, long turn 2 min, joy wait 5 min,
-reaction wait 15 s, blinks every 2–6 s. `clawd_tuning_fast()` compresses them for the sim
-(`SIM_FAST=1`).
+reaction wait 15 s, blinks every 2–6 s, peek cooldown 60 s, peek look
+1.6–2.4 s, double blink on a peek 30 %. `clawd_tuning_fast()` compresses them for the sim
+(`SIM_FAST=1`; the peek cooldown becomes 20 s).
 
 ## QA
 
@@ -207,8 +246,25 @@ reaction wait 15 s, blinks every 2–6 s. `clawd_tuning_fast()` compresses them 
   A reference set of captures is in `screenshots/director/` (01–25 the main
   walkthrough, 26 stale data, 27–29 a lurk cut short, 30–31 attention handing
   back to the screensaver, 32 PWR on a calm dip, 33–34 the jump at 368×448 and
-  its 240×240 fallback).
+  its 240×240 fallback, 35-peek-* a tap on the meters: crouch, hop, ducks out,
+  face rises, looks toward the tap, blinks, drops, back in his seat, a small
+  reaction in the cooldown, and a tap on the peeking face).
+
+  The tap captures come from a single live payload (any one-line scenario)
+  with scripted taps:
+
+  ```bash
+  SIM_FAST=1 SIM_TRACE=1 SIM_SCENARIO=<one live payload> \
+  SIM_TAPS="3000@420,300;12000@240,300;12150@240,300;12300@240,300;25000@60,300;27500@240,300" \
+  .pio/build/sim/program
+  ```
+
+  3 s: the peek, looking right. 12 s: a small reaction, and the rapid taps
+  after it are absorbed. 25 s: the cooldown is over, so the next peek looks
+  left, and the tap at 27.5 s blinks and drops it. A random lurk trip can
+  land on one of those taps (`tap at x … -> hurry home` in the log).
 - Hardware: send `clawd show`, `clawd screensaver`, `clawd attention`,
-  `clawd joy`, `clawd lurk` or `clawd home` on the serial console, then `screenshot`
+  `clawd joy`, `clawd lurk`, `clawd peek [x]` (the peek now, ignoring the
+  cooldown, looking toward x) or `clawd home` on the serial console, then `screenshot`
   (`./screenshot.sh`). This replaces swapping the boot screen in `main.cpp`.
   The device boots to the meters.

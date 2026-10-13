@@ -24,6 +24,10 @@ struct ClawdTuning {
     uint32_t react_pending_ms;   // a notice / wave may wait this long for him to hurry home
     uint32_t blink_min_ms;       // resting face: gap between blinks/glances
     uint32_t blink_max_ms;
+    uint32_t peek_cooldown_ms;   // a tap on the meters earns the face peek at most once per this long
+    uint32_t peek_look_min_ms;   // the peeking face holds its look toward the tap (min..max)
+    uint32_t peek_look_max_ms;
+    uint8_t  peek_double_pct;    // chance the peek's blink is a double
 };
 
 ClawdTuning& clawd_tuning(void);           // mutable singleton, defaults below
@@ -119,6 +123,48 @@ bool reaction_still_due(uint32_t queued_at, uint32_t now, const ClawdTuning* t);
 // `max_feet` (the first meter panel). If it can't fit, the result is clamped
 // and the caller's tall acts must fall back to something shorter.
 int corner_seat_feet(int feet_y, int tallest_px, int max_feet, int top_margin);
+
+// ─── A tap on the meters (the aquarium) ──────────────────────────────────────
+// Tapping the glass while he's home gets a reaction. The full peek (startled
+// hop, he ducks out, the face comes up and looks where you tapped) is the
+// face's eye contact, so it's rationed to one per `peek_cooldown_ms`; taps in
+// between get a small corner reaction. Nothing ever queues: a tap that lands
+// while he's mid-reaction (or walking home) is simply absorbed, and the
+// cooldown only starts when a peek actually starts.
+enum TapReact {
+    TAP_NONE,    // absorbed: minimal mode, not home, or he's already reacting
+    TAP_HURRY,   // he's out (lurk trip / walking): he hurries back to his seat
+    TAP_SMALL,   // a small corner reaction (clawd_tap_act)
+    TAP_PEEK,    // the full face peek
+};
+enum CornerState {
+    CORNER_FREE,   // seated, or in an idle act of his own (interruptible)
+    CORNER_BUSY,   // a commanded act or a walk back to the seat
+    CORNER_OUT,    // away from his seat on his own (lurk trip)
+};
+struct TapInput {
+    uint32_t    now;
+    bool        home;          // the director is in its home beat (meters, nothing staged)
+    bool        minimal;       // minimal mode: Clawd stays still
+    CornerState corner;
+    bool        meters_live;   // fresh data; else the face would hide the pairing / stale hint
+};
+struct PeekGate { bool peeked; uint32_t last_peek; };
+void     peek_gate_clear(PeekGate* g);
+void     peek_gate_mark(PeekGate* g, uint32_t now);   // a peek started
+TapReact clawd_tap_react(const PeekGate* g, const TapInput* in, const ClawdTuning* t);
+
+// The small corner reactions (official acts that open on a crouch, so the
+// reaction shows on the next frame). Never the same twice running; the
+// peek's opening hop counts as "jumping".
+extern const char* const CLAWD_TAP_ACTS[];
+extern const int         CLAWD_TAP_ACT_COUNT;
+const char* clawd_tap_act(const char* last, ClawdRng* r);
+
+// Where the peeking face looks: a glance proportional to how far from the
+// centre the tap landed, ±max_px at the edges (the far eye then travels 1.5x
+// that, face_eye_offsets).
+int peek_glance_px(int tap_x, int width, int max_px);
 
 // ─── Resting face behaviour ──────────────────────────────────────────────────
 // What the resting face does next, and when. Blinks are irregular and
