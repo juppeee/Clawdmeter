@@ -366,8 +366,8 @@ mod tests {
                 .unwrap();
             child.stdin.take().unwrap().write_all(input.as_bytes()).unwrap();
             child.wait().unwrap();
-            // The script hardcodes the pre-rename state dir.
-            let state_a = clawdmeter_core::paths::legacy_state_dir(&home_a);
+            // The script writes under its own hardcoded dir.
+            let state_a = home_a.join(".config/claude-usage-monitor");
             let state_b = b.join("state");
             run(Mode::parse(&args(mode)), input, &state_b, 1_700_000_000);
             let snapshot = |d: &Path| -> Vec<(String, String)> {

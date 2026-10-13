@@ -229,10 +229,7 @@ Run modes: no args = tray app (logs to `<state>/daemon.log`);
 
 State lives in one dir, `~/.config/clawdmeter/` (Windows:
 `%LOCALAPPDATA%\Clawdmeter\`): `config`, `events.log`, `attention`,
-`clear-<sid>`, `ble-address`, `daemon.log`, app state/locks. Every start
-moves a pre-rename `~/.config/claude-usage-monitor/` over once
-(`paths::migrate_legacy`; that name survives only there and in legacy-hook
-tests). Config keys:
+`clear-<sid>`, `ble-address`, `daemon.log`, app state/locks. Config keys:
 `config_dirs`, `poll_interval`, `heartbeat_interval`, `chime`, `beep`,
 `clock`, `claude_path`, `release_repo`, `update_check`, `onboarding_done`.
 

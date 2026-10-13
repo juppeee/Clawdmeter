@@ -61,17 +61,13 @@ fn main() {
         std::process::exit(clawdmeter_app::hooks::main(&args[1..]));
     }
     let paths = Paths::for_user();
-    // Before the logger opens daemon.log, so the old log moves over too.
-    let migration = clawdmeter_core::paths::migrate_legacy(&paths);
     if args.is_empty() {
         logger::init_with_file(&paths.state_dir.join("daemon.log"));
-        log_migration(&paths, migration);
         warn_if_legacy_daemon(&paths);
         std::process::exit(tray::run(paths));
     }
     attach_console();
     logger::init();
-    log_migration(&paths, migration);
     let code = match args[0].as_str() {
         "--daemon" => run_daemon(paths),
         "--window" => {
@@ -127,27 +123,6 @@ fn main() {
         }
     };
     std::process::exit(code);
-}
-
-fn log_migration(paths: &Paths, m: std::io::Result<Option<clawdmeter_core::paths::Migration>>) {
-    let old = clawdmeter_core::paths::legacy_state_dir(&paths.home);
-    match m {
-        Ok(None) => {}
-        Ok(Some(m)) => {
-            if !m.moved.is_empty() {
-                log::info!("moved {} from {} to {}", m.moved.join(", "), old.display(), paths.state_dir.display());
-            }
-            if !m.kept.is_empty() {
-                log::info!(
-                    "left {} in {} ({} has its own)",
-                    m.kept.join(", "),
-                    old.display(),
-                    paths.state_dir.display()
-                );
-            }
-        }
-        Err(e) => log::warn!("could not move files from {} to {}: {e}", old.display(), paths.state_dir.display()),
-    }
 }
 
 /// The bash / Python daemon this app replaces would fight it for the device.
