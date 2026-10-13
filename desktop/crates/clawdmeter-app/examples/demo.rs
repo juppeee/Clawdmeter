@@ -8,6 +8,7 @@
 //!   cargo run -p clawdmeter-app --example demo -- [--page PAGE] [--status connected|off]
 //!   [--board none|fresh|current|old] [--setup welcome|board|flash|pair|hooks|done] [--hooks-preview]
 //!   [--flash-to identify|firmware|flash|done] [--shop] [--accounts retrying] [--refresh wait|checking]
+//!   [--advanced]
 //! ```
 //!
 //! `--accounts retrying` adds a second account that is being rate-limited;
@@ -170,6 +171,7 @@ fn main() {
     let flash_to = arg(&args, "--flash-to");
     let hooks_preview = args.iter().any(|a| a == "--hooks-preview");
     let shop = args.iter().any(|a| a == "--shop");
+    let advanced = args.iter().any(|a| a == "--advanced");
 
     clawdmeter_app::ui::open(move |window, cx| {
         let p = paths.clone();
@@ -180,6 +182,9 @@ fn main() {
         let app = AppView::build(p, page, overview, settings.clone(), flasher.clone(), window, cx);
         if shop {
             flasher.update(cx, |f, cx| f.show_shop(true, cx));
+        }
+        if advanced {
+            settings.update(cx, |s, cx| s.show_advanced(true, cx));
         }
         if hooks_preview {
             settings.update(cx, |s, cx| s.review_hook_install(cx));

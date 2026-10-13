@@ -388,6 +388,26 @@ pub fn field(
         .child(div().flex_shrink_0().child(control))
 }
 
+/// A settings row whose control is too wide to sit beside the text: label,
+/// help, then the control underneath.
+pub fn field_stacked(
+    t: &Theme,
+    label: impl Into<SharedString>,
+    help: impl Into<SharedString>,
+    control: impl IntoElement,
+) -> impl IntoElement {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(3.))
+        .py(px(12.))
+        .border_b_1()
+        .border_color(t.line)
+        .child(div().text_size(px(14.)).text_color(t.text).child(label.into()))
+        .child(div().text_size(px(12.5)).text_color(t.mute).child(help.into()))
+        .child(div().flex().pt(px(8.)).child(control))
+}
+
 /// Section heading in the display face.
 pub fn heading(t: &Theme, text: impl Into<SharedString>) -> impl IntoElement {
     div().font_family(FONT_DISPLAY).text_size(px(20.)).text_color(t.text).child(text.into())

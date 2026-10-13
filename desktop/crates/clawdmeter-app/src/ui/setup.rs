@@ -165,7 +165,11 @@ impl SetupView {
     /// one shows neutral, not green).
     fn completed(&self, i: usize, cx: &Context<Self>) -> bool {
         match i {
-            1 | 2 => matches!(self.board, Some(BoardOutcome::Flashed | BoardOutcome::UpToDate)),
+            1 => match self.board {
+                Some(b) => b != BoardOutcome::Skipped,
+                None => self.flasher.read(cx).picked().is_some(),
+            },
+            2 => matches!(self.board, Some(BoardOutcome::Flashed | BoardOutcome::UpToDate)),
             3 => self.connected,
             4 => {
                 let s = self.settings.read(cx);

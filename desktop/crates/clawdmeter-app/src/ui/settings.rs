@@ -18,7 +18,8 @@ use gpui::{div, img, prelude::*, px, Context, EventEmitter, PathPromptOptions, S
 
 use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_M, R_S};
 use super::widgets::{
-    button, caption, card, field, heading, icon, notice, para, pill, segmented, subheading, toggle, ButtonKind, Tone,
+    button, caption, card, field, field_stacked, heading, icon, notice, para, pill, segmented, subheading, toggle,
+    ButtonKind, Tone,
 };
 use super::{command, live_status, not_running_text, run_blocking, Navigate, REFRESH};
 use crate::diff::{line_diff, with_context, DiffLine};
@@ -159,6 +160,12 @@ impl SettingsView {
     pub fn review_hook_install(&mut self, cx: &mut Context<Self>) {
         let pending = self.hooks.iter().filter(|h| h.status.needs_install()).map(|h| h.dir.clone()).collect();
         self.plan_hooks(HookAction::Install, pending);
+        cx.notify();
+    }
+
+    /// Open or close the Settings page's Advanced section.
+    pub fn show_advanced(&mut self, open: bool, cx: &mut Context<Self>) {
+        self.advanced = open;
         cx.notify();
     }
 
@@ -962,7 +969,7 @@ impl SettingsView {
             }
         }
         let me = cx.entity().downgrade();
-        pane = pane.child(field(
+        pane = pane.child(field_stacked(
             t,
             "Usage checks",
             "Checks every 3 minutes while working, then less often when quiet. Retry delays apply to all checks, \

@@ -758,12 +758,14 @@ impl FlasherView {
             ),
             (None, None) => String::new(),
         };
+        // Firmware that names its board needs a confirmation, not a choice.
+        let heading = if self.info.is_some() && !self.probing { "Your board" } else { "Choose your board" };
         let mut d = div().flex().flex_col().gap(px(12.)).child(
             div()
                 .flex()
                 .items_center()
                 .justify_between()
-                .child(div().font_family(FONT_DISPLAY).text_size(px(20.)).child("Choose your board"))
+                .child(div().font_family(FONT_DISPLAY).text_size(px(20.)).child(heading))
                 .when(self.probing || !chip_text.is_empty(), |d| {
                     let (text, tone) = if self.probing {
                         ("Identifying board…".to_string(), Tone::Accent)
