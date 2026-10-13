@@ -142,6 +142,31 @@ class WebToolsManifestTest(unittest.TestCase):
                 "offset": 0}])
 
 
+    def test_nvs_is_split_out_so_an_update_keeps_pairings(self):
+        with tempfile.TemporaryDirectory() as d:
+            dist = Path(d)
+            write_release(dist, "waveshare_amoled_216", "v2.0.0")
+            self.assertEqual(run("make_manifest.py", "--version", "v2.0.0",
+                                 "--dist", d).returncode, 0)
+            # Give the merged image a real partition table: nvs at 0x9000+0x5000.
+            image = bytearray(b"\xff" * 0x20000)
+            entry = lambda kind, sub, off, size: (b"\xaa\x50" + bytes([kind, sub])
+                                                  + struct.pack("<II", off, size)).ljust(32, b"\0")
+            table = entry(1, 2, 0x9000, 0x5000) + entry(0, 0x10, 0x10000, 0x10000)
+            image[0x8000:0x8000 + len(table)] = table
+            (dist / "waveshare_amoled_216-v2.0.0.bin").write_bytes(bytes(image))
+            r = run("make_webtools_manifest.py", "--dist", d)
+            self.assertEqual(r.returncode, 0, r.stderr)
+            web = json.loads((dist / "webtools-waveshare_amoled_216.json").read_text())
+            self.assertEqual(web["builds"][0]["parts"], [
+                {"path": "waveshare_amoled_216-v2.0.0.part0.bin", "offset": 0},
+                {"path": "waveshare_amoled_216-v2.0.0.part1.bin", "offset": 0xE000}])
+            self.assertEqual((dist / "waveshare_amoled_216-v2.0.0.part0.bin").read_bytes(),
+                             bytes(image[:0x9000]))
+            self.assertEqual((dist / "waveshare_amoled_216-v2.0.0.part1.bin").read_bytes(),
+                             bytes(image[0xE000:]))
+
+
 class HardwareEnvsTest(unittest.TestCase):
     def test_native_envs_are_excluded_from_the_hardware_matrix(self):
         ini = ("[env:board_a]\nplatform = https://x/p.zip ; comment\nboard = esp32-s3-devkitc-1\n\n"
