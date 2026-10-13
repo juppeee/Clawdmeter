@@ -4,13 +4,16 @@
 
     wix build tools/packaging/wix/clawdmeter.wxs -arch x64
       -d Version=1.2.3 -d Exe=path\to\clawdmeter.exe
-      -d Icon=tools\packaging\icons\clawdmeter.ico -o clawdmeter.msi
+      -d Icon=tools\packaging\icons\clawdmeter.ico
+      -ext WixToolset.Util.wixext -o clawdmeter.msi
 
   Installs to %LOCALAPPDATA%\Programs\Clawdmeter without elevation, adds a
   Start Menu shortcut and an Apps & features entry. The UpgradeCode never
   changes: a newer MSI (or a release candidate's final build, same version)
   replaces the installed one in place. App state in %LOCALAPPDATA%\Clawdmeter
-  is the app's own and is left alone on uninstall.
+  is the app's own and is left alone on uninstall. Uninstalling removes the
+  app's Start at login entry (HKCU Run value `Clawdmeter`, written by
+  clawdmeter-core's autostart.rs); upgrades keep it, since the path stays.
 -->
 <Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
   <Package Name="Clawdmeter"
@@ -28,6 +31,18 @@
     <Property Id="ARPURLINFOABOUT" Value="https://github.com/HermannBjorgvin/Clawdmeter" />
     <Property Id="ARPNOMODIFY" Value="1" />
     <Property Id="ARPNOREPAIR" Value="1" />
+
+    <!-- Start at login is the app's own HKCU Run value, not an installer
+         component, so delete it explicitly on a real uninstall. WixQuietExec
+         runs reg.exe without a console window; a missing value is fine. -->
+    <SetProperty Id="RemoveAutostart" Sequence="execute" Before="RemoveAutostart"
+                 Value="&quot;[System64Folder]reg.exe&quot; delete HKCU\Software\Microsoft\Windows\CurrentVersion\Run /v Clawdmeter /f" />
+    <CustomAction Id="RemoveAutostart" BinaryRef="Wix4UtilCA_X64" DllEntry="WixQuietExec"
+                  Execute="deferred" Impersonate="yes" Return="ignore" />
+    <InstallExecuteSequence>
+      <Custom Action="RemoveAutostart" Before="RemoveFiles"
+              Condition="REMOVE=&quot;ALL&quot; AND NOT UPGRADINGPRODUCTCODE" />
+    </InstallExecuteSequence>
 
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="ProgramsDir" Name="Programs">

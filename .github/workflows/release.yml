@@ -222,10 +222,12 @@ jobs:
           ver="${ver%%-*}"
           wix="$(cygpath -u "$RUNNER_TEMP")/wix"
           dotnet tool install wix --version 5.0.2 --tool-path "$wix"
+          "$wix/wix" extension add -g WixToolset.Util.wixext/5.0.2
           "$wix/wix" build tools/packaging/wix/clawdmeter.wxs -arch x64 \
             -d "Version=$ver" \
             -d "Exe=desktop/target/x86_64-pc-windows-msvc/release/clawdmeter.exe" \
             -d "Icon=tools/packaging/icons/clawdmeter.ico" \
+            -ext WixToolset.Util.wixext \
             -o "dist/clawdmeter-$TAG-${{ matrix.name }}.msi"
           rm -f dist/*.wixpdb
           ls -l dist
