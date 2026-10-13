@@ -233,17 +233,16 @@ short reset countdowns, and a clearly nonnumeric placeholder for unknown usage.
 For spend-only accounts, say **of spending limit**, since the period can be a
 day or week as well as a month.
 
-Use **No link** for disconnected, **No data** before a first reading, and
-**Data old** for a retained stale reading. These fit the small status line
-better than sentence-length alternatives. Keep the problem state steady;
-alternating it with “Listening” obscures the condition. Use animation for
-Clawd rather than to make a settled connection look perpetually busy.
+**Owner decision: keep the whimsical status-verb rotation.** Claude Code's
+thinking verbs mean all is well on the device; they do not assert that a
+model request is currently running. Keep the spinner and ellipsis styling.
+The same indicator shows **Waiting** without a connection, **No data** before
+a reading, and **Stale** when a retained reading is old. Preserve the existing
+**Listening** alternation in the stale/no-data state. Minimal display keeps
+its fixed status text instead of rotating verbs.
 
-The rotating list includes “Flibbertigibbeting,” “Discombobulating,” and
-“Pontificating.” It is hard to read on 240 pixels and can imply Claude is
-working when only cached usage is present. Recommended default: **Connected**
-while settled, with Clawd providing the personality. A future **Working**
-label must be gated on activity, not merely a live Bluetooth connection.
+This is decided, not an open copy recommendation. Keep the verb list,
+including the longer words, and check its rendering on the smallest panel.
 
 Pairing copy must name the actual gesture only on capable boards. Keep each
 line short: **Pair again / Hold PWR for 3s / Then release**. On LCD-4, show
@@ -258,11 +257,11 @@ and 480×480 after applying the deck. ASCII-only device fonts constrain copy.
 
 ## Decisions and remaining verification
 
-Recommended defaults require no new owner choice: hide heartbeat tuning,
-move CLI diagnostics to Advanced, use truthful state and summary text, and
-keep device status factual. If the owner specifically wants the whimsical
-status-word rotation retained, keep it as a deliberate style choice and
-review its longest words on the smallest display.
+The owner has decided to retain the whimsical thinking verbs as the device's
+all-is-well indicator, with Waiting/Stale/No data for other states. The copy
+deck marks these strings and their animation format as keep. The remaining
+recommendations include hiding heartbeat tuning, moving CLI diagnostics to
+Advanced, and making setup summaries reflect verified outcomes.
 
 Engineering must establish the supported LCD-4 recovery path for a bond to
 another computer before documenting one. Refreshed screenshot review and

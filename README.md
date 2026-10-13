@@ -105,6 +105,12 @@ timeout. C6 boards show the message without the full-size Clawd. Optional
 beeps and reset chimes work on boards with an implemented audio output.
 **Minimal display** keeps the meters and a still Clawd, with no animated scenes.
 
+The status line rotates through Claude Code's whimsical thinking verbs when
+all is well. It shows **Waiting** without a connection, **No data** before a
+reading, and **Stale** when the retained reading is old. The verbs are a
+healthy-status indicator, not a report of an active model request. Minimal
+display uses fixed status text.
+
 If updates stop, the meters dim. The last reading is retained rather than
 replaced with zero. See [Clawd's director](docs/clawd-director.md) for timing
 and character rules.

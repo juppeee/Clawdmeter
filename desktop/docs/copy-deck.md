@@ -6,13 +6,21 @@ Apply prose only. Do not replace protocol keys, enum serialization, hook event n
 
 Rows marked LOGIC or CONDITIONAL need the condition described in the note. REMOVE means remove the UI element, not display that word. Normal button labels and proper product names are intentionally retained where already clear. Device proposals use ASCII and need native-size rendering after application; no firmware or Rust source is edited by this deck.
 
+## Decided device status behavior
+
+The owner has chosen to keep Claude Code's whimsical thinking verbs as the
+all-is-well indicator. The same status line shows Waiting, Stale, or No data
+for other states, with the existing Listening alternation and animation
+format. Minimal display retains fixed status text. These are keep decisions,
+not proposals to replace the verbs with Connected.
+
 ## Shared rules
 
 - Use Settings in navigation; preserve any legacy CLI aliases.
 - “Updated” means last successful usage fetch. A heartbeat is a cached replay.
-- Use an ellipsis for an operation in progress, not a settled state.
+- Use an ellipsis for an operation in progress in the desktop app. Owner decision: preserve the device status spinner, thinking-verb rotation, and ellipsis as its all-is-well indicator.
 - Keep errors factual, with a next step when one is known. Do not infer rate limiting from every missing response.
-- Keep device connection/data labels within about 9 characters; test remaining labels at 240×240.
+- Keep device Waiting/Stale/No data labels and the existing thinking verbs. Test the longest verbs at 240×240; do not shorten the decided verb list in this copy pass.
 
 
 ## desktop/crates/clawdmeter-app/src/main.rs
@@ -566,96 +574,96 @@ Rows marked LOGIC or CONDITIONAL need the condition described in the note. REMOV
 
 | File:line | Current text | New text | Note |
 | --- | --- | --- | --- |
-| firmware/src/ui.cpp:268 | Accomplishing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:268 | Elucidating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:268 | Perusing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:269 | Actioning | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:269 | Enchanting | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:269 | Philosophising | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:270 | Actualizing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:270 | Envisioning | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:270 | Pondering | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:271 | Baking | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:271 | Finagling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:271 | Pontificating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:272 | Booping | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:272 | Flibbertigibbeting | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:272 | Processing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:273 | Brewing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:273 | Forging | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:273 | Puttering | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:274 | Calculating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:274 | Forming | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:274 | Puzzling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:275 | Cerebrating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:275 | Frolicking | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:275 | Reticulating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:276 | Channelling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:276 | Generating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:276 | Ruminating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:277 | Churning | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:277 | Germinating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:277 | Scheming | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:278 | Clauding | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:278 | Hatching | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:278 | Schlepping | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:279 | Coalescing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:279 | Herding | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:279 | Shimmying | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:280 | Cogitating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:280 | Honking | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:280 | Shucking | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:281 | Combobulating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:281 | Hustling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:281 | Simmering | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:282 | Computing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:282 | Ideating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:282 | Smooshing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:283 | Concocting | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:283 | Imagining | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:283 | Spelunking | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:284 | Conjuring | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:284 | Incubating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:284 | Spinning | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:285 | Considering | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:285 | Inferring | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:285 | Stewing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:286 | Contemplating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:286 | Jiving | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:286 | Sussing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:287 | Cooking | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:287 | Manifesting | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:287 | Synthesizing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:288 | Crafting | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:288 | Marinating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:288 | Thinking | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:289 | Creating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:289 | Meandering | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:289 | Tinkering | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:290 | Crunching | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:290 | Moseying | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:290 | Transmuting | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:291 | Deciphering | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:291 | Mulling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:291 | Unfurling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:292 | Deliberating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:292 | Mustering | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:292 | Unravelling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:293 | Determining | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:293 | Musing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:293 | Vibing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:294 | Discombobulating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:294 | Noodling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:294 | Wandering | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:295 | Divining | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:295 | Percolating | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:295 | Whirring | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:296 | Doing | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:296 | Wibbling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:297 | Effecting | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:297 | Wizarding | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:298 | Working | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
-| firmware/src/ui.cpp:298 | Wrangling | REMOVE rotating word | Replace the idle word rotation with Connected. Do not repeat Connected as 90 array entries. A future Working state must be activity-gated. |
+| firmware/src/ui.cpp:268 | Accomplishing | Accomplishing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:268 | Elucidating | Elucidating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:268 | Perusing | Perusing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:269 | Actioning | Actioning | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:269 | Enchanting | Enchanting | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:269 | Philosophising | Philosophising | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:270 | Actualizing | Actualizing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:270 | Envisioning | Envisioning | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:270 | Pondering | Pondering | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:271 | Baking | Baking | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:271 | Finagling | Finagling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:271 | Pontificating | Pontificating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:272 | Booping | Booping | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:272 | Flibbertigibbeting | Flibbertigibbeting | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:272 | Processing | Processing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:273 | Brewing | Brewing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:273 | Forging | Forging | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:273 | Puttering | Puttering | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:274 | Calculating | Calculating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:274 | Forming | Forming | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:274 | Puzzling | Puzzling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:275 | Cerebrating | Cerebrating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:275 | Frolicking | Frolicking | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:275 | Reticulating | Reticulating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:276 | Channelling | Channelling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:276 | Generating | Generating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:276 | Ruminating | Ruminating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:277 | Churning | Churning | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:277 | Germinating | Germinating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:277 | Scheming | Scheming | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:278 | Clauding | Clauding | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:278 | Hatching | Hatching | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:278 | Schlepping | Schlepping | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:279 | Coalescing | Coalescing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:279 | Herding | Herding | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:279 | Shimmying | Shimmying | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:280 | Cogitating | Cogitating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:280 | Honking | Honking | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:280 | Shucking | Shucking | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:281 | Combobulating | Combobulating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:281 | Hustling | Hustling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:281 | Simmering | Simmering | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:282 | Computing | Computing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:282 | Ideating | Ideating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:282 | Smooshing | Smooshing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:283 | Concocting | Concocting | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:283 | Imagining | Imagining | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:283 | Spelunking | Spelunking | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:284 | Conjuring | Conjuring | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:284 | Incubating | Incubating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:284 | Spinning | Spinning | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:285 | Considering | Considering | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:285 | Inferring | Inferring | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:285 | Stewing | Stewing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:286 | Contemplating | Contemplating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:286 | Jiving | Jiving | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:286 | Sussing | Sussing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:287 | Cooking | Cooking | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:287 | Manifesting | Manifesting | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:287 | Synthesizing | Synthesizing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:288 | Crafting | Crafting | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:288 | Marinating | Marinating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:288 | Thinking | Thinking | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:289 | Creating | Creating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:289 | Meandering | Meandering | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:289 | Tinkering | Tinkering | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:290 | Crunching | Crunching | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:290 | Moseying | Moseying | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:290 | Transmuting | Transmuting | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:291 | Deciphering | Deciphering | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:291 | Mulling | Mulling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:291 | Unfurling | Unfurling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:292 | Deliberating | Deliberating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:292 | Mustering | Mustering | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:292 | Unravelling | Unravelling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:293 | Determining | Determining | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:293 | Musing | Musing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:293 | Vibing | Vibing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:294 | Discombobulating | Discombobulating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:294 | Noodling | Noodling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:294 | Wandering | Wandering | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:295 | Divining | Divining | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:295 | Percolating | Percolating | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:295 | Whirring | Whirring | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:296 | Doing | Doing | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:296 | Wibbling | Wibbling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:297 | Effecting | Effecting | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:297 | Wizarding | Wizarding | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:298 | Working | Working | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
+| firmware/src/ui.cpp:298 | Wrangling | Wrangling | Keep: owner decision. Claude Code's thinking verbs rotate as the all-is-well indicator, not proof of an active model request. |
 | firmware/src/ui.cpp:310 | --- | --- | Keep; preserve numeric formats and glyphs. |
 | firmware/src/ui.cpp:312 | Resets in %dm | Resets in %dm | Keep; preserve numeric formats and glyphs. |
 | firmware/src/ui.cpp:314 | Resets in %dh %dm | Resets in %dh %dm | Keep; preserve numeric formats and glyphs. |
@@ -689,17 +697,17 @@ Rows marked LOGIC or CONDITIONAL need the condition described in the note. REMOV
 | firmware/src/ui.cpp:724 | AM | AM | Keep; preserve numeric formats and glyphs. |
 | firmware/src/ui.cpp:724 | PM | PM | Keep; preserve numeric formats and glyphs. |
 | firmware/src/ui.cpp:726 | %02d:%02d | %02d:%02d | Keep; preserve numeric formats and glyphs. |
-| firmware/src/ui.cpp:736 | Waiting | No link | Short device copy. Render at 240×240 before applying. |
-| firmware/src/ui.cpp:737 | Stale | Data old | Short device copy. Render at 240×240 before applying. |
-| firmware/src/ui.cpp:737 | No data | No data | Keep; preserve numeric formats and glyphs. |
-| firmware/src/ui.cpp:737 | Connected | Connected | Keep; preserve numeric formats and glyphs. |
+| firmware/src/ui.cpp:736 | Waiting | Waiting | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
+| firmware/src/ui.cpp:737 | Stale | Stale | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
+| firmware/src/ui.cpp:737 | No data | No data | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
+| firmware/src/ui.cpp:737 | Connected | Connected | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
 | firmware/src/ui.cpp:741 | %s %s | %s %s | Keep; preserve numeric formats and glyphs. |
-| firmware/src/ui.cpp:761 | Waiting | No link | Short device copy. Render at 240×240 before applying. |
-| firmware/src/ui.cpp:763 | Stale | Data old | Short device copy. Render at 240×240 before applying. |
-| firmware/src/ui.cpp:763 | No data | No data | Keep; preserve numeric formats and glyphs. |
-| firmware/src/ui.cpp:763 | Listening | Data old | LOGIC: keep No data before a reading, Data old after one; remove alternation with Listening. |
-| firmware/src/ui.cpp:765 | Connected | Connected | Keep; preserve numeric formats and glyphs. |
-| firmware/src/ui.cpp:772 | %s %s\xE2\x80\xA6 | %s %s | Remove trailing ellipsis from settled status; keep glyph/text arguments. |
+| firmware/src/ui.cpp:761 | Waiting | Waiting | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
+| firmware/src/ui.cpp:763 | Stale | Stale | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
+| firmware/src/ui.cpp:763 | No data | No data | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
+| firmware/src/ui.cpp:763 | Listening | Listening | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
+| firmware/src/ui.cpp:765 | Connected | Connected | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
+| firmware/src/ui.cpp:772 | %s %s\xE2\x80\xA6 | %s %s\xE2\x80\xA6 | Keep: owner decision. Preserve the existing connection/data state text, alternation, and status animation format. |
 
 ## firmware/src/boards/sim/sim_main.cpp
 

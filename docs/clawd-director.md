@@ -56,6 +56,10 @@ Continuity rules, as the code enforces them:
 - The screen never cuts. `splash_open()` is only called while the face covers
   the screen. `splash_close()` happens behind the face or once the streak has
   passed.
+- The normal status line rotates Claude Code's whimsical thinking verbs as
+  the all-is-well indicator. This is the owner's chosen behavior, not an
+  activity report. Keep the spinner and ellipsis. Disconnected is "Waiting";
+  minimal mode uses fixed status text instead of rotating verbs.
 - Stale data keeps the one-Clawd rule. When the link is up but no fresh usage
   has landed for `DATA_FRESH_MS` (90 s), or the daemon sent `{"ok":false}`,
   the meters stay where they are at 40 % opacity (LVGL `opa`, which scales the
