@@ -120,7 +120,14 @@ pub fn chrome(t: &Theme, title: &'static str, window: &Window, body: impl IntoEl
                     .border_b_1()
                     .border_color(t.line)
                     .bg(t.bg)
-                    .on_mouse_down(MouseButton::Left, |_, window, _| window.start_window_move())
+                    // Start the move on the first drag motion, as Zed's title
+                    // bar does: starting it from the press didn't move the
+                    // window on GNOME Wayland.
+                    .on_mouse_move(|e, window, _| {
+                        if e.pressed_button == Some(MouseButton::Left) {
+                            window.start_window_move();
+                        }
+                    })
                     .child(div().text_size(px(13.)).text_color(t.dim).child(title))
                     .child(
                         div()

@@ -7,6 +7,7 @@
 //! flash size from the ROM, then the user picks among what's left.
 
 use std::io::{Read, Write};
+use std::ops::Range;
 use std::time::{Duration, Instant};
 
 use espflash::connection::{Connection, ResetAfterOperation, ResetBeforeOperation};
@@ -389,31 +390,85 @@ pub enum FlashProgress {
     Done,
 }
 
-struct Progress<F: FnMut(FlashProgress)>(F);
-
-impl<F: FnMut(FlashProgress)> ProgressCallbacks for Progress<F> {
-    fn init(&mut self, _addr: u32, total: usize) {
-        (self.0)(FlashProgress::Start { total });
-    }
-    fn update(&mut self, current: usize) {
-        (self.0)(FlashProgress::Write { done: current });
-    }
-    fn verifying(&mut self) {
-        (self.0)(FlashProgress::Verify);
-    }
-    fn finish(&mut self, _skipped: bool) {
-        (self.0)(FlashProgress::Done);
-    }
+/// Reports one segment's progress as bytes of the whole image, so a write
+/// split around NVS still reads as a single 0..total run.
+struct Progress<'a, F: FnMut(FlashProgress)> {
+    report: &'a mut F,
+    /// Image bytes written by earlier segments.
+    base: usize,
+    /// This segment's length in bytes.
+    len: usize,
+    /// espflash's unit count for this segment, from `init`.
+    units: usize,
 }
 
-/// Write a merged image at 0x0 and reset into it. The caller verified the
-/// image's sha256 against the manifest ([`crate::release::verify`]) and that
-/// the board's chip matches `expected_chip`.
+impl<F: FnMut(FlashProgress)> ProgressCallbacks for Progress<'_, F> {
+    fn init(&mut self, _addr: u32, total: usize) {
+        self.units = total.max(1);
+    }
+    fn update(&mut self, current: usize) {
+        let done = self.base + current.min(self.units) * self.len / self.units;
+        (self.report)(FlashProgress::Write { done });
+    }
+    fn verifying(&mut self) {
+        (self.report)(FlashProgress::Verify);
+    }
+    fn finish(&mut self, _skipped: bool) {}
+}
+
+/// Partition table offset in every supported layout.
+const PARTITION_TABLE: usize = 0x8000;
+
+/// Ranges of a merged image that must not be written: NVS (`data/nvs`) and
+/// NVS keys (`data/nvs_keys`). They hold the BLE bonds and the device's
+/// settings; a merged image only covers them with 0xFF padding, and writing
+/// that would unpair the board from every host.
+pub fn preserved_ranges(image: &[u8]) -> Vec<Range<usize>> {
+    let table = image.get(PARTITION_TABLE..PARTITION_TABLE + 0xC00).unwrap_or(&[]);
+    let mut out = Vec::new();
+    for e in table.chunks_exact(32) {
+        if e[..2] != [0xAA, 0x50] {
+            break;
+        }
+        let (kind, subtype) = (e[2], e[3]);
+        let off = u32::from_le_bytes([e[4], e[5], e[6], e[7]]) as usize;
+        let size = u32::from_le_bytes([e[8], e[9], e[10], e[11]]) as usize;
+        if kind == 0x01 && (subtype == 0x02 || subtype == 0x04) {
+            out.push(off..off.saturating_add(size));
+        }
+    }
+    out.sort_by_key(|r| r.start);
+    out
+}
+
+/// The parts of `0..len` outside `preserved` (sorted), as write segments.
+pub fn write_segments(len: usize, preserved: &[Range<usize>]) -> Vec<Range<usize>> {
+    let mut out = Vec::new();
+    let mut at = 0;
+    for r in preserved {
+        if r.start >= len {
+            break;
+        }
+        if r.start > at {
+            out.push(at..r.start);
+        }
+        at = at.max(r.end);
+    }
+    if at < len {
+        out.push(at..len);
+    }
+    out
+}
+
+/// Write a merged image from 0x0 and reset into it, skipping the NVS
+/// partitions ([`preserved_ranges`]) so pairings and settings survive. The
+/// caller verified the image's sha256 against the manifest
+/// ([`crate::release::verify`]); the chip is checked against `expected_chip`.
 pub fn flash_merged(
     port: &str,
     image: &[u8],
     expected_chip: &BoardImage,
-    progress: impl FnMut(FlashProgress),
+    mut progress: impl FnMut(FlashProgress),
 ) -> Result<(), DeviceError> {
     let mut f = connect(port)?;
     let got = chip_id(f.chip());
@@ -421,8 +476,16 @@ pub fn flash_merged(
         let _ = f.connection().reset();
         return Err(DeviceError::WrongChip { found: got, expected: expected_chip.chip_id() });
     }
-    let mut cb = Progress(progress);
-    f.write_bin_to_flash(0x0, image, &mut cb).map_err(|e| DeviceError::Flash(e.to_string()))?;
+    let segments = write_segments(image.len(), &preserved_ranges(image));
+    progress(FlashProgress::Start { total: segments.iter().map(|r| r.len()).sum() });
+    let mut base = 0;
+    for r in segments {
+        let mut cb = Progress { report: &mut progress, base, len: r.len(), units: 1 };
+        f.write_bin_to_flash(r.start as u32, &image[r.clone()], &mut cb)
+            .map_err(|e| DeviceError::Flash(e.to_string()))?;
+        base += r.len();
+    }
+    progress(FlashProgress::Done);
     // With the stub loader the host does the reboot.
     let chip = f.chip();
     f.connection().reset_after(true, chip).map_err(|e| DeviceError::Flash(e.to_string()))?;
@@ -432,6 +495,41 @@ pub fn flash_merged(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn entry(kind: u8, subtype: u8, off: u32, size: u32) -> Vec<u8> {
+        let mut e = vec![0xAA, 0x50, kind, subtype];
+        e.extend(off.to_le_bytes());
+        e.extend(size.to_le_bytes());
+        e.resize(32, 0);
+        e
+    }
+
+    #[test]
+    #[allow(clippy::single_range_in_vec_init)]
+    fn nvs_is_left_out_of_the_write() {
+        // Default 8 MB layout: nvs 0x9000+0x5000, otadata, app0.
+        let mut image = vec![0xFF; 0x20000];
+        let table =
+            [entry(1, 2, 0x9000, 0x5000), entry(1, 0, 0xE000, 0x2000), entry(0, 0x10, 0x10000, 0x330000)].concat();
+        image[PARTITION_TABLE..PARTITION_TABLE + table.len()].copy_from_slice(&table);
+        let keep = preserved_ranges(&image);
+        assert_eq!(keep, vec![0x9000..0xE000]);
+        assert_eq!(write_segments(image.len(), &keep), vec![0..0x9000, 0xE000..0x20000]);
+    }
+
+    #[test]
+    fn an_image_without_a_partition_table_is_written_whole() {
+        let image = vec![0xFF; 0x10000];
+        assert!(preserved_ranges(&image).is_empty());
+        assert_eq!(write_segments(image.len(), &[]), vec![0..0x10000]);
+    }
+
+    #[test]
+    #[allow(clippy::single_range_in_vec_init)]
+    fn a_short_image_stops_before_nvs() {
+        assert_eq!(write_segments(0x9000, &[0x9000..0xE000]), vec![0..0x9000]);
+        assert_eq!(write_segments(0xA000, &[0x9000..0xE000]), vec![0..0x9000]);
+    }
 
     #[test]
     fn finds_minimal_reply_among_chatter() {
