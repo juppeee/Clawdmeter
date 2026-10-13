@@ -57,6 +57,10 @@ static uint32_t frame_started = 0;
 static int      dx = 0;                      // cells from the authored home spot
 static int      facing = +1;                 // -1 = mirrored (heading left)
 static uint16_t speed = 100;
+// A walk can ramp its speed up (a run-off that gets going): from ramp_from to
+// ramp_to percent over ramp_ms, ease-in. ramp_ms 0 = constant speed.
+static uint16_t ramp_from = 100, ramp_to = 100;
+static uint32_t ramp_ms = 0, walk_t0 = 0;
 
 // walking
 static ClawdGait gait = GAIT_NONE;
@@ -252,6 +256,8 @@ static void walk_start(const ClawdAnim* a, ClawdGait g, int target, uint16_t spd
     cur = a;
     gait = g;
     speed = spd;
+    ramp_ms = 0;
+    walk_t0 = millis();
     walk_target = target;
     walk_dir = target > dx ? +1 : -1;
     facing = walk_dir;
@@ -264,6 +270,14 @@ static void walk_start(const ClawdAnim* a, ClawdGait g, int target, uint16_t spd
 
 // One step of a walk; returns true when it has finished (standing).
 static bool walk_step(uint32_t now) {
+    if (ramp_ms) {
+        const uint32_t el = now - walk_t0;
+        if (el >= ramp_ms) { speed = ramp_to; ramp_ms = 0; }
+        else {
+            const uint32_t e = el * 1000 / ramp_ms;            // permille
+            speed = ramp_from + (uint16_t)((ramp_to - ramp_from) * e * e / 1000000);
+        }
+    }
     if (now - frame_started < clawd_hold(cur, frame, speed)) return false;
     frame_started = now;
     const bool from_loop = in_loop;
@@ -441,6 +455,15 @@ void splash_walk_off_right(uint16_t spd) {
     if (!stand_anim) return;
     pst = P_WALK;
     walk_start(stand_anim, GAIT_WALK, offstage_right_dx(), spd);
+}
+
+void splash_run_off_right(uint16_t from_pct, uint16_t to_pct, uint32_t ramp) {
+    if (!stand_anim) return;
+    pst = P_WALK;
+    walk_start(stand_anim, GAIT_WALK, offstage_right_dx(), from_pct);
+    ramp_from = from_pct;
+    ramp_to = to_pct;
+    ramp_ms = ramp;
 }
 
 void splash_perform(int idx, uint32_t loop_ms) {

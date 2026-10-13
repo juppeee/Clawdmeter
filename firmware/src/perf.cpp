@@ -1,7 +1,7 @@
 #include "perf.h"
 #include <Arduino.h>
 
-static const char* const NAMES[PERF_WINDOW_COUNT] = { "face-rise", "face-drop", "streak" };
+static const char* const NAMES[PERF_WINDOW_COUNT] = { "face-rise", "face-settle", "face-drop", "streak" };
 
 struct PerfStats {
     bool     done;          // a complete (or cut-short) run is recorded

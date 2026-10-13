@@ -30,6 +30,9 @@ void splash_place_home(void);                 // standing at home, idle pose
 void splash_place_offstage_right(void);
 void splash_walk_home(uint16_t speed_pct);    // walking gait to home, then stand
 void splash_walk_off_right(uint16_t speed_pct);
+// A run-off: the walk off right starts at from_pct and speeds up to to_pct
+// over ramp_ms (ease-in), so he gets going instead of starting at full tilt.
+void splash_run_off_right(uint16_t from_pct, uint16_t to_pct, uint32_t ramp_ms);
 // Perform one scene at home, holding its loop for loop_ms, then its outro;
 // ends standing. Walker scenes (walking, crab walking) do one round trip.
 void splash_perform(int anim_index, uint32_t loop_ms);

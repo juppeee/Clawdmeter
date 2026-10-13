@@ -532,11 +532,11 @@ static void run_streak_home(uint32_t now) {
     switch (step) {
     case 0:  // the scene releases to the idle pose, right now
         splash_release();
-        next_step(150);
+        next_step(200);             // a beat: he registers it (anticipation)
         break;
-    case 1:
+    case 1:  // then gets going: 1.5x ramping to 3x
         if (!settled(now)) return;
-        splash_walk_off_right(300);
+        splash_run_off_right(150, 300, 400);
         next_step();
         break;
     case 2:
@@ -591,9 +591,9 @@ static void run_peek(uint32_t now) {
         mascot_leave(300);
         next_step();
         break;
-    case 1:  // gone: the face rises (ease-out)
+    case 1:  // gone: the face rises, head cocked toward the tap
         if (!mascot_away()) return;
-        face_rise();
+        face_rise_toward(peek_x);
         next_step();
         break;
     case 2:  // up: he looks where you tapped

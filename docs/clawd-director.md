@@ -16,9 +16,10 @@ aquarium: he reacts (see "A tap on the meters" below).
 | `firmware/src/mascot.{h,cpp}` | Clawd on the meters: the corner Clawd in his seat, plus the full-size sprite used for the lurk trip and the attention walk-on. Does in-room secondary action (idle acts, lurk trips) when the director allows it. |
 | `firmware/src/splash.{h,cpp}` | The stage room: a full-screen 60×60-cell stage with one performer who stands, walks, or performs a scene. |
 | `firmware/src/face.{h,cpp}` | The #198 face: a field on `lv_layer_top()` with the eyes as small LVGL rectangles on it. It is the screensaver, the held peek, and the curtain that rooms change behind. |
+| `firmware/src/face_motion.{h,cpp}` | The face's rise and drop as a pure function of time (lean, arms, squash and stretch, follow-through; see "The face's motion"), unit-tested in `test/test_face_motion`. |
 | `firmware/src/streak.{h,cpp}` | The orange streak: a field that sweeps right to left and clips the stage so the meters show behind it. |
-| `firmware/src/field.{h,cpp}` | A flat-colour rectangle on an overlay layer that redraws only the strips that change colour (see "Redraw cost and frame rate"). The face and the streak are fields. |
-| `firmware/src/perf.{h,cpp}` | The `perf` serial command: refresh count, timing and pixels sent for the last face rise, face drop and streak. |
+| `firmware/src/field.{h,cpp}` | A flat-colour shape on an overlay layer (a rectangle whose top edge can be a pixel-art staircase, plus two small extra rectangles) that redraws only the strips that change colour (see "Redraw cost and frame rate"). The face and the streak are fields. |
+| `firmware/src/perf.{h,cpp}` | The `perf` serial command: refresh count, timing and pixels sent for the last face rise, its settle, face drop and streak. |
 | `firmware/src/clawd_anim.{h,cpp}` | Read-only view of the official animations. It is the only translation unit that includes `splash_animations.h` (about 400 KB of static data). |
 | `firmware/src/ui.{h,cpp}` | Draws the meters only: cards, clock, status line, battery, the seat. Stale data dims the meters (see below); it never adds a second creature. |
 
@@ -39,7 +40,8 @@ next frame, not on release.
 - **Stage**: the splash container (8 px cells). It opens only behind the face,
   and closes behind the face or the streak.
 - **Face**: an overlay on `lv_layer_top()`. It rises from behind the bottom
-  bezel with ease-out (600 ms) and drops with ease-in (480 ms).
+  bezel, overshoots and settles (at rest after ~595 ms, still after 860 ms),
+  and drops after a little anticipation hop (510 ms). See "The face's motion".
 
 Continuity rules, as the code enforces them:
 
@@ -76,7 +78,7 @@ passed. Beat changes always print; every step prints too after
 | `show` | `a == 3` held for 5 min; at most one per 15 min; hooks seen; meters live | Points at the bar (or, if he's out on a lurk trip, heads straight out), walks off at 1.5×, face rises, blinks, stage is set behind it, face drops, walks on from the right at 1.5×, one scene (loop held 16 s, so about 20 s), waves, walks off right, face rises, blinks, meters are set behind it, face drops, corner walks back to his seat. |
 | `screensaver` | 10 min with no engagement; needs hooks seen or a window that hasn't started; meters live | Walks off through the nearest edge (a lurk trip finishes its peek first), face rises and rests (blinks every 2–6 s, about one in five a double, glances where the far eye travels 1.5×). Every 3–5 min: the stage is set behind the face with Clawd at home, the face drops, one calm scene plays (magnifier or walking, alternating), the face rises, the meters are set behind it, and he rests again. |
 | `face-home` | tap, prompt, button or attention while the screensaver face is up; a tap or attention while the peek face is up | If woken by a prompt or tapped during a peek, he blinks first (noticing), then the stage closes behind the face, the face drops into the meters, and the corner hurries home at 1.5×. |
-| `streak-home` | tap, prompt or attention while on the stage | The scene releases to the idle pose on the spot, waits 150 ms, runs off right at 3×. The streak starts as soon as his last cell leaves the stage: 380 ms, ease in-out, the stage clipped to its left. Then the stage closes and the corner walks home at 1.5×. |
+| `streak-home` | tap, prompt or attention while on the stage | The scene releases to the idle pose on the spot, holds 200 ms, runs off right, ramping from 1.5× to 3× over 400 ms. The streak starts as soon as his last cell leaves the stage: 380 ms, ease in-out, the stage clipped to its left. Then the stage closes and the corner walks home at 1.5×. |
 | `peek` | a tap on the meters while home, at most one per 60 s (below) | Startled hop (`jumping` from its crouch, 1.5×), ducks out through the nearest edge at 3×, face rises, eyes glance toward the tap's x and hold 1.6–2.4 s, a blink (30 % double), the look comes back to you, and the face stays up, resting like the screensaver face (blinks every 2–6 s, some double, glances), until you tap it. That tap goes through `face-home`: the acknowledging blink, the drop, and he walks back to his seat at 1.5×. (below: what else happens while it's up) |
 | `attention` | `m` (alert) in a payload | The corner walks off at 2×, the big Clawd (12 px cells) walks on at 2×, then waves and points alternately. A tap, `x` (clear) or 2 min sends the big one off left. Interrupts a show or the screensaver through `face-home` / `streak-home`, and then returns to where it left off (below). |
 
@@ -197,13 +199,98 @@ also wakes the screensaver, which covers the slow-clock-only case.
 
 | Principle | Implementation |
 |---|---|
-| Anticipation | Pointing before a show and on a prompt, a blink before the face drops on a wake, a turn toward the edge (walking intro frames) before every exit. |
+| Anticipation | Pointing before a show and on a prompt, a blink before the face drops on a wake, the face's crouch-and-hop before it drops, a beat before the stage run-off, a turn toward the edge (walking intro frames) before every exit. |
+| Squash and stretch | The face's eyes: stretched while it moves fast, squashed as it lands against the glass. |
+| Follow-through, overlapping action | The face's eyes and arms lag its body; the lean settles on its own spring, after the body. |
+| Arcs | The face drifts in from its lean side as it rises and toward its low side as it drops. |
 | Timing | Taps act on `LV_EVENT_PRESSED`. `splash_release()` snaps to the idle pose in the same frame. |
 | Secondary action | `clawd_jitter` for idle gaps, `clawd_pick_no_repeat` for acts and scenes, `face_plan_next` for irregular and double blinks and glances. |
 | Staging | The meters never animate while he performs: the stage and face cover them, and there's one actor at a time. |
-| Slow in, slow out | `lv_anim_path_ease_out` for the rising face, `ease_in` for the drop, `ease_in_out` for the streak. Walks begin on intro frames and end on the outro. |
+| Slow in, slow out | Ease-out into the face's overshoot, ease-in for its fall, `ease_in_out` for the streak, the stage run-off's speed ramp. Walks begin on intro frames and end on the outro. |
 | Exaggeration | Wave for a long turn, show for a busy stretch, jumping happy for a reset, the big Clawd for attention. |
 | Appeal | The face appears only for the screensaver, as the show's curtain, and for a tap on the meters at most once a minute. |
+
+## The face's motion
+
+The face is Clawd's body seen up close, so when it comes up to the glass and
+goes away again it should move like a soft, curious creature, not a sliding
+panel. The motion is hand-keyed in the classic way (Thomas & Johnston's
+principles) and computed as a pure function of elapsed time
+(`face_motion.{h,cpp}`, unit-tested in `test/test_face_motion`): the same
+input always gives the same frames, so durations stay fixed and the motion
+never depends on frame rate. The only randomness is which way he leans (the
+tap's side on a peek, the face RNG otherwise).
+
+**What moves, and how it's drawn without rotation or scaling.** A real tilt
+or squash would mean `transform_rotation` / `transform_scale` on a
+full-screen object, which LVGL renders through a full-screen ARGB layer every
+frame (about 0.9 MB on 480×480): it kills the frame rate and can't be
+allocated on the no-PSRAM C6 boards. Instead every deformation is a flat
+rectangle that already exists or a cheap stand-in:
+
+- **Tilt is a shear.** The body's top edge is drawn as a staircase: `n` steps
+  of one art cell (the stage cell, `min(W,H)/60`, 8 px on 480) across the
+  body, so a lean reads as pixel-art steps. The eyes and the arms ride the same
+  slope (the eye or arm on the low side sits lower), which is what sells it
+  once the top edge is above the glass.
+- **Arms** are two chunky nubs (6×7 cells on 480) at Clawd's arm height (the
+  official still has them in the middle third of the body, sticking out about
+  a fifth of its width). While he moves, the body is one arm narrower than the
+  panel on each side and the arms fill that gap. When he presses up to the
+  glass at the end of the rise the body widens, cell by cell, to full bleed
+  and the arms slide out past the bezel; on a drop they come back in first.
+- **Squash and stretch** are on the eyes only: taller and narrower (area
+  kept) while he moves fast, shorter and wider for a few frames when he
+  settles onto the glass.
+- **Follow-through** is lag: the eyes trail the body by 40 ms and the arms by
+  70 ms (clamped), so they keep going when the body stops and catch up after.
+
+**The rise** (peek, show curtain, screensaver), 860 ms in all:
+
+1. 0–500 ms, *up with slow-out and an arc*: ease-out from below the bezel to
+   44 px (on 480) past the rest position, leaning 9 cells toward his
+   curious side (the tap's side on a peek) and drifting in from that side on
+   an arc. The eyes start stretched and relax as he slows.
+2. ~420–600 ms, *presses to the glass*: the body widens to full bleed, the
+   arms leave.
+3. 500–860 ms, *settle*: an underdamped spring (period 300 ms, decay 110 ms)
+   brings him back down through rest at ~595 ms (the old rise was 600 ms) into
+   a small dip (about 12 px of black at the top edge) and back. The lean
+   settles on its own, slower spring (340 ms): one counter-wobble of a cell
+   or two, then level. Overlapping action: the body, the lean, the eyes and
+   the arms each reach rest at a different moment. The eyes squash as he
+   lands in the dip and spring back with a small stretch.
+
+`face_moving()` stays true through the settle, so nothing behind the curtain
+changes while the dip shows a sliver of the room. The director's next step
+(a blink, a glance) starts once he's still.
+
+**The drop** (wake, show curtain, calm dip, peek dismissed), 510 ms:
+
+1. 0–150 ms, *anticipation*: a quick crouch (eyes squash), then a little hop up
+   (eyes stretch), a counter-lean of a cell or two, and the body pulls in so
+   the arms pop back in at the sides.
+2. 150–510 ms, *falls with slow-in*: ease-in down past the bezel, leaning
+   into the fall (8 cells, a random side) and drifting toward the low side on
+   an arc. The eyes and arms lag, so they ride up the body (arms flung up)
+   as it accelerates away.
+
+**Budget.** Each frame invalidates only the rows of the staircase that
+changed (old vs new top edge, per step band, merged into at most 8 areas so
+LVGL's 32-entry invalidation buffer never overflows into a full-screen
+redraw), the side strips when the body widens or drifts, and the arms' old
+XOR new. An open eye's LVGL box is exactly the eye (it widens to hold the
+squint chevron only while blinking), so a moving eye redraws 44 px wide
+columns, not 72: that saving pays for the staircase and the arms, and the
+face costs fewer pixels per frame than the plain slide did (table in "Redraw
+cost and frame rate"). `perf` reports the rise up to the moment he first reaches
+rest (`face-rise`), the settle after it (`face-settle`), and the drop
+(`face-drop`).
+
+**The stage Clawd's run-off** (`streak-home`) gets follow-through through
+timing only, never new frames: the scene releases to the idle pose and holds
+a beat (anticipation), then the walk-off ramps from 1.5× to 3× over its first
+400 ms (ease-in) instead of starting at full speed.
 
 ## Minimal mode
 
@@ -275,7 +362,9 @@ reaction wait 15 s, blinks every 2–6 s, peek cooldown 60 s, peek look
   its 240×240 fallback, 35-peek-* a tap on the meters: crouch, hop, ducks out,
   face rises, blinks, looks toward the tap, still up seconds later (a resting
   glance, a double blink), the tap on the face blinks and drops it, back in his
-  seat, and a small reaction in the cooldown).
+  seat, and a small reaction in the cooldown; 36-face-motion-sheet.png, a
+  33 ms contact sheet of a peek's rise, settle and drop, 36-face-motion.gif
+  the same at real timing, and 36-* key frames).
 
   The tap captures come from a single live payload (any one-line scenario)
   with scripted taps:
@@ -337,11 +426,16 @@ On hardware that read as choppy.
 Measured in the sim (`SIM_FAST=1`, a peek, a tap, a show and a tap; pixels
 per frame is the bus-independent part):
 
-| | before | after |
-|---|---|---|
-| face rise (600 ms) | 18 frames, 154 k px/frame (67 % of the panel) | 35 frames, 22 k px/frame (9.5 %) |
-| face drop (480 ms) | 13 frames, 162 k px/frame (70 %) | 27 frames, 25 k px/frame (11 %) |
-| streak (380 ms) | 13 frames, 161 k px/frame (70 %) | 22 frames, 25 k px/frame (11 %) |
+| | plain LVGL objects | fields, plain slide | fields, face motion |
+|---|---|---|---|
+| face rise (to rest) | 18 frames, 154 k px/frame (67 % of the panel) | 600 ms: 35 frames, 22 k px/frame (9.5 %) | ~600 ms: 35 frames, 19–21 k px/frame (8.5–9 %) |
+| face settle | | | ~260 ms: 15 frames, 14–15 k px/frame (6.3 %) |
+| face drop | 13 frames, 162 k px/frame (70 %) | 480 ms: 27 frames, 25 k px/frame (11 %) | ~515 ms: 30 frames, 24–25 k px/frame (10.5 %) |
+| streak (380 ms) | 13 frames, 161 k px/frame (70 %) | 22 frames, 25 k px/frame (11 %) | unchanged |
+
+The face-motion numbers vary a little run to run with the lean's random side;
+`SIM_ROUND_EVEN=1` (the CO5300's even-aligned flushes) changes them by under
+1 k px/frame. At 368×448 the rise is about 13 k px/frame, at 240×240 about 5 k.
 
 `perf` on the serial console prints the same for the last run of each on
 hardware: duration, frames and fps, the longest gap between two frames (the
