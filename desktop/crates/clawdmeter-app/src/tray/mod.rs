@@ -313,12 +313,13 @@ impl TrayApp {
             self.last_written_at = now;
         }
 
-        // Reap the window; with no tray, the window is the app.
-        let closed = self.window.as_mut().is_some_and(|c| !matches!(c.try_wait(), Ok(None)));
-        if closed {
+        // Reap the window; with no tray, the window is the app. A child that
+        // exits because another process already has the window open (it hands
+        // that one the page) doesn't end the app: it ends when no window is open.
+        if self.window.as_mut().is_some_and(|c| !matches!(c.try_wait(), Ok(None))) {
             self.window = None;
         }
-        !closed || self.use_tray
+        self.use_tray || self.window.is_some() || ipc::window_open_elsewhere(&self.paths)
     }
 
     fn create_tray(&mut self) {

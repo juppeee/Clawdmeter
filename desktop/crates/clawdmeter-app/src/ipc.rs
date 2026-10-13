@@ -361,6 +361,11 @@ pub fn acquire_window_lock(paths: &Paths) -> io::Result<Option<fs::File>> {
     }
 }
 
+/// Whether some process has the app window open (holds the window lock).
+pub fn window_open_elsewhere(paths: &Paths) -> bool {
+    matches!(acquire_window_lock(paths), Ok(None))
+}
+
 /// What the device last told us about its firmware.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FirmwareRecord {
@@ -394,6 +399,18 @@ pub fn load_latest_release(paths: &Paths) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn window_open_elsewhere_follows_the_lock() {
+        let dir = std::env::temp_dir().join(format!("clawdmeter-winlock-{}", std::process::id()));
+        let paths = Paths::under(&dir);
+        assert!(!window_open_elsewhere(&paths));
+        let held = acquire_window_lock(&paths).unwrap().expect("free");
+        assert!(window_open_elsewhere(&paths));
+        drop(held);
+        assert!(!window_open_elsewhere(&paths));
+        let _ = fs::remove_dir_all(dir);
+    }
     use clawdmeter_core::usage::{UsageReading, Window};
     use clawdmeter_core::EngineStatus;
 
