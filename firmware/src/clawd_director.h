@@ -33,12 +33,18 @@ void director_alert_clear(void);            // the session moved on
 
 void director_tap(void);           // any touch press (also wired internally to LVGL)
 void director_button(void);        // a physical button press: you're here
+void director_stage_next(void);    // PWR while the stage is up: next scene, same room
+
+// Print every beat step with a timestamp (the sim turns it on with
+// SIM_TRACE=1 for walkthrough timings). Beat changes always print.
+void director_set_trace(bool on);
 
 DirectorRoom director_room(void);
 const char*  director_beat_name(void);
 
 // QA hook for the `clawd <beat>` serial command: start a beat now so it can
 // be captured with `screenshot` on hardware. beat = show | screensaver |
-// attention | joy | home. Returns false for an unknown name, or for show /
-// screensaver while another beat is still running.
+// attention | joy | lurk | home. Returns false for an unknown name, or for
+// show / screensaver / lurk while another beat is still running (lurk also
+// needs the full-size sprite, i.e. PSRAM).
 bool director_debug(const char* beat);

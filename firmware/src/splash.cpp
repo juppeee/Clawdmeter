@@ -68,7 +68,10 @@ static bool     loop_release = false;
 static uint32_t loop_hold_ms = 6000;
 static uint32_t loop_entered = 0;
 static int      scene_group = -1;
+static bool     scene_calm = false;          // the current scene is a screensaver calm dip
 static const char* last_scene = NULL;
+static const char* last_show = NULL;         // never the same act twice running,
+static const char* last_calm = NULL;         //   tracked per kind of scene
 // walker scenes: stand → right edge → off left → home
 static uint8_t  choreo_phase = 0;
 static uint32_t choreo_since = 0;
@@ -284,65 +287,6 @@ static void scene_start(const ClawdAnim* a, uint32_t hold) {
     redraw();
 }
 
-// ─── Mini creature ───────────────────────────────────────────────────────────
-static lv_obj_t  *mini_canvas = NULL;
-static uint16_t  *mini_buf = NULL;
-static int        mini_cell = 0;
-static int        mini_w = 0;
-static int        mini_h = 0;
-static const ClawdAnim *mini_anim = NULL;
-static uint16_t   mini_frame = 0;
-static uint32_t   mini_started = 0;
-
-static void mini_render(void) {
-    if (!mini_buf || !mini_anim) return;
-    const int aw = mini_anim->w, ah = mini_anim->h;
-    const uint8_t *cells = clawd_frame(mini_anim, mini_frame);
-    const uint16_t *pal = mini_anim->palette;
-    for (int gy = 0; gy < ah; gy++) {
-        for (int gx = 0; gx < aw; gx++) {
-            uint8_t code = cells[gy * aw + gx];
-            uint16_t color = (pal && code < CLAWD_PALETTE_SIZE) ? pal[code] : COL_EMPTY;
-            for (int d = 0; d < mini_cell; d++) {
-                uint16_t *dst = &mini_buf[(gy * mini_cell + d) * mini_w + gx * mini_cell];
-                for (int i = 0; i < mini_cell; i++) dst[i] = color;
-            }
-        }
-    }
-    if (mini_canvas) lv_obj_invalidate(mini_canvas);
-}
-
-lv_obj_t* splash_mini_create(lv_obj_t *parent, const char *anim_name, int px) {
-    mini_anim = clawd_anim(anim_name);
-    if (!mini_anim) return NULL;
-    const int amax = (mini_anim->w > mini_anim->h) ? mini_anim->w : mini_anim->h;
-    mini_cell = px / amax;
-    if (mini_cell < 1) mini_cell = 1;
-    mini_w = mini_anim->w * mini_cell;
-    mini_h = mini_anim->h * mini_cell;
-#ifdef BOARD_HAS_PSRAM
-    const uint32_t caps = MALLOC_CAP_SPIRAM;
-#else
-    const uint32_t caps = MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT;
-#endif
-    mini_buf = (uint16_t*)heap_caps_malloc(mini_w * mini_h * 2, caps);
-    if (!mini_buf) return NULL;
-    mini_canvas = lv_canvas_create(parent);
-    lv_canvas_set_buffer(mini_canvas, mini_buf, mini_w, mini_h, LV_COLOR_FORMAT_RGB565);
-    mini_frame = 0;
-    mini_started = millis();
-    mini_render();
-    return mini_canvas;
-}
-
-void splash_mini_tick(void) {
-    if (!mini_buf || !mini_anim || mini_anim->frame_count == 0) return;
-    if (millis() - mini_started < mini_anim->holds[mini_frame]) return;
-    mini_started = millis();
-    mini_frame = (mini_frame + 1) % mini_anim->frame_count;
-    mini_render();
-}
-
 // ─── Init ────────────────────────────────────────────────────────────────────
 void splash_init(lv_obj_t *parent) {
     const BoardCaps& c = board_caps();
@@ -468,6 +412,7 @@ void splash_walk_off_right(uint16_t spd) {
 
 void splash_perform(int idx, uint32_t loop_ms) {
     scene_group = -1;
+    scene_calm = false;
     scene_start(clawd_anim_at(idx), loop_ms);
 }
 
@@ -479,9 +424,13 @@ void splash_perform_group(int group, uint32_t loop_ms, bool calm) {
     if (group < 0 || group >= GROUP_COUNT) group = 0;
     const char* const* names = calm ? CALM_NAMES : GROUP_NAMES[group];
     const int n = calm ? (int)(sizeof(CALM_NAMES) / sizeof(CALM_NAMES[0])) : GROUP_MAX;
-    const int pick = clawd_pick_no_repeat(names, n, last_scene, &rng);
+    const char*& last = calm ? last_calm : last_show;
+    const int pick = clawd_pick_no_repeat(names, n, last, &rng);
     scene_group = calm ? 0 : group;
-    scene_start(pick >= 0 ? clawd_anim(names[pick]) : NULL, loop_ms);
+    scene_calm = calm;
+    const ClawdAnim* a = pick >= 0 ? clawd_anim(names[pick]) : NULL;
+    if (a) last = a->name;
+    scene_start(a, loop_ms);
 }
 
 void splash_release(void) {
@@ -498,13 +447,21 @@ bool splash_busy(void) { return pst == P_WALK || pst == P_SCENE || pst == P_CHOR
 
 void splash_next(void) {
     if (pst != P_SCENE && pst != P_CHOREO) return;
+    // Step within the list the scene came from: a calm dip only ever steps to
+    // another calm scene (the screensaver stays calm), a show within its group.
     const int g = scene_group >= 0 ? scene_group : 0;
+    const char* const* names = scene_calm ? CALM_NAMES : GROUP_NAMES[g];
+    const int n = scene_calm ? (int)(sizeof(CALM_NAMES) / sizeof(CALM_NAMES[0])) : GROUP_MAX;
     int at = 0;
-    for (int i = 0; i < GROUP_MAX; i++)
-        if (last_scene && GROUP_NAMES[g][i] && strcmp(GROUP_NAMES[g][i], last_scene) == 0) at = i;
-    for (int k = 1; k <= GROUP_MAX; k++) {
-        const ClawdAnim* a = clawd_anim(GROUP_NAMES[g][(at + k) % GROUP_MAX]);
-        if (a && strcmp(a->name, "lurking") != 0) { scene_start(a, loop_hold_ms); return; }
+    for (int i = 0; i < n; i++)
+        if (last_scene && names[i] && strcmp(names[i], last_scene) == 0) at = i;
+    for (int k = 1; k <= n; k++) {
+        const ClawdAnim* a = clawd_anim(names[(at + k) % n]);
+        if (a && strcmp(a->name, "lurking") != 0) {
+            (scene_calm ? last_calm : last_show) = a->name;
+            scene_start(a, loop_hold_ms);
+            return;
+        }
     }
 }
 

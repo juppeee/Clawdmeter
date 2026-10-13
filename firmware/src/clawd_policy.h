@@ -21,6 +21,7 @@ struct ClawdTuning {
     uint32_t alert_timeout_ms;   // attention gives up after this long
     uint32_t long_turn_ms;       // a turn this long earns a wave on Stop
     uint32_t joy_pending_ms;     // a reset celebration may wait this long for him to get home
+    uint32_t react_pending_ms;   // a notice / wave may wait this long for him to hurry home
     uint32_t blink_min_ms;       // resting face: gap between blinks/glances
     uint32_t blink_max_ms;
 };
@@ -86,6 +87,38 @@ struct TurnTracker {
 void turn_clear(TurnTracker* t);
 // Feed a fired hook event; returns true when this event deserves the wave.
 bool turn_on_event(TurnTracker* t, char event, uint32_t now, const ClawdTuning* tune);
+
+// ─── Shows ───────────────────────────────────────────────────────────────────
+// Which mood group a show performs from. The trigger (sustained activity 3)
+// would lift the live group to Heavy every time, so the show reads the
+// usage-only base group instead, floored at Active: a show is always a busy
+// stretch, but the laptop / dancing / skateboard / soccer set stays reachable
+// and Heavy's set is kept for when usage really is burning.
+int clawd_show_group(int base_group);
+
+// ─── Attention: where it returns to ─────────────────────────────────────────
+// "Attention can interrupt anything and returns to where it left off."
+// A show it cut short ends gracefully home (it was a 20 s treat; replaying it
+// after a 2-minute alert would be stale, and the show gate already counted
+// it). An interrupted screensaver comes back if nobody showed up: the alert
+// timed out or was cleared with no tap, button, prompt or tool activity in
+// between. Any sign of you (or a tap: "show me the meters") ends on the meters.
+enum AttnFrom { ATTN_FROM_HOME, ATTN_FROM_SHOW, ATTN_FROM_SCREENSAVER };
+enum AttnEnd  { ATTN_END_TAP, ATTN_END_CLEAR, ATTN_END_TIMEOUT };
+bool attention_resumes_screensaver(AttnFrom from, AttnEnd how, bool engaged_since_alert);
+
+// ─── Reactions while he's out ────────────────────────────────────────────────
+// A notice or wave that arrives while he's away from his seat (a lurk trip)
+// is not dropped: he cuts the trip short, hurries back and then reacts. It
+// goes stale after `react_pending_ms` (he never got home in time).
+bool reaction_still_due(uint32_t queued_at, uint32_t now, const ClawdTuning* t);
+
+// ─── Corner seat ─────────────────────────────────────────────────────────────
+// Feet line for the corner seat: `feet_y` lowered just enough that an act
+// `tallest_px` tall clears the top edge by `top_margin`, but never below
+// `max_feet` (the first meter panel). If it can't fit, the result is clamped
+// and the caller's tall acts must fall back to something shorter.
+int corner_seat_feet(int feet_y, int tallest_px, int max_feet, int top_margin);
 
 // ─── Resting face behaviour ──────────────────────────────────────────────────
 // What the resting face does next, and when. Blinks are irregular and

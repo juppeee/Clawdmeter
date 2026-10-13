@@ -101,6 +101,35 @@ void sim_pump(void) {
         }
     }
 
+    // SIM_CMDS="ms:cmd;ms:cmd" — scripted input at those times. `pwr` is a
+    // PWR short press, `prompt` / `stop` a hook event (keys e / t), `alert`
+    // toggles an attention alert / clear (key m); anything
+    // else is typed as a serial command line (e.g. `clawd lurk`).
+    {
+        static char* cmds = NULL;
+        static bool  loaded = false;
+        if (!loaded) {
+            loaded = true;
+            const char* v = getenv("SIM_CMDS");
+            if (v) cmds = strdup(v);
+        }
+        while (cmds && *cmds) {
+            char* colon = strchr(cmds, ':');
+            if (!colon) { cmds = NULL; break; }
+            if (millis() < strtoul(cmds, NULL, 10)) break;
+            char* semi = strchr(colon + 1, ';');
+            if (semi) *semi = 0;
+            const char* c = colon + 1;
+            printf("[%lu] sim: %s\n", (unsigned long)millis(), c);
+            if (strcmp(c, "pwr") == 0)         { edge_pressed = true; edge_released = true; }
+            else if (strcmp(c, "prompt") == 0)   sim_inject_event('p');
+            else if (strcmp(c, "stop") == 0)     sim_inject_event('s');
+            else if (strcmp(c, "alert") == 0)    sim_inject_alert_toggle();
+            else                                 Serial.feed(c);
+            cmds = semi ? semi + 1 : NULL;
+        }
+    }
+
     // Headless CI hook: SIM_AUTOSHOT_MS=<ms> → screenshot + exit.
     static long autoshot_ms = -2;
     if (autoshot_ms == -2) {

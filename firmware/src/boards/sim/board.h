@@ -31,7 +31,9 @@
 // exits. SIM_SHOTS="ms:path,ms:path" saves several and exits after the last;
 // SIM_TAPS="ms@x,y;ms@x,y" presses the panel at those times; SIM_FAST=1
 // compresses the director's minutes into seconds (sim/director.jsonl);
-// SIM_MINIMAL=1 boots with minimal mode on.
+// SIM_MINIMAL=1 boots with minimal mode on. SIM_CMDS="ms:cmd;ms:cmd" types
+// serial commands at those times (`pwr`, `prompt`, `stop`, `alert` are the
+// PWR button, the e / t hook events and the m alert toggle). SIM_TRACE=1 prints every director step.
 
 #define BOARD_NAME  "Simulator 480x480"
 // Panel size; override to preview other boards' geometry, e.g.

@@ -34,15 +34,10 @@ void splash_walk_off_right(uint16_t speed_pct);
 // ends standing. Walker scenes (walking, crab walking) do one round trip.
 void splash_perform(int anim_index, uint32_t loop_ms);
 // Pick a scene from mood group 0..3 (never the one before), perform it.
-// calm = only the gentle Idle-group scenes (magnifier, walking).
+// calm = only the gentle Idle-group scenes (magnifier, walking). Never the
+// same scene twice running (tracked separately for shows and calm dips).
 void splash_perform_group(int group, uint32_t loop_ms, bool calm);
 void splash_release(void);    // tap: stop now, snap to the idle pose where he is
 bool splash_busy(void);       // walking or performing
 bool splash_performer_visible(void);   // any of him is on the stage right now
-void splash_next(void);       // PWR on the stage: swap to the next scene in the group
-
-// Mini animated creature for embedding elsewhere (the stale-data idle view).
-// Renders the named official animation at ~px x px inside `parent`; returns
-// the canvas (position it with lv_obj_align) or NULL. One at a time.
-lv_obj_t* splash_mini_create(lv_obj_t *parent, const char *anim_name, int px);
-void splash_mini_tick(void);
+void splash_next(void);       // PWR on the stage: the next scene in the group (calm stays calm)

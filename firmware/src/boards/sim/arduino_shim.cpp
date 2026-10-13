@@ -26,6 +26,24 @@ void SimSerial::printf(const char* fmt, ...) {
     vprintf(fmt, ap);
     va_end(ap);
 }
+static char   rx_buf[512];
+static size_t rx_head = 0, rx_len = 0;
+int SimSerial::available(void) { return (int)rx_len; }
+int SimSerial::read(void) {
+    if (!rx_len) return -1;
+    const char c = rx_buf[rx_head];
+    rx_head = (rx_head + 1) % sizeof(rx_buf);
+    rx_len--;
+    return (uint8_t)c;
+}
+void SimSerial::feed(const char* line) {
+    for (const char* c = line;; c++) {
+        if (rx_len == sizeof(rx_buf)) return;
+        rx_buf[(rx_head + rx_len) % sizeof(rx_buf)] = *c ? *c : '\n';
+        rx_len++;
+        if (!*c) return;
+    }
+}
 SimSerial Serial;
 
 // ---- Preferences: tiny in-memory key/value store ----

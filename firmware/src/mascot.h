@@ -28,17 +28,26 @@ bool mascot_acting(void);            // playing an act in his seat
 
 void mascot_autonomy(bool on);       // idle acts + lurk trips while seated
 // Play `anim` in the seat `times` times (noticing, a wave, jumping happy).
-// Interrupts an idle act; refused (false) while he's walking or away.
+// Interrupts an idle act; refused (false) while he's walking or away. An act
+// too tall for the headroom above the seat plays a shorter official act.
 bool mascot_act(const char* anim, uint8_t times);
 void mascot_leave(uint16_t speed_pct);                 // walk off the nearest edge
 void mascot_return(int from_side, uint16_t speed_pct); // -1 left / +1 right edge → seat
+// Something to react to while he's out of his seat: cut a lurk trip short
+// (the rest of the peek plays fast), turn around if he's heading out, or
+// speed up a walk home. True when he's home or on his way; false while the
+// attention Clawd owns him.
+bool mascot_hurry_home(void);
+bool mascot_lurk(void);              // QA: start a lurk trip now (seated, PSRAM only)
 void mascot_place_away(void);        // off screen now (a curtain is covering)
 void mascot_reset(void);             // seated now, nothing pending
 
 // Attention: corner walks off left at 2x, the big Clawd walks on at 2x and
 // alternates waving and pointing until attention(false), then walks off and
 // the small one walks home. Minimal mode: a held pointing frame in the seat.
-void mascot_attention(bool on);
+// to_seat=false (only meaningful with on=false): the small one stays off
+// screen after the big one leaves, for a screensaver that resumes.
+void mascot_attention(bool on, bool to_seat = true);
 bool mascot_in_attention(void);      // anything of the attention beat still on screen
 
 void mascot_set_minimal(bool on);    // still frame only, no autonomy

@@ -1,6 +1,8 @@
 #include "ui.h"
 #include "splash.h"
 #include "mascot.h"
+#include "clawd_anim.h"
+#include "clawd_policy.h"
 #include "minimal_mode.h"
 #include <lvgl.h>
 #include <time.h>
@@ -57,9 +59,8 @@ struct Layout {
     int16_t batt_y;                  // battery icon top edge
     int16_t batt_w;                  // battery icon width, for position math
 
-    // Pairing hint / idle screen
+    // Pairing hint
     int16_t pair_y1, pair_y2, pair_y3;
-    int16_t idle_px;                 // sleeping-creature size on the idle screen
 
     // Bluetooth screen
     int16_t bt_info_panel_h;
@@ -105,7 +106,6 @@ static void compute_layout(const BoardCaps& c) {
     L.pair_y1 = 40;
     L.pair_y2 = 120;
     L.pair_y3 = 160;
-    L.idle_px = 160;
 
     if (c.height >= 460) {
         // Large layout — tuned for 480x480 (AMOLED-2.16).
@@ -122,8 +122,10 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_credit_1_font = &font_styrene_24;
         L.bt_credit_2_font = &font_styrene_20;
     } else if (c.height >= 300) {
-        // Compact layout — tuned for 368x448 (AMOLED-1.8).
-        L.content_y = 85;
+        // Compact layout — tuned for 368x448 (AMOLED-1.8). The panels start
+        // low enough that the corner Clawd's jump (30 cells x 3 px) clears
+        // the top edge from a seat that still sits above the first panel.
+        L.content_y = 96;
         L.usage_panel_h = 130;
         L.usage_panel_gap = 12;
         L.usage_bar_y = 48;
@@ -169,7 +171,6 @@ static void compute_layout(const BoardCaps& c) {
         L.pair_y1 = 12;
         L.pair_y2 = 56;
         L.pair_y3 = 80;
-        L.idle_px = 96;
         L.bt_info_panel_h = 90;
         L.bt_reset_zone_h = 60;
         L.bt_title_font    = &font_tiempos_34;
@@ -227,14 +228,16 @@ static lv_obj_t* logo_img;
 static lv_image_dsc_t battery_dscs[6];  // empty, low, medium, full, charging, plug-zap (no battery)
 
 // ---- Live-data freshness → which usage sub-view to show ----
-// usage panels when data is flowing, an idle "Zzz" screen when the host is
-// connected but no usage update landed within DATA_FRESH_MS, the pairing hint
-// when BLE is down. Re-evaluated every loop in ui_tick_anim().
-static lv_obj_t* idle_group;            // the "Zzz" idle screen
+// Live meters when data is flowing; the same meters dimmed when the host is
+// connected but no usage update landed within DATA_FRESH_MS (stale: the last
+// numbers stay, visibly not live, and the status line says so); the pairing
+// hint when BLE is down. The corner Clawd stays in his seat in all three:
+// there is only ever one Clawd. Re-evaluated every loop in ui_tick_anim().
+#define STALE_OPA LV_OPA_40
 static uint32_t  last_data_ms = 0;      // lv_tick when the last valid usage update landed
 static bool      data_received = false; // any valid update since boot
 static bool      data_ok = true;        // last payload's ok flag; a {"ok":false} beat = "no fresh data"
-static int       view_state = -1;       // -1 unknown / 0 pair / 1 idle / 2 usage
+static int       view_state = -1;       // -1 unknown / 0 pair / 1 stale / 2 live
 static const uint32_t DATA_FRESH_MS = 90000;  // usage counts as "live" within this window (daemon sends ~60s)
 
 // ---- Shared ----
@@ -449,28 +452,6 @@ static void build_pair_group(lv_obj_t* parent) {
     lv_obj_add_flag(pair_group, LV_OBJ_FLAG_HIDDEN);  // ui_update_ble_status decides
 }
 
-// Idle "Zzz" screen — shown when the host is connected but no usage update has
-// landed recently (token expired, daemon down, host asleep…). Full-screen, like
-// the pairing hint, so we never render hours-old numbers as if they were live.
-static void build_idle_group(lv_obj_t* parent) {
-    idle_group = lv_obj_create(parent);
-    lv_obj_set_size(idle_group, L.scr_w, L.scr_h - L.content_y);
-    lv_obj_set_pos(idle_group, 0, L.content_y);
-    lv_obj_set_style_bg_opa(idle_group, LV_OPA_TRANSP, 0);
-    lv_obj_set_style_border_width(idle_group, 0, 0);
-    lv_obj_set_style_pad_all(idle_group, 0, 0);
-    lv_obj_clear_flag(idle_group, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_flag(idle_group, LV_OBJ_FLAG_EVENT_BUBBLE);
-
-    // A shrunk-down resting creature (the official cloud-ride animation)
-    // sits between the header and the status line; the animated "Listening…"
-    // status line carries the words, so no extra text is needed here.
-    lv_obj_t* creature = splash_mini_create(idle_group, "cloud", L.idle_px);
-    if (creature) lv_obj_align(creature, LV_ALIGN_CENTER, 0, -20);
-
-    lv_obj_add_flag(idle_group, LV_OBJ_FLAG_HIDDEN);  // update_view_state decides
-}
-
 static void init_usage_screen(lv_obj_t* scr) {
     usage_container = lv_obj_create(scr);
     lv_obj_set_size(usage_container, L.scr_w, L.scr_h);
@@ -531,7 +512,6 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_label_set_recolor(lbl_weekly_reset, true);
 
     build_pair_group(usage_container);
-    build_idle_group(usage_container);
 
     // Status line — always visible on the usage view. Driven by ui_tick_anim().
     lbl_anim = lv_label_create(usage_container);
@@ -579,10 +559,19 @@ void ui_init(void) {
         const int slot  = L.small_icons ? LOGO_SMALL_HEIGHT : LOGO_HEIGHT;
         const int art_h = L.small_icons ? CLAWD_STILL_SMALL_H : CLAWD_STILL_H;
         const int top   = L.logo_y + (slot - art_h) / 2;
+        const int cell  = L.small_icons ? 2 : 3;
+        // His tallest act (jumping happy, the fresh-window joy) rises well
+        // above the idle pose. Lower the seat just enough for it to clear the
+        // top edge, without sitting on the first panel. Where the layout has
+        // no room for that (240 px panels) the mascot swaps in a shorter
+        // official act instead of clipping (mascot.cpp).
+        const ClawdAnim* jump = clawd_anim("jumping happy");
+        const int feet = jump ? corner_seat_feet(top + art_h, jump->h * cell, L.content_y - 4, 2)
+                              : top + art_h;
         // Animated: idles, does acts, and takes walk-off/lurk trips (the
         // trips need PSRAM; without it he stays in his seat).
         // Created last so he walks over the battery and the stage.
-        if (!mascot_create(scr, L.margin, top + art_h, L.small_icons ? 2 : 3)) {
+        if (!mascot_create(scr, L.margin, feet, cell)) {
             logo_img = lv_image_create(scr);
             lv_image_set_src(logo_img, &logo_dsc);
             lv_obj_set_pos(logo_img, L.margin, top);
@@ -677,27 +666,32 @@ void ui_update(const UsageData* data) {
     }
 }
 
-// Pick the usage-view sub-screen: pairing hint (BLE down), the idle "Zzz" screen
-// (connected but data has gone stale), or the live usage panels. Only re-lays-out
-// on an actual change. The animated status line stays visible everywhere — it
-// reads "Listening…" on the idle screen, keeping it alive rather than frozen.
+// Pick the usage-view sub-screen: pairing hint (BLE down), stale meters
+// (connected but data has gone stale: dimmed, last values kept), or the live
+// meters. Only restyles on an actual change. The animated status line stays
+// visible everywhere and names the state.
 static void update_view_state(void) {
-    if (!usage_group || !pair_group || !idle_group) return;
+    if (!usage_group || !pair_group) return;
     int v;
     if (!s_ble_connected) {
         v = 0;  // pairing hint
     } else if (data_received && data_ok && (lv_tick_get() - last_data_ms) < DATA_FRESH_MS) {
         v = 2;  // live usage
     } else {
-        v = 1;  // idle / Zzz
+        v = 1;  // stale
     }
     if (v == view_state) return;
     view_state = v;
-    lv_obj_add_flag(pair_group, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(idle_group, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_add_flag(usage_group, LV_OBJ_FLAG_HIDDEN);
-    lv_obj_clear_flag(v == 0 ? pair_group : v == 1 ? idle_group : usage_group,
-                      LV_OBJ_FLAG_HIDDEN);
+    if (v == 0) {
+        lv_obj_add_flag(usage_group, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(pair_group, LV_OBJ_FLAG_HIDDEN);
+    } else {
+        lv_obj_add_flag(pair_group, LV_OBJ_FLAG_HIDDEN);
+        lv_obj_clear_flag(usage_group, LV_OBJ_FLAG_HIDDEN);
+        // `opa` (not `opa_layered`) scales every draw of the group and its
+        // children: no layer buffer, so it costs nothing on the C6.
+        lv_obj_set_style_opa(usage_group, v == 1 ? STALE_OPA : LV_OPA_COVER, 0);
+    }
 }
 
 bool ui_meters_live(void) { return view_state == 2; }
@@ -705,7 +699,6 @@ bool ui_meters_live(void) { return view_state == 2; }
 void ui_tick_anim(void) {
     update_view_state();
     const bool still = minimal_mode();   // minimal: nothing moves but the numbers
-    if (view_state == 1 && !still) splash_mini_tick();   // animate the sleeping creature on the idle screen
 
     uint32_t now = lv_tick_get();
 
@@ -734,7 +727,8 @@ void ui_tick_anim(void) {
 
     if (still) {
         // One glyph, one word per state; redrawn only when it changes.
-        const char* text = !s_ble_connected ? "Waiting" : view_state == 1 ? "No data" : "Connected";
+        const char* text = !s_ble_connected ? "Waiting"
+                         : view_state == 1 ? (data_received ? "Stale" : "No data") : "Connected";
         if (text != still_shown) {
             still_shown = text;
             static char sbuf[40];
@@ -759,8 +753,8 @@ void ui_tick_anim(void) {
     const char* text;
     if (!s_ble_connected) {
         text = "Waiting";              // advertising / waiting for a host connection
-    } else if (view_state == 1) {      // idle — alternate so it reads as alive AND data-less
-        text = (anim_msg_idx & 1) ? "No data" : "Listening";
+    } else if (view_state == 1) {      // stale — alternate so it reads as alive AND not live
+        text = (anim_msg_idx & 1) ? (data_received ? "Stale" : "No data") : "Listening";
     } else if (now - connected_at_ms < 5000) {
         text = "Connected";
     } else {

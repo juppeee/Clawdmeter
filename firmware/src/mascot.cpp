@@ -52,6 +52,8 @@ static bool     autonomy = false;
 static bool     minimal = false;
 static bool     attn = false;
 static bool     stay_away = false;     // asked to leave mid-lurk: don't walk back in
+static bool     hurry = false;         // cut the lurk short: walk back at HURRY_PCT
+static bool     attn_to_seat = true;   // attention over: the small one walks home (else stays out)
 static uint32_t seated_since = 0;
 static uint32_t idle_gap = 7000;
 static const char* last_act = NULL;
@@ -68,6 +70,11 @@ static const char* const ACTS_BY_RATE[4][4] = {
     { "dancing",  "waving",  "dancing",  "lurking" },   // heavy: can't sit still
 };
 static const uint16_t STILL_MS_BY_RATE[4] = { 10000, 7000, 5000, 3500 };
+static const uint16_t HURRY_PCT = 250;        // hurrying home from a lurk trip
+// An act taller than the headroom above his seat (jumping happy on a 240 px
+// panel) would be clipped by the top edge. It swaps for this official act,
+// which always fits, instead.
+static const char* const TALL_FALLBACK = "dancing";
 // Everything the corner buffer must fit.
 static const char* const CORNER_ANIMS[] = {
     "walking", "waving", "pointing", "dancing", "jumping happy",
@@ -270,6 +277,10 @@ bool mascot_act(const char* name, uint8_t times) {
     if (!(mode == M_SEATED || (mode == M_ACT && act_auto))) return false;
     const ClawdAnim* a = clawd_anim(name);
     if (!a) return false;
+    if (feet_y - a->h * cell < 0) {
+        const ClawdAnim* f = clawd_anim(TALL_FALLBACK);
+        if (f && feet_y - f->h * cell >= 0) a = f;
+    }
     start_frames(a);
     act_left = times ? times : 1;
     act_auto = false;
@@ -301,9 +312,44 @@ void mascot_return(int from_side, uint16_t spd) {
     walk_to(slot_x, spd, AFTER_SEAT);
 }
 
+bool mascot_lurk(void) {
+    if (!img || minimal || !big_img || mode != M_SEATED) return false;
+    last_act = "lurking";
+    walk_to(off_left_x(), 100, AFTER_LURK);
+    return true;
+}
+
+bool mascot_hurry_home(void) {
+    if (!img || minimal) return false;
+    switch (mode) {
+    case M_SEATED:
+    case M_ACT:
+        return true;                                  // already home
+    case M_LURK:
+        // Cut the peek short: the rest of it plays fast, then he walks back
+        // in at a hurry (lurk end, mascot_tick).
+        stay_away = false;
+        hurry = true;
+        speed = HURRY_PCT + 50;
+        return true;
+    case M_WALK:
+        if (after == AFTER_BIG) return false;         // fetching you: attention owns him
+        if (after == AFTER_SEAT) { speed = HURRY_PCT; return true; }
+        walk_to(slot_x, HURRY_PCT, AFTER_SEAT);       // heading out: turn around
+        return true;
+    case M_AWAY:
+        x = off_left_x();
+        walk_to(slot_x, HURRY_PCT, AFTER_SEAT);
+        return true;
+    default:
+        return false;                                 // the big Clawd is on
+    }
+}
+
 void mascot_place_away(void) {
     if (!img) return;
     stay_away = false;
+    hurry = false;
     show(img, false);
     show(big_img, false);
     mode = M_AWAY;
@@ -314,6 +360,7 @@ void mascot_reset(void) {
     if (!img) return;
     attn = false;
     stay_away = false;
+    hurry = false;
     show(big_img, false);
     seat();
 }
@@ -323,9 +370,10 @@ void mascot_set_minimal(bool on) {
     mascot_reset();
 }
 
-void mascot_attention(bool on) {
+void mascot_attention(bool on, bool to_seat) {
     if (!img || on == attn) return;
     attn = on;
+    attn_to_seat = on || to_seat;
     if (minimal) {
         if (on) {
             const ClawdAnim* p = clawd_anim("pointing");
@@ -353,7 +401,10 @@ void mascot_attention(bool on) {
         else if (mode == M_BIG_OUT)      mode = M_BIG_IN;          // was leaving: turn around
         else                             walk_to(off_left_x(), 200, AFTER_BIG);
     } else {
-        if (mode == M_WALK && after == AFTER_BIG) walk_to(slot_x, 200, AFTER_SEAT);  // hadn't left yet
+        if (mode == M_WALK && after == AFTER_BIG) {               // hadn't left yet
+            if (attn_to_seat) walk_to(slot_x, 200, AFTER_SEAT);
+            else              after = AFTER_AWAY;                 // keep going: he's off again
+        }
         else if (mode == M_BIG_IN || mode == M_BIG_ACT) {
             mode = M_BIG_OUT;
             start_frames(walk_anim);
@@ -410,9 +461,10 @@ void mascot_tick(void) {
         }
         if (mode == M_LURK) {                          // back in from the right
             show(big_img, false);
-            if (stay_away) { stay_away = false; mode = M_AWAY; return; }
+            if (stay_away) { stay_away = false; hurry = false; mode = M_AWAY; return; }
             x = off_right_x();
-            walk_to(slot_x, 100, AFTER_SEAT);
+            walk_to(slot_x, hurry ? HURRY_PCT : 100, AFTER_SEAT);
+            hurry = false;
             return;
         }
         if (mode == M_ACT && --act_left > 0) {         // again (jumping happy x2)
@@ -444,6 +496,7 @@ void mascot_tick(void) {
             if (mode == M_BIG_OUT && big_x0 + (a->ox + a->w) * big_cell + big_dx <= 0) {
                 show(big_img, false);                  // gone: the small one walks home
                 x = off_left_x();
+                if (!attn_to_seat) { mode = M_AWAY; return; }   // ...or stays out (screensaver resumes)
                 walk_to(slot_x, 100, AFTER_SEAT);
                 return;
             }

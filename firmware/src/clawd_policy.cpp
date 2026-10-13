@@ -17,6 +17,7 @@ void clawd_tuning_defaults(ClawdTuning* t) {
     t->alert_timeout_ms = 2 * MIN;
     t->long_turn_ms     = 2 * MIN;
     t->joy_pending_ms   = 5 * MIN;
+    t->react_pending_ms = 15 * SEC;   // the walk back from a lurk is ~6 s at 2.5x
     t->blink_min_ms     = 2 * SEC;
     t->blink_max_ms     = 6 * SEC;
 }
@@ -129,6 +130,30 @@ bool turn_on_event(TurnTracker* t, char event, uint32_t now, const ClawdTuning* 
         return long_turn;
     }
     return false;
+}
+
+// ─── Shows ───────────────────────────────────────────────────────────────────
+int clawd_show_group(int base_group) {
+    if (base_group > 3) base_group = 3;
+    return base_group < 2 ? 2 : base_group;      // RATE_ACTIVE floor
+}
+
+// ─── Attention ───────────────────────────────────────────────────────────────
+bool attention_resumes_screensaver(AttnFrom from, AttnEnd how, bool engaged) {
+    if (from != ATTN_FROM_SCREENSAVER) return false;
+    if (how == ATTN_END_TAP) return false;
+    return !engaged;
+}
+
+bool reaction_still_due(uint32_t queued_at, uint32_t now, const ClawdTuning* t) {
+    return (uint32_t)(now - queued_at) <= t->react_pending_ms;
+}
+
+// ─── Corner seat ─────────────────────────────────────────────────────────────
+int corner_seat_feet(int feet_y, int tallest_px, int max_feet, int top_margin) {
+    const int need = tallest_px + top_margin;
+    if (feet_y >= need) return feet_y;
+    return need <= max_feet ? need : (max_feet > feet_y ? max_feet : feet_y);
 }
 
 // ─── Resting face ────────────────────────────────────────────────────────────

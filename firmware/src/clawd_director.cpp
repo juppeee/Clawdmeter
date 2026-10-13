@@ -41,6 +41,16 @@ static bool     notice_wake = false;  // B_FACE_HOME: blink first (he noticed yo
 // Attention
 static bool     attention_on = false;
 static uint32_t attention_since = 0;
+static AttnFrom attn_from = ATTN_FROM_HOME;   // what it interrupted
+static uint32_t attn_mark = 0;                // last_engagement right after the alert
+static bool     attn_engaged = false;         // you showed up since the alert (sticky across refreshes)
+static bool     resume_screensaver = false;   // decided when attention ends
+
+// A notice / wave waiting for him to hurry home from a lurk trip.
+static const char* react_anim = NULL;
+static uint8_t     react_times = 0;
+static uint32_t    react_at = 0;
+static bool        trace = false;
 
 // Situation
 static ShowGate    show_gate;
@@ -65,13 +75,11 @@ static void go(Beat b) {
     mascot_autonomy(b == B_HOME && !minimal);
 }
 
-#ifndef DIRECTOR_TRACE
-#define DIRECTOR_TRACE 0
-#endif
+void director_set_trace(bool on) { trace = on; }
 
 static void next_step(uint32_t pause_ms = 0) {
     step++;
-    if (DIRECTOR_TRACE)
+    if (trace)
         Serial.printf("[%lu] director:   %s step %u\n", (unsigned long)now_ms(), BEAT_NAMES[beat], step);
     wait_until = now_ms() + pause_ms;
 }
@@ -98,11 +106,29 @@ static void close_stage(void) {
 }
 
 // Back on the meters after a transition: attention takes over if it's
-// waiting, otherwise he walks back to his seat from the left.
+// waiting; an alert that ended mid-transition with nobody around puts the
+// screensaver back; otherwise he walks back to his seat from the left.
 static void arrive_meters(void) {
     if (attention_on) { go(B_ATTENTION); return; }
+    if (resume_screensaver) {
+        resume_screensaver = false;
+        if (!minimal && ui_meters_live()) { go(B_SCREENSAVER); return; }
+    }
     mascot_return(-1, 150);
     go(B_CORNER);
+}
+
+// A corner reaction (noticing, the long-turn wave). If he's out on a lurk
+// trip he cuts it short and hurries back, then reacts (anticipation: the
+// reaction is never just dropped). Only on the meters with nothing staged.
+static void react(const char* anim, uint8_t times) {
+    if (beat != B_HOME && beat != B_CORNER) return;
+    if (mascot_act(anim, times)) { react_anim = NULL; go(B_CORNER); return; }
+    if (!mascot_hurry_home()) return;
+    react_anim = anim;
+    react_times = times;
+    react_at = now_ms();
+    if (beat != B_CORNER) go(B_CORNER);
 }
 
 // "Show me the meters": the fastest no-cut path from wherever we are.
@@ -123,17 +149,36 @@ static void to_meters(bool noticed) {
 }
 
 // ─── Attention ───────────────────────────────────────────────────────────────
-static void end_attention(void) {
+static void end_attention(AttnEnd how) {
     if (!attention_on) return;
     attention_on = false;
+    const bool engaged = attn_engaged || (int32_t)(last_engagement - attn_mark) > 0;
+    resume_screensaver = attention_resumes_screensaver(attn_from, how, engaged);
     ui_set_alert_text(NULL);
-    mascot_attention(false);
-    Serial.println("director: attention over");
+    mascot_attention(false, !resume_screensaver);
+    Serial.printf("[%lu] director: attention over (%s)%s\n", (unsigned long)now_ms(),
+                  how == ATTN_END_TAP ? "tap" : how == ATTN_END_CLEAR ? "cleared" : "timeout",
+                  resume_screensaver ? ", back to the screensaver" : "");
     if (beat == B_ATTENTION && step == 0) next_step();
 }
 
 void director_alert(const char* message) {
+    if (!attention_on) {
+        // Remember what it interrupts, so it can return there. A new alert
+        // while the last one is still leaving for the screensaver inherits
+        // that origin (nobody has shown up in between).
+        const bool leaving_for_screensaver = beat == B_ATTENTION && resume_screensaver;
+        attn_from = (beat == B_SCREENSAVER || leaving_for_screensaver) ? ATTN_FROM_SCREENSAVER
+                  : (beat == B_SHOW)                                  ? ATTN_FROM_SHOW
+                                                                      : ATTN_FROM_HOME;
+        attn_engaged = false;
+        resume_screensaver = false;
+        react_anim = NULL;                    // the big Clawd outranks a corner reaction
+    } else if ((int32_t)(last_engagement - attn_mark) > 0) {
+        attn_engaged = true;                  // a refresh must not forget that you showed up
+    }
     engage();
+    attn_mark = last_engagement;
     attention_since = now_ms();
     ui_set_alert_text(message);
     if (attention_on) return;                 // refresh text + timer only
@@ -150,19 +195,27 @@ void director_alert(const char* message) {
     }
 }
 
-void director_alert_clear(void) { end_attention(); }
+void director_alert_clear(void) { end_attention(ATTN_END_CLEAR); }
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
 void director_tap(void) {
     engage();
-    if (attention_on) { end_attention(); return; }   // a dismissing tap does nothing else
+    if (attention_on) { end_attention(ATTN_END_TAP); return; }   // a dismissing tap does nothing else
+    resume_screensaver = false;                   // "show me the meters" wins
     if (minimal) return;
     to_meters(false);
 }
 
 void director_button(void) {
     engage();
+    resume_screensaver = false;
     if (beat == B_SCREENSAVER) to_meters(false);
+}
+
+void director_stage_next(void) {
+    engage();
+    resume_screensaver = false;
+    splash_next();
 }
 
 static void indev_cb(lv_event_t* e) {
@@ -189,7 +242,11 @@ void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {
         // he's home, else when he gets back. Never on replays (signals only
         // reports real samples). It outranks the notice / wave below.
         if (beat == B_HOME && mascot_act("jumping happy", 2)) go(B_CORNER);
-        else { joy_pending = true; joy_at = now_ms(); }
+        else {
+            joy_pending = true;
+            joy_at = now_ms();
+            if (beat == B_HOME) mascot_hurry_home();   // out on a trip: come back for it
+        }
     }
 
     if (sig->event_fired) {
@@ -197,14 +254,15 @@ void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {
         const bool wave = turn_on_event(&turn, sig->event, now_ms(), &clawd_tuning());
         if (minimal) return;
         if (sig->event == 'p' || sig->event == 'b') {
+            resume_screensaver = false;       // you're back
             if (beat == B_SCREENSAVER) {
                 to_meters(true);              // he notices, the face drops
-            } else if (beat == B_HOME) {
+            } else {
                 // Anticipation: he turns and points before anything else.
-                if (mascot_act("pointing", 1)) go(B_CORNER);
+                react("pointing", 1);
             }
-        } else if (sig->event == 's' && wave && beat == B_HOME) {
-            if (mascot_act("waving", 1)) go(B_CORNER);
+        } else if (sig->event == 's' && wave) {
+            react("waving", 1);
         }
     }
 }
@@ -212,6 +270,8 @@ void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {
 // ─── Minimal mode ────────────────────────────────────────────────────────────
 static void apply_minimal(bool on) {
     minimal = on;
+    react_anim = NULL;                        // a queued corner reaction is moot now
+    resume_screensaver = false;
     face_hide_now();
     streak_cancel();
     close_stage();
@@ -289,7 +349,9 @@ static void run_show(uint32_t now) {
         next_step();
         break;
     case 6: {
-        int g = usage_rate_group();
+        // The trigger lifted the live group to Heavy; read the usage-only
+        // base group (floored at Active) so the whole repertoire shows up.
+        const int g = clawd_show_group(usage_rate_base_group());
         splash_perform_group(g, t.show_scene_ms, false);
         next_step();
         break;
@@ -435,11 +497,37 @@ static void run_streak_home(uint32_t now) {
 static void run_attention(uint32_t now) {
     if (step == 0) {
         if (!mascot_in_attention()) mascot_attention(true);
-        if ((uint32_t)(now - attention_since) >= clawd_tuning().alert_timeout_ms) end_attention();
+        if ((uint32_t)(now - attention_since) >= clawd_tuning().alert_timeout_ms)
+            end_attention(ATTN_END_TIMEOUT);
         return;
     }
-    // Dismissed: wait for the big one to leave and the small one to sit down.
-    if (!mascot_in_attention() && !mascot_busy()) go(B_HOME);
+    // Over: wait for the big one to leave and the small one to sit down (or,
+    // when the screensaver resumes, to stay out of sight).
+    if (mascot_in_attention() || mascot_busy()) return;
+    if (resume_screensaver) {
+        resume_screensaver = false;
+        if (!minimal && ui_meters_live()) { go(B_SCREENSAVER); return; }
+    }
+    if (mascot_away()) {              // was told to stay out, then you showed up
+        mascot_return(-1, 150);
+        go(B_CORNER);
+        return;
+    }
+    go(B_HOME);
+}
+
+static void run_corner(uint32_t now) {
+    if (react_anim) {
+        if (!reaction_still_due(react_at, now, &clawd_tuning())) {
+            react_anim = NULL;                       // never made it home in time
+        } else {
+            if (!mascot_seated() && !mascot_acting()) return;   // still hurrying back
+            if (!mascot_act(react_anim, react_times)) return;   // a commanded act first
+            react_anim = NULL;
+            return;
+        }
+    }
+    if (settled(now)) go(B_HOME);
 }
 
 static void run_home(uint32_t now) {
@@ -467,7 +555,7 @@ void director_tick(void) {
 
     switch (beat) {
     case B_HOME:        run_home(now); break;
-    case B_CORNER:      if (settled(now)) go(B_HOME); break;
+    case B_CORNER:      run_corner(now); break;
     case B_SHOW:        run_show(now); break;
     case B_SCREENSAVER: run_screensaver(now); break;
     case B_FACE_HOME:   run_face_home(now); break;
@@ -485,6 +573,10 @@ bool director_debug(const char* name) {
         joy_pending = true;
         joy_at = now_ms();
         return true;
+    }
+    if (strcmp(name, "lurk") == 0) {      // a lurk trip now (to QA cutting it short)
+        if (beat != B_HOME) return false;
+        return mascot_lurk();
     }
     const bool show = strcmp(name, "show") == 0;
     if (!show && strcmp(name, "screensaver") != 0) return false;

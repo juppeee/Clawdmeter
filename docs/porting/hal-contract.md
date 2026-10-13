@@ -88,7 +88,7 @@ function in your board folder only when it has something to report.
 | `buzz`                    | plays the reset chime (no reply) |
 | `info`                    | one JSON line: `{"env":"waveshare_amoled_18","ver":"v1.9.0","rev":"co5300_cst816","link":"ble"}`. `env` comes from `-DCLAWD_ENV` (set per env in `platformio.ini` from `${this.__env__}`), `ver` from `-DCLAWD_VERSION` (defaults to `dev`; CI sets `PLATFORMIO_BUILD_FLAGS='-DCLAWD_VERSION=\"vX.Y.Z\"'`), `rev` from `board_hal_rev()`. |
 | `minimal [on\|off\|auto]` | sets (or with no argument, reports) the minimal-mode override; replies `{"minimal":true,"override":"on"}` |
-| `clawd <beat>`            | starts a Clawd beat now, for `screenshot` QA without waiting for the situation: `show`, `screensaver`, `attention`, `joy`, `home` (a tap). Replies `{"clawd":"show","ok":true}`. See `docs/clawd-director.md`. |
+| `clawd <beat>`            | starts a Clawd beat now, for `screenshot` QA without waiting for the situation: `show`, `screensaver`, `attention`, `joy`, `lurk` (a lurk trip, PSRAM boards), `home` (a tap). Replies `{"clawd":"show","ok":true}`. See `docs/clawd-director.md`. |
 
 ## Responsive UI breakpoints
 

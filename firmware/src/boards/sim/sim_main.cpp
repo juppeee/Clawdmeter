@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include "sim_platform.h"
 #include "../../clawd_policy.h"
+#include "../../clawd_director.h"
 #include <stdlib.h>
 #include <Preferences.h>
 
@@ -24,6 +25,9 @@ int main(void) {
         clawd_tuning_fast(&clawd_tuning());
         printf("[sim] SIM_FAST: compressed director timings\n");
     }
+    // SIM_TRACE=1: print every director beat step with a timestamp (the
+    // timings walkthrough screenshots are picked from). Beat changes always print.
+    if (getenv("SIM_TRACE")) director_set_trace(true);
     // SIM_MINIMAL=1: boot with the minimal-mode override on (as if the user
     // had sent `minimal on`); `z` toggles it at runtime.
     if (getenv("SIM_MINIMAL")) {

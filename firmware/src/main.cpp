@@ -361,9 +361,11 @@ void loop() {
 
         if (power_hal_pwr_pressed()) {
             if (!idle_consume_wake_press()) {
-                if (director_room() == ROOM_STAGE) splash_next();
-                else                               brightness_cycle();
-                director_button();
+                // On the stage PWR swaps the scene and stays in the room (a
+                // screensaver calm dip steps to the other calm scene);
+                // anywhere else it cycles brightness and counts as you being here.
+                if (director_room() == ROOM_STAGE) director_stage_next();
+                else { brightness_cycle(); director_button(); }
             }
         }
 
@@ -418,6 +420,11 @@ void loop() {
                 sound_hal_play_reset();
             }
             ui_update(&usage);
+            // A prompt (or you're back after a gap): you're at the computer,
+            // so a dimmed or dark panel wakes before Clawd notices you. A
+            // Stop or tool activity doesn't: Claude working alone isn't you.
+            if (sig.event_fired && (sig.event == 'p' || sig.event == 'b'))
+                idle_note_activity();
             director_on_payload(&usage, &sig);
             if (usage.alert_msg[0]) {
                 Serial.println("attention — mascot");

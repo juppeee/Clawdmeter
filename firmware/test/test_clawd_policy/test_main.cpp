@@ -132,6 +132,67 @@ static void test_far_eye_travels_further(void) {
     TEST_ASSERT_EQUAL_INT(-20, r);
 }
 
+static void test_show_group_uses_base_rate_floored_at_active(void) {
+    TEST_ASSERT_EQUAL_INT(2, clawd_show_group(0));   // idle usage, busy hooks: Active set
+    TEST_ASSERT_EQUAL_INT(2, clawd_show_group(1));
+    TEST_ASSERT_EQUAL_INT(2, clawd_show_group(2));
+    TEST_ASSERT_EQUAL_INT(3, clawd_show_group(3));   // really burning: Heavy set
+    TEST_ASSERT_EQUAL_INT(2, clawd_show_group(-1));  // no samples yet
+    TEST_ASSERT_EQUAL_INT(3, clawd_show_group(7));
+}
+
+static void test_show_variety_is_reachable_and_never_repeats(void) {
+    // The Active set a show now draws from with idle-to-active usage.
+    static const char* const ACTIVE[] = { "laptop", "dancing", "skateboard", "soccer" };
+    ClawdRng r; clawd_rng_seed(&r, 99);
+    bool seen[4] = { false, false, false, false };
+    const char* last = NULL;
+    for (int i = 0; i < 200; i++) {
+        const int k = clawd_pick_no_repeat(ACTIVE, 4, last, &r);
+        TEST_ASSERT_TRUE(k >= 0 && k < 4);
+        if (last) TEST_ASSERT_TRUE(strcmp(ACTIVE[k], last) != 0);
+        seen[k] = true;
+        last = ACTIVE[k];
+    }
+    for (int k = 0; k < 4; k++) TEST_ASSERT_TRUE(seen[k]);
+}
+
+static void test_attention_returns_to_an_unattended_screensaver(void) {
+    TEST_ASSERT_TRUE(attention_resumes_screensaver(ATTN_FROM_SCREENSAVER, ATTN_END_TIMEOUT, false));
+    TEST_ASSERT_TRUE(attention_resumes_screensaver(ATTN_FROM_SCREENSAVER, ATTN_END_CLEAR, false));
+}
+
+static void test_attention_ends_home_when_you_showed_up(void) {
+    // A tap means "show me the meters", whatever was interrupted.
+    TEST_ASSERT_FALSE(attention_resumes_screensaver(ATTN_FROM_SCREENSAVER, ATTN_END_TAP, false));
+    // A prompt, button or tool activity during the alert: you're here.
+    TEST_ASSERT_FALSE(attention_resumes_screensaver(ATTN_FROM_SCREENSAVER, ATTN_END_CLEAR, true));
+    TEST_ASSERT_FALSE(attention_resumes_screensaver(ATTN_FROM_SCREENSAVER, ATTN_END_TIMEOUT, true));
+    // An interrupted show ends gracefully home; home stays home.
+    TEST_ASSERT_FALSE(attention_resumes_screensaver(ATTN_FROM_SHOW, ATTN_END_TIMEOUT, false));
+    TEST_ASSERT_FALSE(attention_resumes_screensaver(ATTN_FROM_HOME, ATTN_END_CLEAR, false));
+}
+
+static void test_reaction_waits_for_him_to_hurry_home(void) {
+    TEST_ASSERT_TRUE(reaction_still_due(1000, 1000, &T));
+    TEST_ASSERT_TRUE(reaction_still_due(1000, 1000 + T.react_pending_ms, &T));
+    TEST_ASSERT_FALSE(reaction_still_due(1000, 1001 + T.react_pending_ms, &T));
+    TEST_ASSERT_TRUE(reaction_still_due(0xFFFFF000u, 0x00000100u, &T));   // wraps safely
+    // Long enough for the lurk peek at speed plus the walk back at 2.5x.
+    TEST_ASSERT_TRUE(T.react_pending_ms >= 10 * SEC);
+}
+
+static void test_corner_seat_leaves_headroom_for_the_jump(void) {
+    // 480 panel: seat feet at 84, jump 30 cells x 3 px, first panel at 100.
+    TEST_ASSERT_EQUAL_INT(92, corner_seat_feet(84, 90, 96, 2));
+    // Already enough room: unchanged.
+    TEST_ASSERT_EQUAL_INT(120, corner_seat_feet(120, 90, 200, 2));
+    // 240 panel: 60 px jump can't fit above a panel at 44; clamped, never
+    // pushed into the panel (the mascot swaps the act instead).
+    TEST_ASSERT_EQUAL_INT(40, corner_seat_feet(38, 60, 40, 2));
+    TEST_ASSERT_EQUAL_INT(38, corner_seat_feet(38, 60, 30, 2));   // never raised
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_show_needs_five_sustained_minutes_of_level_3);
@@ -145,5 +206,11 @@ int main(int, char**) {
     RUN_TEST(test_jitter_stays_within_40_percent);
     RUN_TEST(test_face_rhythm_is_irregular_with_some_double_blinks);
     RUN_TEST(test_far_eye_travels_further);
+    RUN_TEST(test_show_group_uses_base_rate_floored_at_active);
+    RUN_TEST(test_show_variety_is_reachable_and_never_repeats);
+    RUN_TEST(test_attention_returns_to_an_unattended_screensaver);
+    RUN_TEST(test_attention_ends_home_when_you_showed_up);
+    RUN_TEST(test_reaction_waits_for_him_to_hurry_home);
+    RUN_TEST(test_corner_seat_leaves_headroom_for_the_jump);
     return UNITY_END();
 }

@@ -105,8 +105,10 @@ SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl .pio/build/sim/program
 ```
 
 With `SIM_FAST` the show starts at ~14 s, the screensaver at ~53 s, the wake
-at ~90 s, attention at ~97 s and the reset jump at ~115 s. The sim build
-prints a timestamped trace of every beat and step (`-DDIRECTOR_TRACE=1`):
+at ~90 s, attention at ~97 s and the reset jump at ~115 s. With `SIM_TRACE=1`
+the sim prints a timestamped trace of every beat and step, and
+`SIM_CMDS="ms:cmd;…"` types serial commands at set times (`pwr`, `prompt`,
+`stop`, `alert`, `clawd <beat>`):
 
 ```
 [14014] director: home -> show

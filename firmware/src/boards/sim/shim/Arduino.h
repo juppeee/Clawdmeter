@@ -14,8 +14,11 @@ void delay(unsigned long ms);
 class SimSerial {
 public:
     void begin(unsigned long baud) { (void)baud; }
-    int  available(void) { return 0; }
-    int  read(void) { return -1; }
+    // Fed by SIM_CMDS (sim_platform.cpp) so headless runs can type serial
+    // commands (`clawd lurk`, `screenshot`, ...) at scripted times.
+    int  available(void);
+    int  read(void);
+    void feed(const char* line);   // queue a line (newline appended)
     size_t write(const uint8_t* buf, size_t len);
     void flush(void) { fflush(stdout); }
     void print(const char* s) { fputs(s, stdout); }
