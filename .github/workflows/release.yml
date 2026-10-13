@@ -1,0 +1,170 @@
+name: Release
+
+# Push a tag like v1.9.0 to publish a GitHub Release with:
+#   <env>-<tag>.bin           one merged image per hardware env, flashed at 0x0
+#   manifest.json             {version, boards: [{env, chip, flash_size,
+#                             display_name, file, offset, size, sha256}]}
+#   webtools-<env>.json       ESP Web Tools manifest per board (browser flasher)
+#   clawdmeter-<tag>-*.tar.gz / .zip   desktop app for Linux, macOS, Windows
+#   SHA256SUMS
+# Tags with a hyphen (v1.9.0-rc.1) publish as prereleases, which the desktop
+# app's "latest release" check skips.
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  # Run steps read the tag from this variable instead of an inline expression.
+  TAG: ${{ github.ref_name }}
+
+jobs:
+  envs:
+    name: List hardware envs
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.envs.outputs.matrix }}
+      names: ${{ steps.envs.outputs.names }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check the tag is a version
+        # The firmware, manifest.json and the app's update check all compare
+        # this numerically; `v*` alone would also match e.g. `very-old`.
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.]+)?$ ]]; then
+            echo "::error::tag '$TAG' is not vMAJOR.MINOR.PATCH[-prerelease]"
+            exit 1
+          fi
+      - id: envs
+        run: |
+          echo "matrix=$(python3 tools/ci/hardware_envs.py --matrix)" >> "$GITHUB_OUTPUT"
+          echo "names=$(python3 tools/ci/hardware_envs.py)" >> "$GITHUB_OUTPUT"
+
+  firmware:
+    name: Firmware ${{ matrix.env }}
+    needs: envs
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: true
+      matrix:
+        include: ${{ fromJSON(needs.envs.outputs.matrix) }}
+    env:
+      # Baked into the image; the firmware's serial `info` command reports it
+      # and the desktop app compares it with manifest.json's version.
+      PLATFORMIO_BUILD_FLAGS: -DCLAWD_VERSION=\"${{ github.ref_name }}\"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/setup-pio
+        with:
+          cache-key: ${{ matrix.board }}
+      - run: pio run -d firmware -e "${{ matrix.env }}"
+      - name: Merge bootloader + partitions + boot_app0 + app
+        run: >-
+          python tools/ci/merge_firmware.py --env "${{ matrix.env }}"
+          --version "$TAG" --out-dir dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: firmware-${{ matrix.env }}
+          path: dist/
+          if-no-files-found: error
+
+  desktop:
+    name: Desktop ${{ matrix.name }}
+    needs: envs   # only for the tag check
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - name: linux-x86_64
+            os: ubuntu-22.04
+            targets: x86_64-unknown-linux-gnu
+          - name: macos-universal
+            os: macos-14
+            targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - name: windows-x86_64
+            os: windows-latest
+            targets: x86_64-pc-windows-msvc
+    steps:
+      - uses: actions/checkout@v4
+      - if: runner.os == 'Linux'
+        uses: ./.github/actions/linux-desktop-deps
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.targets }}
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: desktop
+          key: release-${{ matrix.name }}
+      - name: cargo build --release
+        shell: bash
+        working-directory: desktop
+        run: |
+          IFS=, read -ra targets <<< "${{ matrix.targets }}"
+          for t in "${targets[@]}"; do
+            cargo build --release --locked -p clawdmeter-app --target "$t"
+          done
+      - name: Package
+        shell: bash
+        run: |
+          tag="$TAG"
+          mkdir -p dist stage
+          cp README.md stage/
+          case "${{ matrix.name }}" in
+            linux-*)
+              cp desktop/target/x86_64-unknown-linux-gnu/release/clawdmeter stage/
+              tar -C stage -czf "dist/clawdmeter-$tag-${{ matrix.name }}.tar.gz" .
+              ;;
+            macos-*)
+              lipo -create -output stage/clawdmeter \
+                desktop/target/aarch64-apple-darwin/release/clawdmeter \
+                desktop/target/x86_64-apple-darwin/release/clawdmeter
+              lipo -info stage/clawdmeter
+              tar -C stage -czf "dist/clawdmeter-$tag-${{ matrix.name }}.tar.gz" .
+              ;;
+            windows-*)
+              cp desktop/target/x86_64-pc-windows-msvc/release/clawdmeter.exe stage/
+              (cd stage && 7z a -tzip "../dist/clawdmeter-$tag-${{ matrix.name }}.zip" .)
+              ;;
+          esac
+          ls -l stage dist
+      - uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.name }}
+          path: dist/
+          if-no-files-found: error
+
+  publish:
+    name: Publish GitHub Release
+    needs: [envs, firmware, desktop]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: manifest.json + ESP Web Tools manifests
+        run: |
+          python3 tools/ci/make_manifest.py --version "$TAG" \
+            --dist dist --expect '${{ needs.envs.outputs.names }}'
+          python3 tools/ci/make_webtools_manifest.py --dist dist
+          rm -f dist/*-"$TAG".json   # per-env sidecars, folded into manifest.json
+          (cd dist && sha256sum -- * > SHA256SUMS)
+          cat dist/manifest.json
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          fail_on_unmatched_files: true

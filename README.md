@@ -286,6 +286,38 @@ sim`, then `cd firmware && .pio/build/sim/program`). See
 - **Porting** — [`docs/porting/adding-a-board.md`](docs/porting/adding-a-board.md)
   and [`docs/porting/hal-contract.md`](docs/porting/hal-contract.md).
 
+## Releasing
+
+Push a version tag; CI does the rest.
+
+```bash
+git tag v1.9.0 && git push origin v1.9.0
+```
+
+[`.github/workflows/release.yml`](.github/workflows/release.yml) then:
+
+1. Builds every hardware env in `firmware/platformio.ini` (everything except
+   `platform = native`) with `-DCLAWD_VERSION="v1.9.0"`.
+2. Merges bootloader, partition table, `boot_app0` and app into one image per
+   board, `<env>-v1.9.0.bin`, flashed at offset `0x0`
+   ([`tools/ci/merge_firmware.py`](tools/ci/merge_firmware.py)).
+3. Builds the desktop app for Linux x86_64, macOS (universal) and Windows.
+4. Publishes a GitHub Release with the images, the app archives,
+   `SHA256SUMS`, a `manifest.json` (env, chip, flash size, display name,
+   sha256 per board; [`tools/ci/make_manifest.py`](tools/ci/make_manifest.py))
+   that the desktop flasher reads, and one ESP Web Tools manifest per board,
+   `webtools-<env>.json`, for the browser flasher.
+
+A tag with a hyphen (`v1.9.0-rc.1`) publishes a prerelease, which the app's
+update check ignores. Adding a board needs a `DISPLAY_NAMES` entry in
+`make_manifest.py`; the tooling tests in `tools/ci/tests/` fail without one.
+
+Every PR that touches `firmware/` or `tools/ci/` also builds all boards and
+uploads the merged images as workflow artifacts, runs the host unit tests
+(`pio test -e native`), and captures a simulator screenshot (`sim-autoshot`).
+The tag must look like `vMAJOR.MINOR.PATCH` with an optional `-suffix`, or
+the release run stops before building anything.
+
 ## Credits
 
 - Pixel-art Clawd animations are Anthropic's official mascot art (claude.ai/code, Claude Code desktop), archived and converted by the tooling in `tools/` and `research/clawd-official/`.

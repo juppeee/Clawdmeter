@@ -1,0 +1,53 @@
+name: Daemon
+
+# Tests for the legacy host daemons (bash, macOS and Windows Python). They pin
+# the behaviour the Rust desktop core has to match, so they keep running until
+# those daemons are deleted.
+
+on:
+  pull_request:
+    paths:
+      - "daemon/**"
+      - "conftest.py"
+      - ".github/workflows/daemon.yml"
+  push:
+    branches: [main]
+    paths:
+      - "daemon/**"
+      - "conftest.py"
+      - ".github/workflows/daemon.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python:
+    name: pytest
+    # The Windows-daemon tests mock the Win32/WinRT surface and pass on Linux;
+    # bleak, httpx, pystray and Pillow all install there.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: daemon/requirements-windows.txt
+      - run: python -m pip install --disable-pip-version-check pytest -r daemon/requirements-windows.txt
+      - run: python -m pytest daemon/tests -q
+
+  bash:
+    name: bash daemon tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run daemon/tests/*.sh
+        run: |
+          status=0
+          for t in daemon/tests/*.sh; do
+            echo "::group::$t"
+            bash "$t" || { echo "::error file=$t::failed"; status=1; }
+            echo "::endgroup::"
+          done
+          exit $status
