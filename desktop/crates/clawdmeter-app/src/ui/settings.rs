@@ -11,15 +11,15 @@ use std::path::PathBuf;
 use std::time::Duration;
 
 use clawdmeter_core::autostart::{self, LaunchMode};
-use clawdmeter_core::config::{ClockMode, ConfigFile};
+use clawdmeter_core::config::{AlertOn, ClockMode, ConfigFile};
 use clawdmeter_core::{Paths, Settings};
 use clawdmeter_flash::device::{self, FirmwareInfo};
 use gpui::{div, img, prelude::*, px, Context, EventEmitter, PathPromptOptions, SharedString, Window};
 
 use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_M, R_S};
 use super::widgets::{
-    button, caption, card, field, field_stacked, heading, icon, notice, para, pill, segmented, subheading, toggle,
-    ButtonKind, Tone,
+    button, caption, card, checkbox, field, field_stacked, heading, icon, notice, para, pill, segmented, subheading,
+    toggle, ButtonKind, Tone,
 };
 use super::{command, live_status, not_running_text, run_blocking, Navigate, REFRESH};
 use crate::diff::{line_diff, with_context, DiffLine};
@@ -952,7 +952,44 @@ impl SettingsView {
         if let Some((tone, m)) = &self.hook_msg {
             pane = pane.child(notice(t, *tone, m.clone()));
         }
+        if !self.embedded && self.preview.is_none() {
+            pane = pane.child(self.alert_kinds(t, cx));
+        }
         pane
+    }
+
+    /// Which waits alert (`alert_on`), for every account at once. The hooks
+    /// stay installed as they are; the app drops the kinds that are off.
+    fn alert_kinds(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
+        type Pick = fn(&mut AlertOn) -> &mut bool;
+        let rows: [(&'static str, &'static str, &'static str, Pick); 4] = [
+            ("alert-permission", "Permission requests", "A tool is waiting for your approval.", |a| &mut a.permission),
+            ("alert-question", "Questions", "Claude asks you to choose an answer.", |a| &mut a.question),
+            ("alert-idle", "Waiting for input", "The prompt has sat idle for a while.", |a| &mut a.idle),
+            ("alert-elicitation", "MCP input requests", "An MCP server asks you for details.", |a| &mut a.elicitation),
+        ];
+        let mut list = div()
+            .flex()
+            .flex_col()
+            .pt(px(10.))
+            .child(subheading(t, "Alert me for"))
+            .child(caption(t, "Applies to every account. A turned-off kind never reaches the device or the tray."));
+        let current = self.settings.alert_on;
+        for (id, label, help, pick) in rows {
+            let mut probe = current;
+            let on = *pick(&mut probe);
+            let me = cx.entity().downgrade();
+            list = list.child(checkbox(t, id, label, help, on, move |_, _, cx| {
+                let _ = me.update(cx, |v, cx| {
+                    v.save(|s, _| {
+                        let flag = pick(&mut s.alert_on);
+                        *flag = !*flag;
+                    });
+                    cx.notify();
+                });
+            }));
+        }
+        list
     }
 
     fn settings_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
@@ -1261,6 +1298,20 @@ mod tests {
             assert_eq!(v.hooks[0].status, HookStatus::Installed);
             assert!(v.preview.is_none());
         });
+        let _ = std::fs::remove_dir_all(&paths.home);
+    }
+
+    #[gpui::test]
+    fn alert_kinds_save_to_the_config(cx: &mut TestAppContext) {
+        let paths = home("alerts");
+        let p = paths.clone();
+        let (_view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Page::Hooks, false, cx));
+        click(cx, "alert-idle");
+        let text = std::fs::read_to_string(&paths.config_file).unwrap();
+        assert!(text.contains("alert_on = permission, question, idle, elicitation"), "{text}");
+        click(cx, "alert-permission");
+        let text = std::fs::read_to_string(&paths.config_file).unwrap();
+        assert!(text.contains("alert_on = question, idle, elicitation"), "{text}");
         let _ = std::fs::remove_dir_all(&paths.home);
     }
 

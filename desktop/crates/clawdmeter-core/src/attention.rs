@@ -1,7 +1,8 @@
 //! Attention alerts from the hook (`clawdmeter hook alert|clear`), consumed
 //! the way the legacy bash and macOS daemons did.
 //!
-//! The hook writes `<state>/attention` (`{"m": message, "s": session id}`)
+//! The hook writes `<state>/attention` (`{"m": message, "s": session id,
+//! "k": kind}`, see [`AlertKind`])
 //! when a session needs the user and touches `<state>/clear-<session id>` when
 //! that session moves on. Each tick the daemon consumes both:
 //!
@@ -24,6 +25,60 @@ pub const ATTENTION_MAX_AGE: Duration = Duration::from_secs(60);
 /// Device fonts are ASCII and the status line holds this many characters.
 pub const MESSAGE_LIMIT: usize = 120;
 
+/// What a session is waiting for. The hook records it (`k`) from Claude
+/// Code's hook input; which kinds alert is the `alert_on` setting.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AlertKind {
+    /// A tool needs permission (`Notification`, `permission_prompt`). Also
+    /// a `Notification` with no type, as older Claude Code sends.
+    Permission,
+    /// Claude asks a question (`PreToolUse` on `AskUserQuestion`).
+    Question,
+    /// The prompt has sat idle, waiting for input (`idle_prompt`).
+    Idle,
+    /// An MCP server asks for input (`elicitation_dialog`).
+    Elicitation,
+    /// Any other notification type; follows [`AlertKind::Permission`].
+    Other,
+}
+
+impl AlertKind {
+    /// The `k` value the hook writes.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AlertKind::Permission => "permission",
+            AlertKind::Question => "question",
+            AlertKind::Idle => "idle",
+            AlertKind::Elicitation => "elicitation",
+            AlertKind::Other => "other",
+        }
+    }
+
+    /// Read `k`; a missing value (older hooks, the legacy script) is a
+    /// permission request.
+    pub fn parse(s: Option<&str>) -> Self {
+        match s {
+            None | Some("permission") => AlertKind::Permission,
+            Some("question") => AlertKind::Question,
+            Some("idle") => AlertKind::Idle,
+            Some("elicitation") => AlertKind::Elicitation,
+            Some(_) => AlertKind::Other,
+        }
+    }
+
+    /// The kind for one hook input: `PreToolUse` is the question tool,
+    /// `Notification` is told apart by its `notification_type`.
+    pub fn from_hook(event: Option<&str>, notification_type: Option<&str>) -> Self {
+        match (event, notification_type) {
+            (Some("PreToolUse"), _) => AlertKind::Question,
+            (_, None | Some("permission_prompt")) => AlertKind::Permission,
+            (_, Some("idle_prompt")) => AlertKind::Idle,
+            (_, Some("elicitation_dialog")) => AlertKind::Elicitation,
+            (_, Some(_)) => AlertKind::Other,
+        }
+    }
+}
+
 /// One alert read from the attention file.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Alert {
@@ -31,6 +86,8 @@ pub struct Alert {
     pub message: String,
     /// Claude Code session id (may be empty).
     pub session: String,
+    /// What the session waits for.
+    pub kind: AlertKind,
     /// The file's mtime.
     pub at: SystemTime,
 }
@@ -80,7 +137,8 @@ impl AttentionInbox {
             Some(serde_json::Value::Null) | None => String::new(),
             Some(other) => other.to_string(),
         };
-        Some(Alert { message: to_ascii(&field("m"), MESSAGE_LIMIT), session: field("s"), at: mtime })
+        let kind = AlertKind::parse(v.get("k").and_then(|k| k.as_str()));
+        Some(Alert { message: to_ascii(&field("m"), MESSAGE_LIMIT), session: field("s"), kind, at: mtime })
     }
 
     /// Consume every `clear-<sid>` file: `{sid: mtime}`.
@@ -246,7 +304,7 @@ mod tests {
     }
 
     fn alert(sid: &str, msg: &str, at: SystemTime) -> Alert {
-        Alert { message: msg.into(), session: sid.into(), at }
+        Alert { message: msg.into(), session: sid.into(), kind: AlertKind::Permission, at }
     }
 
     // Ported from the legacy daemon test test_bash_attention.sh.
@@ -306,5 +364,20 @@ mod tests {
         let c: HashMap<_, _> = [("s".to_owned(), t0 + Duration::from_secs(1))].into();
         st.ingest(None, &c);
         assert!(!st.pending(), "never shown, nothing to clear");
+    }
+
+    #[test]
+    fn alert_kinds_from_hook_input() {
+        let k = AlertKind::from_hook;
+        assert_eq!(k(Some("PreToolUse"), None), AlertKind::Question);
+        assert_eq!(k(Some("Notification"), None), AlertKind::Permission);
+        assert_eq!(k(Some("Notification"), Some("permission_prompt")), AlertKind::Permission);
+        assert_eq!(k(Some("Notification"), Some("idle_prompt")), AlertKind::Idle);
+        assert_eq!(k(Some("Notification"), Some("elicitation_dialog")), AlertKind::Elicitation);
+        assert_eq!(k(Some("Notification"), Some("auth_success")), AlertKind::Other);
+        for kind in [AlertKind::Permission, AlertKind::Question, AlertKind::Idle, AlertKind::Elicitation] {
+            assert_eq!(AlertKind::parse(Some(kind.as_str())), kind);
+        }
+        assert_eq!(AlertKind::parse(None), AlertKind::Permission, "legacy files have no kind");
     }
 }

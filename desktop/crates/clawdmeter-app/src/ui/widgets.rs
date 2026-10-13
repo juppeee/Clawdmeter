@@ -315,6 +315,49 @@ pub fn toggle(
     }
 }
 
+/// A checkbox with a label and one line of help; the whole row toggles.
+pub fn checkbox(
+    t: &Theme,
+    id: &'static str,
+    label: &'static str,
+    help: &'static str,
+    on: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let handler: Handler = Box::new(on_click);
+    div()
+        .id(id)
+        .debug_selector(move || id.to_owned())
+        .flex()
+        .items_start()
+        .gap(px(10.))
+        .py(px(6.))
+        .cursor_pointer()
+        .on_click(move |e, w, cx| handler(e, w, cx))
+        .child(
+            div()
+                .flex()
+                .flex_shrink_0()
+                .items_center()
+                .justify_center()
+                .mt(px(1.))
+                .size(px(18.))
+                .rounded(px(5.))
+                .border_1()
+                .border_color(if on { t.accent } else { t.line })
+                .bg(if on { t.accent } else { t.surface })
+                .when(on, |d| d.child(icon("check", 13., t.accent_ink))),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(1.))
+                .child(div().text_size(px(14.)).text_color(t.text).child(label))
+                .child(div().text_size(px(12.5)).text_color(t.mute).child(help)),
+        )
+}
+
 /// A row of mutually exclusive choices (stands in for a select).
 pub fn segmented<V: Clone + PartialEq + 'static>(
     t: &Theme,

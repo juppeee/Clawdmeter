@@ -5,7 +5,9 @@
 //! The hook writes the files the daemon follows, under the state dir
 //! (`~/.config/clawdmeter`, `%LOCALAPPDATA%\Clawdmeter` on Windows):
 //!
-//! * `alert` writes `attention` (`{"m": message, "s": session id}`, one line);
+//! * `alert` writes `attention` (`{"k": kind, "m": message, "s": session
+//!   id}`, one line; the kind lets the daemon drop alert types the user
+//!   turned off, see [`clawdmeter_core::attention::AlertKind`]);
 //! * `clear` touches `clear-<session id>`;
 //! * `event` appends `<unix_ts> <hook_event_name> <session_id>` to
 //!   `events.log`, rolling it to `events.log.1` past 256 KB.
@@ -14,7 +16,7 @@
 //! event name and session id are recorded, never the prompt or the tool call.
 //! Hook stdout can reach the model, so the hook prints nothing and always
 //! exits 0. The file formats match the legacy `attention-hook.sh` byte for
-//! byte, so an older daemon reads them unchanged.
+//! byte apart from the alert's `k`, which older readers ignore.
 
 pub mod install;
 
@@ -23,6 +25,7 @@ use std::io::{self, Write};
 use std::path::Path;
 use std::time::SystemTime;
 
+use clawdmeter_core::attention::AlertKind;
 use serde_json::{Map, Value};
 
 /// `events.log` rolls over once it is larger than this.
@@ -129,7 +132,8 @@ fn log_event(v: &Value, dir: &Path, now_unix: u64) -> io::Result<()> {
     OpenOptions::new().create(true).append(true).open(&f)?.write_all(line.as_bytes())
 }
 
-/// The attention file's text: jq -c '{m: (.message // .tool_input.questions[0].question // ""), s: .session_id}'.
+/// The attention file's text: jq -c '{m: (.message // .tool_input.questions[0].question // ""), s: .session_id}',
+/// plus `k`, the alert kind.
 pub fn alert_json(v: &Value) -> Option<String> {
     let obj = as_jq_object(v)?;
     let m = match present(obj.get("message")) {
@@ -141,7 +145,10 @@ pub fn alert_json(v: &Value) -> Option<String> {
         }
     };
     let s = obj.get("session_id").cloned().unwrap_or(Value::Null);
+    let text = |k: &str| obj.get(k).and_then(Value::as_str);
+    let kind = AlertKind::from_hook(text("hook_event_name"), text("notification_type"));
     let mut out = Map::new();
+    out.insert("k".into(), Value::String(kind.as_str().into()));
     out.insert("m".into(), m);
     out.insert("s".into(), s);
     // jq escapes DEL; serde_json writes it raw. DEL only occurs inside strings.
@@ -258,19 +265,30 @@ mod tests {
     #[test]
     fn alert_bodies() {
         let n = json!({"message": "Claude needs your permission", "session_id": "s1"});
-        assert_eq!(alert_json(&n).unwrap(), "{\"m\":\"Claude needs your permission\",\"s\":\"s1\"}\n");
-        let q = json!({"tool_input": {"questions": [{"question": "Pick one"}]}, "session_id": "s2"});
-        assert_eq!(alert_json(&q).unwrap(), "{\"m\":\"Pick one\",\"s\":\"s2\"}\n");
-        assert_eq!(alert_json(&json!({"tool_input": {}})).unwrap(), "{\"m\":\"\",\"s\":null}\n");
-        assert_eq!(alert_json(&json!({"tool_input": {"questions": []}})).unwrap(), "{\"m\":\"\",\"s\":null}\n");
+        assert_eq!(
+            alert_json(&n).unwrap(),
+            "{\"k\":\"permission\",\"m\":\"Claude needs your permission\",\"s\":\"s1\"}\n"
+        );
+        let q = json!({"hook_event_name": "PreToolUse", "tool_input": {"questions": [{"question": "Pick one"}]}, "session_id": "s2"});
+        assert_eq!(alert_json(&q).unwrap(), "{\"k\":\"question\",\"m\":\"Pick one\",\"s\":\"s2\"}\n");
+        let idle = json!({"hook_event_name": "Notification", "notification_type": "idle_prompt", "message": "Waiting"});
+        assert_eq!(alert_json(&idle).unwrap(), "{\"k\":\"idle\",\"m\":\"Waiting\",\"s\":null}\n");
+        assert_eq!(alert_json(&json!({"tool_input": {}})).unwrap(), "{\"k\":\"permission\",\"m\":\"\",\"s\":null}\n");
+        assert_eq!(
+            alert_json(&json!({"tool_input": {"questions": []}})).unwrap(),
+            "{\"k\":\"permission\",\"m\":\"\",\"s\":null}\n"
+        );
         // jq errors on these, so the script writes nothing.
         assert_eq!(alert_json(&json!({"tool_input": "x"})), None);
         assert_eq!(alert_json(&json!({"tool_input": {"questions": {"a": 1}}})), None);
         assert_eq!(
             alert_json(&json!({"message": "wins", "tool_input": "x"})).unwrap(),
-            "{\"m\":\"wins\",\"s\":null}\n"
+            "{\"k\":\"permission\",\"m\":\"wins\",\"s\":null}\n"
         );
-        assert_eq!(alert_json(&json!({"message": "a\u{7f}\"b"})).unwrap(), "{\"m\":\"a\\u007f\\\"b\",\"s\":null}\n");
+        assert_eq!(
+            alert_json(&json!({"message": "a\u{7f}\"b"})).unwrap(),
+            "{\"k\":\"permission\",\"m\":\"a\\u007f\\\"b\",\"s\":null}\n"
+        );
     }
 
     #[test]
@@ -287,7 +305,10 @@ mod tests {
         let d = dir("files");
         let input = r#"{"hook_event_name":"Notification","session_id":"s1","message":"Waiting"}"#;
         run(Mode::parse(&args("alert event")), input, &d, 100);
-        assert_eq!(fs::read_to_string(d.join("attention")).unwrap(), "{\"m\":\"Waiting\",\"s\":\"s1\"}\n");
+        assert_eq!(
+            fs::read_to_string(d.join("attention")).unwrap(),
+            "{\"k\":\"permission\",\"m\":\"Waiting\",\"s\":\"s1\"}\n"
+        );
         assert_eq!(fs::read_to_string(d.join("events.log")).unwrap(), "100 Notification s1\n");
         run(Mode::parse(&args("clear event")), r#"{"hook_event_name":"PostToolUse","session_id":"s1"}"#, &d, 101);
         assert!(d.join("clear-s1").is_file());
@@ -370,6 +391,11 @@ mod tests {
             let state_a = home_a.join(".config/claude-usage-monitor");
             let state_b = b.join("state");
             run(Mode::parse(&args(mode)), input, &state_b, 1_700_000_000);
+            // The script predates the alert kind.
+            let unkinded = |body: String| match body.strip_prefix("{\"k\":\"") {
+                Some(rest) => format!("{{{}", rest.split_once("\",").map_or(rest, |(_, r)| r)),
+                None => body,
+            };
             let snapshot = |d: &Path| -> Vec<(String, String)> {
                 let mut out: Vec<(String, String)> = fs::read_dir(d)
                     .map(|rd| {
@@ -378,7 +404,7 @@ mod tests {
                             // The script leaves attention.<pid> behind when jq fails.
                             .filter(|n| !n.starts_with("attention."))
                             .map(|n| {
-                                let body = fs::read_to_string(d.join(&n)).unwrap_or_default();
+                                let body = unkinded(fs::read_to_string(d.join(&n)).unwrap_or_default());
                                 let body = body
                                     .lines()
                                     .map(|l| match l.split_once(' ') {

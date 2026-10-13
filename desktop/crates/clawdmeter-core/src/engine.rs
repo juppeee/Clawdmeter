@@ -208,7 +208,10 @@ impl Engine {
     }
 
     /// One tick's attention files.
+    /// Alerts of a kind the user turned off (`alert_on`) are dropped here,
+    /// so neither the device nor the tray sees them.
     pub fn on_attention(&mut self, alert: Option<Alert>, clears: &HashMap<String, SystemTime>) {
+        let alert = alert.filter(|a| self.settings.alert_on.allows(a.kind));
         self.attention.ingest(alert, clears);
     }
 
@@ -461,6 +464,7 @@ impl Engine {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::attention::AlertKind;
     use crate::config::{ConfigFile, Settings};
     use crate::events::HookKind;
     use crate::paths::Paths;
@@ -633,7 +637,12 @@ mod tests {
         let mut e = Engine::new(settings("beep = on\n"));
         e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
         write(&mut e, T0).unwrap();
-        let alert = Alert { message: "Claude needs you".into(), session: "abc".into(), at: SystemTime::now() };
+        let alert = Alert {
+            message: "Claude needs you".into(),
+            session: "abc".into(),
+            kind: AlertKind::Permission,
+            at: SystemTime::now(),
+        };
         e.on_attention(Some(alert.clone()), &HashMap::new());
         let w = write(&mut e, T0 + 2).unwrap();
         assert_eq!(w.kind, WriteKind::Attention);
@@ -643,6 +652,21 @@ mod tests {
         e.on_attention(None, &clears);
         let w = write(&mut e, T0 + 4).unwrap();
         assert_eq!((w.payload.x, w.payload.m.clone()), (Some(1), None));
+    }
+
+    #[test]
+    fn disabled_alert_kinds_never_alert() {
+        let mut e = Engine::new(settings("beep = on\n"));
+        e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
+        write(&mut e, T0).unwrap();
+        let idle =
+            Alert { message: "waiting".into(), session: "s".into(), kind: AlertKind::Idle, at: SystemTime::now() };
+        e.on_attention(Some(idle.clone()), &HashMap::new());
+        assert!(!e.status(T0).attention, "idle is off by default");
+        assert!(write(&mut e, T0 + 2).is_none());
+        e.update_settings(settings("beep = on\nalert_on = idle\n"));
+        e.on_attention(Some(idle), &HashMap::new());
+        assert!(e.status(T0).attention);
     }
 
     #[test]

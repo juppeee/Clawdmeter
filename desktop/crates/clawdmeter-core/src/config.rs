@@ -197,6 +197,75 @@ pub struct Settings {
     pub claude_path: Option<PathBuf>,
     /// Daily firmware update check (default on).
     pub update_check: bool,
+    /// Which kinds of "Claude needs you" alert reach the device and tray.
+    pub alert_on: AlertOn,
+}
+
+/// `alert_on`: the alert kinds that show, as a comma list of `permission`,
+/// `question`, `idle`, `elicitation` (`none` for no alerts). Default: all
+/// but `idle`. Other notification types follow `permission`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct AlertOn {
+    /// Permission requests (and unrecognised notification types).
+    pub permission: bool,
+    /// AskUserQuestion.
+    pub question: bool,
+    /// The prompt waiting for input.
+    pub idle: bool,
+    /// MCP input requests.
+    pub elicitation: bool,
+}
+
+impl Default for AlertOn {
+    fn default() -> Self {
+        AlertOn { permission: true, question: true, idle: false, elicitation: true }
+    }
+}
+
+impl AlertOn {
+    /// Parse the comma list; unknown words are ignored.
+    pub fn parse(v: &str) -> Self {
+        let mut a = AlertOn { permission: false, question: false, idle: false, elicitation: false };
+        for w in v.split(',').map(|w| w.trim().to_ascii_lowercase()) {
+            match w.as_str() {
+                "permission" => a.permission = true,
+                "question" => a.question = true,
+                "idle" => a.idle = true,
+                "elicitation" => a.elicitation = true,
+                _ => {}
+            }
+        }
+        a
+    }
+
+    /// The comma list ([`AlertOn::parse`] reads it back).
+    pub fn as_config(&self) -> String {
+        let on: Vec<&str> = [
+            (self.permission, "permission"),
+            (self.question, "question"),
+            (self.idle, "idle"),
+            (self.elicitation, "elicitation"),
+        ]
+        .into_iter()
+        .filter_map(|(on, w)| on.then_some(w))
+        .collect();
+        if on.is_empty() {
+            "none".into()
+        } else {
+            on.join(", ")
+        }
+    }
+
+    /// Whether an alert of `kind` shows.
+    pub fn allows(&self, kind: crate::attention::AlertKind) -> bool {
+        use crate::attention::AlertKind as K;
+        match kind {
+            K::Permission | K::Other => self.permission,
+            K::Question => self.question,
+            K::Idle => self.idle,
+            K::Elicitation => self.elicitation,
+        }
+    }
 }
 
 /// Parse an interval like the bash daemon: digits only, clamped to >= 10.
@@ -243,6 +312,7 @@ impl Settings {
                 .to_owned(),
             claude_path: cfg.get("claude_path").filter(|s| !s.is_empty()).map(|s| paths.expand_tilde(s)),
             update_check: on_off(cfg.get("update_check"), true),
+            alert_on: cfg.get("alert_on").map(AlertOn::parse).unwrap_or_default(),
         }
     }
 
@@ -316,6 +386,9 @@ impl Settings {
         if current.update_check != self.update_check {
             cfg.set("update_check", oo(self.update_check));
         }
+        if current.alert_on != self.alert_on {
+            cfg.set("alert_on", &self.alert_on.as_config());
+        }
     }
 }
 
@@ -340,6 +413,31 @@ mod tests {
 
     fn settings(text: &str) -> Settings {
         Settings::from_config(&ConfigFile::parse(text), &paths(), None)
+    }
+
+    #[test]
+    fn alert_kinds_round_trip() {
+        use crate::attention::AlertKind;
+        let d = settings("").alert_on;
+        assert_eq!(d, AlertOn::default());
+        assert!(d.allows(AlertKind::Question) && !d.allows(AlertKind::Idle));
+        assert!(d.allows(AlertKind::Other), "unknown types follow permission");
+        let s = settings("alert_on = idle, Question\n").alert_on;
+        assert_eq!(s, AlertOn { permission: false, question: true, idle: true, elicitation: false });
+        assert!(!s.allows(AlertKind::Other));
+        assert_eq!(AlertOn::parse(&s.as_config()), s);
+        let none = settings("alert_on = none\n").alert_on;
+        assert_eq!(none.as_config(), "none");
+        assert_eq!(AlertOn::parse(&none.as_config()), none);
+
+        // Saving writes the key only when it differs from the file.
+        let mut cfg = ConfigFile::parse("# keep\n");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("alert_on").is_none(), "defaults stay out of the file");
+        s.alert_on.idle = true;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("alert_on"), Some("permission, question, idle, elicitation"));
     }
 
     // Ported from the legacy daemon test test_bash_heartbeat.sh (interval parsing).

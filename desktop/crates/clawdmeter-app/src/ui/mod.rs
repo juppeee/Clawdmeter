@@ -75,6 +75,7 @@ const ASSETS: &[(&str, &[u8])] = bundled![
         "x",
         "chevron-right",
         "chevron-down",
+        "check",
     ],
 ];
 

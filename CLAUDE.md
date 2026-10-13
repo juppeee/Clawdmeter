@@ -251,7 +251,10 @@ State lives in one dir, `~/.config/clawdmeter/` (Windows:
 `%LOCALAPPDATA%\Clawdmeter\`): `config`, `events.log`, `attention`,
 `clear-<sid>`, `ble-address`, `daemon.log`, app state/locks. Config keys:
 `config_dirs`, `poll_interval`, `heartbeat_interval`, `chime`, `beep`,
-`clock`, `claude_path`, `release_repo`, `update_check`, `onboarding_done`.
+`clock`, `claude_path`, `release_repo`, `update_check`, `onboarding_done`,
+`alert_on` (alert kinds the daemon lets through: the hook records `k` from
+`hook_event_name` / `notification_type`, `engine.on_attention` drops the
+rest; default all but `idle`).
 
 Cadence (per account, `cadence.rs`): every `/usage` makes Claude Code hit
 `GET /api/oauth/usage`, which is rate-limited per account, so the budget is
