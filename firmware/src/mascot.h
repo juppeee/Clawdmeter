@@ -1,0 +1,44 @@
+#pragma once
+#include <stdint.h>
+#include <stdbool.h>
+#include <lvgl.h>
+
+// Clawd on the meters: the corner Clawd in his seat (3 px cells on a 480
+// panel) plus the full-size sprite he becomes for the lurk trip (8 px) and
+// the attention walk-on (12 px). Same character, one at a time: the big one
+// only appears after the small one has walked off an edge.
+//
+// The director (clawd_director.cpp) commands him; on his own he only does the
+// in-room secondary action while seated and `autonomy` is on: jittered idle
+// gaps, mood-picked acts (never the same twice running) and the lurk trip.
+//
+// The corner sprite works on every board (its ~23 KB buffer falls back to
+// internal RAM); the full-size sprite needs PSRAM (~250 KB). Without it the
+// lurk trip is skipped and attention is message-only.
+
+lv_obj_t* mascot_create(lv_obj_t *parent, int slot_x, int feet_y, int cell);
+void mascot_tick(void);
+void mascot_set_visible(bool v);     // false while another room is showing
+bool mascot_has_big(void);
+
+bool mascot_seated(void);            // in his seat, between acts
+bool mascot_away(void);              // fully off screen
+bool mascot_busy(void);              // walking, acting, lurking or fetching you
+bool mascot_acting(void);            // playing an act in his seat
+
+void mascot_autonomy(bool on);       // idle acts + lurk trips while seated
+// Play `anim` in the seat `times` times (noticing, a wave, jumping happy).
+// Interrupts an idle act; refused (false) while he's walking or away.
+bool mascot_act(const char* anim, uint8_t times);
+void mascot_leave(uint16_t speed_pct);                 // walk off the nearest edge
+void mascot_return(int from_side, uint16_t speed_pct); // -1 left / +1 right edge → seat
+void mascot_place_away(void);        // off screen now (a curtain is covering)
+void mascot_reset(void);             // seated now, nothing pending
+
+// Attention: corner walks off left at 2x, the big Clawd walks on at 2x and
+// alternates waving and pointing until attention(false), then walks off and
+// the small one walks home. Minimal mode: a held pointing frame in the seat.
+void mascot_attention(bool on);
+bool mascot_in_attention(void);      // anything of the attention beat still on screen
+
+void mascot_set_minimal(bool on);    // still frame only, no autonomy

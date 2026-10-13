@@ -4,7 +4,7 @@
 // 480×480 AMOLED so shared code (main.cpp, ui.cpp, splash.cpp) can be
 // developed without hardware. No pins here, just geometry and the key map.
 //
-//   mouse / left-drag    touch (tap toggles splash <-> usage)
+//   mouse / left-drag    touch (a tap means "show me the meters")
 //   space                play/pause scenario playback
 //   left / right         step one scenario state (pauses playback)
 //   1..9                 jump to scenario state N (pauses playback)
@@ -14,6 +14,10 @@
 //   p                    PWR button (short press; hold ~3s + release = pair)
 //   c                    toggle charging       - / =   battery down / up 5%
 //   u                    toggle no battery (USB power only → plug-zap icon)
+//   e / t                inject a hook event: prompt / stop
+//   a                    inject activity level, cycling 0 → 1 → 2 → 3
+//   m                    inject an attention alert / clear it
+//   z                    toggle minimal mode
 //   s                    save screenshot BMP to the current directory
 //   esc / window close   quit
 //
@@ -24,8 +28,18 @@
 //
 // Headless / CI: SDL_VIDEODRIVER=dummy SIM_AUTOSHOT_MS=<ms> saves a
 // screenshot (SIM_AUTOSHOT_PATH, default sim-autoshot.bmp) after <ms> and
-// exits.
+// exits. SIM_SHOTS="ms:path,ms:path" saves several and exits after the last;
+// SIM_TAPS="ms@x,y;ms@x,y" presses the panel at those times; SIM_FAST=1
+// compresses the director's minutes into seconds (sim/director.jsonl);
+// SIM_MINIMAL=1 boots with minimal mode on.
 
 #define BOARD_NAME  "Simulator 480x480"
+// Panel size; override to preview other boards' geometry, e.g.
+//   PLATFORMIO_BUILD_FLAGS="-DSIM_LCD_W=368 -DSIM_LCD_H=448" pio run -e sim
+#ifdef SIM_LCD_W
+#define LCD_WIDTH   SIM_LCD_W
+#define LCD_HEIGHT  SIM_LCD_H
+#else
 #define LCD_WIDTH   480
 #define LCD_HEIGHT  480
+#endif

@@ -1,7 +1,11 @@
 #include "ui.h"
 #include "splash.h"
+#include "mascot.h"
+#include "minimal_mode.h"
 #include <lvgl.h>
 #include <time.h>
+#include <stdio.h>
+#include <Arduino.h>
 #include "logo.h"
 #include "clawd_still.h"
 #include "icons.h"
@@ -235,7 +239,6 @@ static const uint32_t DATA_FRESH_MS = 90000;  // usage counts as "live" within t
 
 // ---- Shared ----
 static lv_image_dsc_t logo_dsc;
-static screen_t current_screen = SCREEN_USAGE;
 static bool     s_ble_connected = false;   // cached BLE connection state
 static uint32_t connected_at_ms = 0;       // when we last entered CONNECTED ("Connected" dwell)
 
@@ -310,9 +313,6 @@ static void format_reset_time(int mins, char* buf, size_t len) {
         snprintf(buf, len, "Resets in %dd %dh", mins / 1440, (mins % 1440) / 60);
     }
 }
-
-// Forward decls — callbacks defined near ui_show_screen below
-static void global_click_cb(lv_event_t* e);
 
 static lv_obj_t* make_panel(lv_obj_t* parent, int x, int y, int w, int h) {
     lv_obj_t* panel = lv_obj_create(parent);
@@ -479,7 +479,6 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_set_style_border_width(usage_container, 0, 0);
     lv_obj_set_style_pad_all(usage_container, 0, 0);
     lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_SCROLLABLE);
-    lv_obj_add_event_cb(usage_container, global_click_cb, LV_EVENT_CLICKED, NULL);
 
     lbl_title = lv_label_create(usage_container);
     lv_label_set_text(lbl_title, "Usage");
@@ -542,29 +541,9 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_align(lbl_anim, LV_ALIGN_BOTTOM_MID, 0, L.anim_y);
 }
 
-// ---- Attention: the mascot walk-on (splash_mascot_attention) plus the
-// message on the status line. Ends on a tap, after 2 minutes, or ui_hide_alert().
-static const uint32_t ALERT_TIMEOUT_MS = 120000;
-static bool        alert_active = false;
-static lv_timer_t* alert_timer;
-
-static void alert_timer_cb(lv_timer_t* t) { (void)t; ui_hide_alert(); }
-
-// Registered on the input device, so it sees every tap. A tap that dismisses
-// does nothing else.
-static void alert_tap_cb(lv_event_t* e) {
-    if (!alert_active) return;
-    ui_hide_alert();
-    lv_indev_stop_processing((lv_indev_t*)lv_event_get_user_data(e));
-}
-
-static void init_alert(void) {
-    alert_timer = lv_timer_create(alert_timer_cb, ALERT_TIMEOUT_MS, NULL);
-    lv_timer_pause(alert_timer);
-    lv_indev_t* indev = lv_indev_get_next(NULL);
-    if (indev) lv_indev_add_event_cb(indev, alert_tap_cb, LV_EVENT_CLICKED, indev);
-    lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
-}
+// ---- Attention message on the status line (the director sequences the rest).
+static bool alert_active = false;
+static const char* still_shown = nullptr;   // minimal mode: status word on screen
 
 // ======== Public API ========
 
@@ -575,18 +554,23 @@ void ui_init(void) {
     lv_obj_set_style_bg_color(scr, COL_BG, 0);
     lv_obj_set_style_bg_opa(scr, LV_OPA_COVER, 0);
 
-#ifndef BOARD_HAS_PSRAM
-    // Static corner mascot (see clawd_still.h) — the animated one needs PSRAM.
+    // Static corner mascot (see clawd_still.h): fallback when the animated
+    // one can't get its buffer.
     if (L.small_icons) init_icon_dsc_rgb565a8(&logo_dsc, CLAWD_STILL_SMALL_W, CLAWD_STILL_SMALL_H, clawd_still_small_data);
     else               init_icon_dsc_rgb565a8(&logo_dsc, CLAWD_STILL_W, CLAWD_STILL_H, clawd_still_data);
-#endif
     init_battery_icons();
 
     init_usage_screen(scr);
-    splash_init(scr);
+    splash_init(scr);       // the stage room sits above the meters when open
 
-    if (splash_get_root()) {
-        lv_obj_add_event_cb(splash_get_root(), global_click_cb, LV_EVENT_CLICKED, NULL);
+    battery_img = lv_image_create(scr);
+    lv_image_set_src(battery_img, &battery_dscs[0]);
+    lv_obj_set_pos(battery_img, L.scr_w - L.batt_w - L.margin, L.batt_y);
+    // Boards without battery telemetry never show the indicator (per the HAL
+    // contract).
+    if (!board_caps().has_battery) {
+        lv_obj_del(battery_img);
+        battery_img = nullptr;
     }
 
     // Corner mascot in the old logo slot. The still Clawd is shorter than the
@@ -595,27 +579,17 @@ void ui_init(void) {
         const int slot  = L.small_icons ? LOGO_SMALL_HEIGHT : LOGO_HEIGHT;
         const int art_h = L.small_icons ? CLAWD_STILL_SMALL_H : CLAWD_STILL_H;
         const int top   = L.logo_y + (slot - art_h) / 2;
-#ifdef BOARD_HAS_PSRAM
-        // Animated: idles, does acts, and takes walk-off/lurk trips.
-        splash_mascot_create(scr, L.margin, top + art_h, L.small_icons ? 2 : 3);
-#else
-        logo_img = lv_image_create(scr);
-        lv_image_set_src(logo_img, &logo_dsc);
-        lv_obj_set_pos(logo_img, L.margin, top);
-#endif
+        // Animated: idles, does acts, and takes walk-off/lurk trips (the
+        // trips need PSRAM; without it he stays in his seat).
+        // Created last so he walks over the battery and the stage.
+        if (!mascot_create(scr, L.margin, top + art_h, L.small_icons ? 2 : 3)) {
+            logo_img = lv_image_create(scr);
+            lv_image_set_src(logo_img, &logo_dsc);
+            lv_obj_set_pos(logo_img, L.margin, top);
+        }
     }
 
-    battery_img = lv_image_create(scr);
-    lv_image_set_src(battery_img, &battery_dscs[0]);
-    lv_obj_set_pos(battery_img, L.scr_w - L.batt_w - L.margin, L.batt_y);
-    // Boards without battery telemetry never show the indicator (per the HAL
-    // contract; previously every board drew the empty-battery glyph).
-    if (!board_caps().has_battery) {
-        lv_obj_del(battery_img);
-        battery_img = nullptr;
-    }
-
-    init_alert();
+    lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
 }
 
 void ui_update(const UsageData* data) {
@@ -726,10 +700,12 @@ static void update_view_state(void) {
                       LV_OBJ_FLAG_HIDDEN);
 }
 
+bool ui_meters_live(void) { return view_state == 2; }
+
 void ui_tick_anim(void) {
-    if (current_screen != SCREEN_USAGE) return;
     update_view_state();
-    if (view_state == 1) splash_mini_tick();   // animate the sleeping creature on the idle screen
+    const bool still = minimal_mode();   // minimal: nothing moves but the numbers
+    if (view_state == 1 && !still) splash_mini_tick();   // animate the sleeping creature on the idle screen
 
     uint32_t now = lv_tick_get();
 
@@ -755,6 +731,18 @@ void ui_tick_anim(void) {
     }
 
     if (alert_active) return;          // the status line holds the alert message
+
+    if (still) {
+        // One glyph, one word per state; redrawn only when it changes.
+        const char* text = !s_ble_connected ? "Waiting" : view_state == 1 ? "No data" : "Connected";
+        if (text != still_shown) {
+            still_shown = text;
+            static char sbuf[40];
+            snprintf(sbuf, sizeof(sbuf), "%s %s", spinner_frames[1], text);
+            lv_label_set_text(lbl_anim, sbuf);
+        }
+        return;
+    }
 
     if (now - anim_msg_start >= ANIM_MSG_MS) {
         anim_msg_idx = (anim_msg_idx + 1) % ANIM_MSG_COUNT;
@@ -786,47 +774,8 @@ void ui_tick_anim(void) {
     lv_label_set_text(lbl_anim, buf);
 }
 
-static screen_t prev_non_splash_screen = SCREEN_USAGE;
 static void apply_battery_visibility(void) {
-    if (!battery_img) return;
-    if (current_screen == SCREEN_SPLASH) lv_obj_add_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
-    else                                  lv_obj_clear_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
-}
-
-static void global_click_cb(lv_event_t* e) {
-    (void)e;
-    if (current_screen == SCREEN_SPLASH) ui_show_screen(prev_non_splash_screen);
-    else                                  ui_show_screen(SCREEN_SPLASH);
-}
-
-void ui_show_screen(screen_t screen) {
-    lv_obj_add_flag(usage_container, LV_OBJ_FLAG_HIDDEN);
-    splash_hide();
-
-    switch (screen) {
-    case SCREEN_SPLASH:  splash_show(); break;
-    case SCREEN_USAGE:   lv_obj_clear_flag(usage_container, LV_OBJ_FLAG_HIDDEN); break;
-    default: break;
-    }
-
-    splash_mascot_set_visible(screen != SCREEN_SPLASH);
-    if (logo_img) {
-        if (screen == SCREEN_SPLASH) lv_obj_add_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
-        else                          lv_obj_clear_flag(logo_img, LV_OBJ_FLAG_HIDDEN);
-    }
-
-    if (screen != SCREEN_SPLASH) prev_non_splash_screen = screen;
-    current_screen = screen;
-    apply_battery_visibility();
-}
-
-void ui_toggle_splash(void) {
-    if (current_screen == SCREEN_SPLASH) ui_show_screen(prev_non_splash_screen);
-    else                                  ui_show_screen(SCREEN_SPLASH);
-}
-
-screen_t ui_get_current_screen(void) {
-    return current_screen;
+    if (battery_img) lv_obj_clear_flag(battery_img, LV_OBJ_FLAG_HIDDEN);
 }
 
 void ui_update_ble_status(ble_state_t state, const char* name, const char* mac) {
@@ -861,22 +810,20 @@ void ui_update_battery(int percent, bool charging, bool usb_power) {
     apply_battery_visibility();
 }
 
-void ui_show_alert(const char* message) {
-    alert_active = true;
-    if (current_screen == SCREEN_SPLASH) ui_show_screen(SCREEN_USAGE);
-    splash_mascot_attention(true);
-    lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_SCROLL_CIRCULAR);
-    lv_obj_set_width(lbl_anim, L.content_w);
-    lv_label_set_text(lbl_anim, message);
-    lv_timer_reset(alert_timer);
-    lv_timer_resume(alert_timer);
-}
-
-void ui_hide_alert(void) {
+void ui_set_alert_text(const char* message) {
+    if (message && message[0]) {
+        alert_active = true;
+        // Minimal mode: nothing moves, so a long message is cut, not scrolled.
+        lv_label_set_long_mode(lbl_anim, minimal_mode() ? LV_LABEL_LONG_DOT
+                                                        : LV_LABEL_LONG_SCROLL_CIRCULAR);
+        lv_obj_set_width(lbl_anim, L.content_w);
+        lv_label_set_text(lbl_anim, message);
+        return;
+    }
     if (!alert_active) return;
     alert_active = false;
-    splash_mascot_attention(false);
     lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_WRAP);
     lv_obj_set_width(lbl_anim, LV_SIZE_CONTENT);
-    lv_timer_pause(alert_timer);
+    anim_last_ms = 0;          // whimsical line redraws on the next tick
+    still_shown = nullptr;
 }

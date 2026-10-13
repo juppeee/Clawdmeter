@@ -24,6 +24,15 @@ Keep the two in sync. The pattern in `caps.cpp` does this for you:
 | `BOARD_HAS_BATTERY`            | 0       | Whether PMU battery measurement is meaningful on this board. UI hides the battery indicator when false. |
 | `BOARD_HAS_IO_EXPANDER`        | 0       | Whether an IO expander gates display / touch reset lines. Doesn't directly gate any code path — but signals to the porter that `board_init()` must release the expander before `display_hal_init()`. |
 
+## Runtime-only capabilities
+
+Some `BoardCaps` fields have no `BOARD_HAS_*` macro because no per-board code
+is compiled differently for them; set them directly in `caps.cpp`.
+
+| Field          | Default | What it gates |
+|----------------|---------|---------------|
+| `minimal_ui`   | `false` | Minimal mode (design system §10): the meters plus a still corner Clawd, nothing else animates — no stage, face, streak or lurk trip. Set `true` on e-ink or panels too slow to animate. It is only the board's *default*: the user can override it either way (persisted in NVS, `minimal on\|off\|auto` on the serial console today, the desktop app's Device tab later). Shared code must call `minimal_mode()` from `minimal_mode.h`, never read `caps.minimal_ui` directly, so the override always wins. The director (`clawd_director.cpp`) applies it: one room, corner Clawd on the official still frame, a held pointing frame plus a non-scrolling message for attention, a tap dismisses the alert, and the status line stops spinning. Toggling it at runtime resets Clawd to his seat. |
+
 ## Build-flag macros
 
 `BOARD_HAS_PSRAM` is set as a `-D` build flag in `platformio.ini` (not in `board.h`) on chips with external PSRAM wired up. Shared code (`main.cpp`, `splash.cpp`) and per-board display drivers use it to choose between `MALLOC_CAP_SPIRAM` (large buffers) and `MALLOC_CAP_INTERNAL` (small buffers, partial-render LVGL, splash canvas capped at ~80 KB, screenshot capture disabled). New ESP32-C6 / ESP32-C3 ports must leave this undefined.

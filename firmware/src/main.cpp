@@ -8,7 +8,13 @@
 #include "ui.h"
 #include "ble.h"
 #include "splash.h"
+#include "mascot.h"
+#include "clawd_director.h"
 #include "usage_rate.h"
+#include "signals.h"
+#include "payload.h"
+#include "minimal_mode.h"
+#include "build_info.h"
 #include "idle.h"
 #include "idle_cfg.h"
 #include "brightness.h"
@@ -20,6 +26,7 @@
 #include "hal/power_hal.h"
 #include "hal/imu_hal.h"
 #include "hal/sound_hal.h"
+#include "hal/board_info_hal.h"
 
 static UsageData usage = {};
 
@@ -56,8 +63,8 @@ static void rounder_cb(lv_event_t* e) {
 //           swallowed (mirrors the button wake-consumption); a press while
 //           awake counts as activity.
 //   false → touch never counts as activity and is fully swallowed while the
-//           panel is dark, so pets/sleeves can't wake it overnight and LVGL
-//           can't quietly toggle splash<->usage on a black panel.
+//           panel is dark, so pets/sleeves can't wake it overnight and the
+//           director can't act on taps nobody can see.
 static void my_touch_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     uint16_t x, y;
     bool pressed;
@@ -97,34 +104,13 @@ static void my_touch_cb(lv_indev_t* indev, lv_indev_data_t* data) {
     }
 }
 
-// Parse a JSON line into UsageData.
+// Parse a JSON line into UsageData (payload.cpp holds the pure parser).
 static bool parse_json(const char* json, UsageData* out) {
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, json);
-    if (err) {
-        Serial.printf("JSON parse error: %s\n", err.c_str());
+    const char* err = nullptr;
+    if (!payload_parse(json, out, &err)) {
+        Serial.printf("JSON parse error: %s\n", err ? err : "?");
         return false;
     }
-
-    out->session_pct = doc["s"] | 0.0f;
-    out->session_reset_mins = doc["sr"] | -1;
-    out->weekly_pct = doc["w"] | 0.0f;
-    out->weekly_reset_mins = doc["wr"] | -1;
-    strlcpy(out->status, doc["st"] | "unknown", sizeof(out->status));
-    // as<bool>, not `| false`: daemons send 1, and `|` only accepts a JSON bool.
-    out->chime = doc["c"].as<bool>();   // absent (old daemon / chime off) → stay silent
-    out->beep = doc["b"].as<bool>();
-    strlcpy(out->alert_msg, doc["m"] | "", sizeof(out->alert_msg));
-    out->alert_clear = doc["x"].as<bool>();
-    const char* acct = doc["acct"] | "pro";
-    out->enterprise = (strcmp(acct, "ent") == 0);
-    out->time_pct = doc["tp"] | 0;
-    out->period_days = doc["pd"] | 30;
-    strlcpy(out->reset_date, doc["rd"] | "", sizeof(out->reset_date));
-    out->clock_epoch = doc["t"] | 0L;
-    out->clock_fmt = doc["tf"] | 24;
-    out->ok = doc["ok"] | false;
-    out->valid = true;
     return true;
 }
 
@@ -171,6 +157,25 @@ static void send_screenshot() {
 #endif
 }
 
+// One JSON line identifying this build, for the desktop flasher's first
+// detection probe. Keys are fixed: env, ver, rev, link.
+static void send_info() {
+    Serial.printf("{\"env\":\"%s\",\"ver\":\"%s\",\"rev\":\"%s\",\"link\":\"ble\"}\n",
+                  CLAWD_ENV, CLAWD_VERSION, board_hal_rev());
+}
+
+// `minimal` → print state; `minimal on|off|auto` → persist an override.
+static void minimal_cmd(const char* arg) {
+    while (*arg == ' ') arg++;
+    if      (strcmp(arg, "on") == 0)   minimal_mode_set_override(MINIMAL_ON);
+    else if (strcmp(arg, "off") == 0)  minimal_mode_set_override(MINIMAL_OFF);
+    else if (strcmp(arg, "auto") == 0) minimal_mode_set_override(MINIMAL_AUTO);
+    else if (*arg) { Serial.println("usage: minimal [on|off|auto]"); return; }
+    static const char* const NAMES[] = { "auto", "on", "off" };
+    Serial.printf("{\"minimal\":%s,\"override\":\"%s\"}\n",
+                  minimal_mode() ? "true" : "false", NAMES[minimal_mode_override()]);
+}
+
 static void check_serial_cmd() {
     while (Serial.available()) {
         char c = Serial.read();
@@ -178,6 +183,12 @@ static void check_serial_cmd() {
             cmd_buf[cmd_pos] = '\0';
             if (strcmp(cmd_buf, "screenshot") == 0) send_screenshot();
             else if (strcmp(cmd_buf, "buzz") == 0)  sound_hal_play_reset();
+            else if (strcmp(cmd_buf, "info") == 0)  send_info();
+            else if (strncmp(cmd_buf, "minimal", 7) == 0) minimal_cmd(cmd_buf + 7);
+            else if (strncmp(cmd_buf, "clawd ", 6) == 0) {
+                const bool ok = director_debug(cmd_buf + 6);
+                Serial.printf("{\"clawd\":\"%s\",\"ok\":%s}\n", cmd_buf + 6, ok ? "true" : "false");
+            }
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;
@@ -202,6 +213,7 @@ void setup() {
     display_hal_begin();
     idle_init();        // takes over panel brightness and starts the idle timer
     brightness_init();  // load the user's saved brightness level and apply via idle
+    minimal_mode_init();
 
     power_hal_init();
     imu_hal_init();
@@ -235,13 +247,14 @@ void setup() {
     ui_init();
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
-    ui_show_screen(SCREEN_SPLASH);
+    director_init();    // rooms + beats; boots on the meters (home)
 
     Serial.printf("Dashboard ready (%s, %dx%d), waiting for data on BLE...\n",
         board_caps().name, W, H);
 }
 
 static ble_state_t last_ble_state = BLE_STATE_INIT;
+static int shown_group = 0;   // mood group last logged
 
 // Hold-to-pair gesture: hold the PWR button ~3s, then RELEASE → clear all BLE
 // bonds and re-advertise. Clearing on *release* (not while held) is deliberate:
@@ -298,7 +311,8 @@ void loop() {
     imu_hal_tick();
     sound_hal_tick();
     splash_tick();
-    splash_mascot_tick();
+    mascot_tick();
+    director_tick();
     // Rotation transition (blank + ramp) would fight the idle fade — skip
     // ticks while the panel is dark. A rotation that happens during sleep
     // is detected by the next tick after wake and ramped in then.
@@ -307,8 +321,9 @@ void loop() {
     // ---- Physical buttons ----
     //   PRIMARY   → HID Space  (Claude Code voice-mode PTT)
     //   SECONDARY → HID Shift+Tab  (mode toggle; only if the board has one)
-    //   PWR       → on splash: cycle animations; on usage: cycle brightness;
-    //               hold ~3s + release: pairing mode
+    //   PWR       → on the stage: next scene in the group; elsewhere: cycle
+    //               brightness; hold ~3s + release: pairing mode
+    // Any press also tells the director you're here (wakes the screensaver).
     // First press from sleep is consumed as a wake-only event by
     // idle_consume_wake_press(); the normal action fires from the second
     // press. Activity bookkeeping happens inside idle_consume_wake_press
@@ -320,7 +335,7 @@ void loop() {
         if (primary_now != primary_was) {
             if (primary_now) {
                 if (idle_consume_wake_press()) primary_wake_swallowed = true;
-                else                            ble_keyboard_press(0x2C, 0);  // HID Space, no mods
+                else { ble_keyboard_press(0x2C, 0); director_button(); }  // HID Space, no mods
             } else {
                 if (primary_wake_swallowed) primary_wake_swallowed = false;
                 else                        ble_keyboard_release();
@@ -335,7 +350,7 @@ void loop() {
             if (secondary_now != secondary_was) {
                 if (secondary_now) {
                     if (idle_consume_wake_press()) secondary_wake_swallowed = true;
-                    else                            ble_keyboard_press(0x2B, 0x02);  // HID Tab + LEFT_SHIFT
+                    else { ble_keyboard_press(0x2B, 0x02); director_button(); }  // HID Tab + LEFT_SHIFT
                 } else {
                     if (secondary_wake_swallowed) secondary_wake_swallowed = false;
                     else                          ble_keyboard_release();
@@ -346,10 +361,9 @@ void loop() {
 
         if (power_hal_pwr_pressed()) {
             if (!idle_consume_wake_press()) {
-                // On splash: cycle animations. On the usage view: cycle
-                // screen brightness (single non-splash view, no more screens).
-                if (ui_get_current_screen() == SCREEN_SPLASH) splash_next();
-                else                                          brightness_cycle();
+                if (director_room() == ROOM_STAGE) splash_next();
+                else                               brightness_cycle();
+                director_button();
             }
         }
 
@@ -380,9 +394,16 @@ void loop() {
 
     if (ble_has_data()) {
         if (parse_json(ble_get_data(), &usage)) {
-            int g_before = usage_rate_group();
-            bool session_reset = usage_rate_sample(usage.session_pct);
-            int g_after = usage_rate_group();
+            // Fast + slow clock bookkeeping: rate sample (replays skipped),
+            // hook activity lift, event dedupe. See signals.h.
+            const SignalsUpdate sig = signals_ingest(&usage);
+            const bool session_reset = sig.session_reset;
+            const int g_before = sig.group_before;
+            const int g_after  = sig.group_after;
+            shown_group = g_after;
+            if (sig.event_fired)
+                Serial.printf("[%lu] hook event '%c' (#%lu)\n", (unsigned long)millis(),
+                              sig.event ? sig.event : '?', (unsigned long)sig.event_seq);
             // 5-hour session limit refilled → chime so the user knows they can
             // use Claude again (no-op on boards without a buzzer). Gated on the
             // daemon's opt-in `chime` config; the `buzz` serial cmd ignores it.
@@ -396,21 +417,36 @@ void loop() {
                 Serial.println("attention — chime");
                 sound_hal_play_reset();
             }
+            ui_update(&usage);
+            director_on_payload(&usage, &sig);
             if (usage.alert_msg[0]) {
                 Serial.println("attention — mascot");
                 idle_note_activity();
-                ui_show_alert(usage.alert_msg);
+                director_alert(usage.alert_msg);
             }
-            if (usage.alert_clear) ui_hide_alert();
-            if (g_after != g_before) {
+            if (usage.alert_clear) director_alert_clear();
+            if (g_after != g_before)
                 Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
                     g_before, g_after, usage.session_pct);
-                if (splash_is_active()) splash_pick_for_current_rate();
-            }
-            ui_update(&usage);
             ble_send_ack();
         } else {
             ble_send_nack();
+        }
+    }
+
+    // The mood group also moves without a payload: the 15-min window decays
+    // to Idle on its own and a hook activity lift expires. Nothing needs to
+    // react (the corner and the stage read the group when they pick), but log
+    // it so the serial trace matches what Clawd does.
+    {
+        static uint32_t last_check = 0;
+        if (millis() - last_check >= 1000) {
+            last_check = millis();
+            const int g = usage_rate_group();
+            if (g != shown_group) {
+                Serial.printf("usage rate: group %d -> %d (decay)\n", shown_group, g);
+                shown_group = g;
+            }
         }
     }
 

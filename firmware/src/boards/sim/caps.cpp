@@ -9,6 +9,7 @@ static const BoardCaps caps = {
     .has_rotation = false,
     .has_battery = true,    // fake battery, adjustable with -/=
     .has_imu = false,
+    .minimal_ui   = false,   // full animated UI; true for e-ink / slow panels
 };
 
 const BoardCaps& board_caps(void) { return caps; }

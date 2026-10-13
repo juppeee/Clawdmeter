@@ -69,6 +69,27 @@ Boards with no PMU and no PWR button can return zero/false from all five
 | `imu_hal_tick`               | Sample the accelerometer at a low rate (~10 Hz) and update the rotation state with hysteresis. |
 | `imu_hal_rotation_quadrant`  | Current rotation, 0..3 (quarter turns CW). Used by `display_hal_draw_bitmap` on rotation-capable boards. Boards without rotation always return 0. |
 
+## `board_info_hal.h` (optional)
+
+Weak defaults live in `firmware/src/board_info_default.cpp`; implement a
+function in your board folder only when it has something to report.
+
+| Function         | Responsibility |
+|------------------|----------------|
+| `board_hal_rev`  | Short, stable hardware-revision token for the `info` serial command (`{"env","ver","rev","link"}`), which the desktop flasher uses to identify a board before re-flashing. Default `""`. Valid after `board_init()`; return a static string. AMOLED-1.8 returns `sh8601_ft3168` or `co5300_cst816` from its boot-time probe. |
+
+## Serial console commands
+
+`check_serial_cmd()` in `main.cpp` (115200 baud, newline-terminated):
+
+| Command                   | Reply |
+|---------------------------|-------|
+| `screenshot`              | `SCREENSHOT_START w h bytes`, raw RGB565, `SCREENSHOT_END` (`SCREENSHOT_UNSUPPORTED` without PSRAM) |
+| `buzz`                    | plays the reset chime (no reply) |
+| `info`                    | one JSON line: `{"env":"waveshare_amoled_18","ver":"v1.9.0","rev":"co5300_cst816","link":"ble"}`. `env` comes from `-DCLAWD_ENV` (set per env in `platformio.ini` from `${this.__env__}`), `ver` from `-DCLAWD_VERSION` (defaults to `dev`; CI sets `PLATFORMIO_BUILD_FLAGS='-DCLAWD_VERSION=\"vX.Y.Z\"'`), `rev` from `board_hal_rev()`. |
+| `minimal [on\|off\|auto]` | sets (or with no argument, reports) the minimal-mode override; replies `{"minimal":true,"override":"on"}` |
+| `clawd <beat>`            | starts a Clawd beat now, for `screenshot` QA without waiting for the situation: `show`, `screensaver`, `attention`, `joy`, `home` (a tap). Replies `{"clawd":"show","ok":true}`. See `docs/clawd-director.md`. |
+
 ## Responsive UI breakpoints
 
 `ui.cpp::compute_layout()` picks layout values from `board_caps().width`

@@ -22,7 +22,7 @@ Launch from the `firmware/` directory — the default scenario path
 
 | Key | Action |
 |---|---|
-| mouse / left-drag | touch (tap toggles splash ↔ usage) |
+| mouse / left-drag | touch (a tap means "show me the meters", from any room) |
 | `space` | play/pause scenario playback |
 | `←` / `→` | step one scenario state (pauses playback) |
 | `1`–`9` | jump to scenario state N (pauses playback) |
@@ -33,6 +33,10 @@ Launch from the `firmware/` directory — the default scenario path
 | `c` | toggle charging |
 | `u` | toggle no battery / USB power only (shows the plug-zap icon) |
 | `-` / `=` | battery down / up 5% |
+| `e` / `t` | inject a hook event: prompt (`e:"p"`) / stop (`e:"s"`) |
+| `a` | inject the activity level, cycling 0 → 1 → 2 → 3 |
+| `m` | inject an attention alert / clear it |
+| `z` | toggle minimal mode |
 | `s` | save screenshot BMP to the current directory |
 | `esc` / window close | quit |
 
@@ -60,6 +64,19 @@ States: 0 starting · 1 idle · 2 thinking · 3 responding · 4 running-tool ·
 5 compacting · 6 needs-permission · 7 asking-you · 8 needs-input · 9 error.
 `tok` is context tokens in 1k units (190 = 190k); `-1`/absent = unknown.
 
+Fast-clock fields from the hook-aware daemon work in scenarios too, since
+they go through the same `payload_parse()` → `signals_ingest()` path as on
+hardware: `a` (activity 0-3, lifts the mood group), `e` + `es` (latest hook
+event `p`/`s`/`b` and its sequence number; the first `es` seen is only a
+baseline, each later change fires once), `n` (active sessions) and `rp: 1`
+(heartbeat replay, skipped by the rate math). The console logs
+`hook event 'p' (#2)` and `usage rate: group 0 -> 3` as they land. Note the
+scenario loop wraps `es` back to its first value, which counts as a change.
+
+The injection keys overlay those fields on the current state's payload and
+send it through the same path, so you can poke Clawd by hand: `a` three
+times then wait for a show, `e` to make him notice, `m` for the big Clawd.
+
 Override the scenario file with `SIM_SCENARIO=<path>`. If the file is missing,
 a small built-in state list is used.
 
@@ -72,6 +89,49 @@ SDL_VIDEODRIVER=dummy SIM_AUTOSHOT_MS=6000 .pio/build/sim/program
 Saves `sim-autoshot.bmp` (override with `SIM_AUTOSHOT_PATH`) after the given
 delay and exits. Combine with `SIM_SCENARIO` pointing at a single-state file
 to capture any specific screen.
+
+## Clawd walkthrough (rooms and beats)
+
+`firmware/sim/director.jsonl` walks through every beat of the director
+(`docs/clawd-director.md`): notice → show → long-turn wave → screensaver
+(face, calm scene) → prompt wakes it → attention → clear → fresh window. Real
+timings are minutes (a show needs 5 minutes of activity level 3, the
+screensaver 10 quiet minutes), so run it with `SIM_FAST=1`, which compresses
+them to seconds:
+
+```bash
+cd firmware
+SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl .pio/build/sim/program
+```
+
+With `SIM_FAST` the show starts at ~14 s, the screensaver at ~53 s, the wake
+at ~90 s, attention at ~97 s and the reset jump at ~115 s. The sim build
+prints a timestamped trace of every beat and step (`-DDIRECTOR_TRACE=1`):
+
+```
+[14014] director: home -> show
+[18655] director:   show step 3
+...
+[53011] director: home -> screensaver
+```
+
+Headless capture of several moments, plus scripted taps:
+
+```bash
+SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
+  SIM_SHOTS="19500:blink.bmp,26000:scene.bmp,57000:face.bmp" \
+  SIM_TAPS="25000@300,250" .pio/build/sim/program
+```
+
+- `SIM_SHOTS="ms:path,..."` saves a screenshot at each time (ascending) and
+  exits after the last.
+- `SIM_TAPS="ms@x,y;..."` holds a 120 ms press at each time. A tap at 25 s
+  lands on the show's scene and runs the streak back to the meters.
+- `SIM_MINIMAL=1` boots with the minimal-mode override on.
+
+Scenes are picked at random from the mood group, so step times after the
+show's scene shift a little between runs; read them from the trace. A
+captured set lives in `screenshots/director/`.
 
 ## Caveat
 
