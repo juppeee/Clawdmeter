@@ -132,6 +132,68 @@ pub fn windows_run_command(exe: &Path, mode: LaunchMode) -> String {
     cmd
 }
 
+/// The first argument of a `"quoted" rest` or `bare rest` command line,
+/// with `unescape` applied inside quotes.
+fn first_arg(line: &str, unescape: impl Fn(&str) -> String) -> Option<String> {
+    let line = line.trim();
+    if let Some(rest) = line.strip_prefix('"') {
+        let mut end = None;
+        let mut esc = false;
+        for (i, c) in rest.char_indices() {
+            match c {
+                _ if esc => esc = false,
+                '\\' => esc = true,
+                '"' => {
+                    end = Some(i);
+                    break;
+                }
+                _ => {}
+            }
+        }
+        return end.map(|e| unescape(&rest[..e]));
+    }
+    line.split_whitespace().next().map(str::to_owned)
+}
+
+/// The executable a [`systemd_unit`] starts.
+pub fn exe_from_systemd_unit(text: &str) -> Option<PathBuf> {
+    let line = text.lines().find_map(|l| l.strip_prefix("ExecStart="))?;
+    let arg = first_arg(line, |s| {
+        let mut out = String::new();
+        let mut chars = s.chars();
+        while let Some(c) = chars.next() {
+            if c == '\\' {
+                out.extend(chars.next());
+            } else {
+                out.push(c);
+            }
+        }
+        out.replace("%%", "%").replace("$$", "$")
+    })?;
+    Some(PathBuf::from(arg))
+}
+
+/// The executable an [`xdg_desktop_entry`] runs.
+pub fn exe_from_desktop_entry(text: &str) -> Option<PathBuf> {
+    let line = text.lines().find_map(|l| l.strip_prefix("Exec="))?;
+    first_arg(line, str::to_owned).map(PathBuf::from)
+}
+
+/// The executable a [`launch_agent_plist`] runs: the first
+/// `ProgramArguments` string.
+pub fn exe_from_plist(text: &str) -> Option<PathBuf> {
+    let args = &text[text.find("<key>ProgramArguments</key>")?..];
+    let start = args.find("<string>")? + "<string>".len();
+    let end = start + args[start..].find("</string>")?;
+    let s = args[start..end].replace("&quot;", "\"").replace("&gt;", ">").replace("&lt;", "<").replace("&amp;", "&");
+    Some(PathBuf::from(s))
+}
+
+/// The executable a [`windows_run_command`] runs.
+pub fn exe_from_run_command(cmd: &str) -> Option<PathBuf> {
+    first_arg(cmd, str::to_owned).map(PathBuf::from)
+}
+
 /// Where the login entry lives for `mode` on this OS (`None` on Windows,
 /// which uses the registry).
 pub fn entry_path(home: &Path, mode: LaunchMode) -> Option<PathBuf> {
@@ -220,6 +282,35 @@ pub fn is_enabled(home: &Path, mode: LaunchMode) -> bool {
         return windows_run_value().is_some_and(|cmd| !is_legacy_run_command(&cmd));
     }
     entry_path(home, mode).is_some_and(|p| p.exists())
+}
+
+/// The executable the installed login entry launches, if there is one.
+pub fn entry_exe(home: &Path, mode: LaunchMode) -> Option<PathBuf> {
+    if cfg!(windows) {
+        return windows_run_value().filter(|c| !is_legacy_run_command(c)).and_then(|c| exe_from_run_command(&c));
+    }
+    let text = fs::read_to_string(entry_path(home, mode)?).ok()?;
+    if cfg!(target_os = "macos") {
+        exe_from_plist(&text)
+    } else {
+        match mode {
+            LaunchMode::Daemon => exe_from_systemd_unit(&text),
+            LaunchMode::Tray => exe_from_desktop_entry(&text),
+        }
+    }
+}
+
+/// Whether an installed login entry should be rewritten: it launches a
+/// file that is gone, or something other than `want` (an AppImage mount, an
+/// old Nix store path, a moved binary). `false` when there is no entry.
+pub fn is_stale(home: &Path, mode: LaunchMode, want: &Path) -> bool {
+    if !is_enabled(home, mode) {
+        return false;
+    }
+    match entry_exe(home, mode) {
+        Some(exe) => exe != want || !exe.exists(),
+        None => true,
+    }
 }
 
 /// The current `Clawdmeter` Run value (Windows), if any.
@@ -364,6 +455,27 @@ mod tests {
         assert!(windows_run_command(Path::new("c.exe"), LaunchMode::Daemon).ends_with(" --daemon"));
     }
 
+    #[test]
+    fn entries_round_trip_their_exe() {
+        for exe in ["/usr/bin/clawdmeter", "/opt/My Apps/clawd\"meter", "/a%b/$c&<d>"] {
+            let exe = Path::new(exe);
+            assert_eq!(exe_from_systemd_unit(&systemd_unit(exe)).as_deref(), Some(exe));
+            for mode in [LaunchMode::Tray, LaunchMode::Daemon] {
+                assert_eq!(exe_from_plist(&launch_agent_plist(exe, mode, Path::new("/l.log"))).as_deref(), Some(exe));
+            }
+        }
+        for exe in ["/usr/bin/clawdmeter", "/tmp/.mount_Clawd x/usr/bin/clawdmeter"] {
+            let exe = Path::new(exe);
+            assert_eq!(exe_from_desktop_entry(&xdg_desktop_entry(exe)).as_deref(), Some(exe));
+        }
+        let win = Path::new(r"C:\Program Files\Clawdmeter\clawdmeter.exe");
+        for mode in [LaunchMode::Tray, LaunchMode::Daemon] {
+            assert_eq!(exe_from_run_command(&windows_run_command(win, mode)).as_deref(), Some(win));
+        }
+        assert_eq!(exe_from_desktop_entry("[Desktop Entry]\nName=x\n"), None);
+        assert_eq!(exe_from_run_command("\"unterminated"), None);
+    }
+
     // Ported from test_windows_autostart.py: the Run value name and the
     // pythonw command the old tray wrote.
     #[test]
@@ -424,6 +536,13 @@ mod tests {
         assert!(!is_enabled(&home, LaunchMode::Tray));
         enable(&home, Path::new("/usr/bin/clawdmeter"), LaunchMode::Tray).unwrap();
         assert!(is_enabled(&home, LaunchMode::Tray));
+        assert_eq!(entry_exe(&home, LaunchMode::Tray).as_deref(), Some(Path::new("/usr/bin/clawdmeter")));
+        let real = std::env::current_exe().unwrap();
+        assert!(is_stale(&home, LaunchMode::Tray, &real), "points elsewhere");
+        enable(&home, &real, LaunchMode::Tray).unwrap();
+        assert!(!is_stale(&home, LaunchMode::Tray, &real));
+        enable(&home, Path::new("/tmp/.mount_gone/usr/bin/clawdmeter"), LaunchMode::Tray).unwrap();
+        assert!(is_stale(&home, LaunchMode::Tray, Path::new("/tmp/.mount_gone/usr/bin/clawdmeter")), "target missing");
         disable(&home, LaunchMode::Tray).unwrap();
         assert!(!is_enabled(&home, LaunchMode::Tray));
         disable(&home, LaunchMode::Tray).unwrap();

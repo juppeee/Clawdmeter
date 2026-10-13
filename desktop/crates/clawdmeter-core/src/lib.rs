@@ -13,7 +13,8 @@
 //! * [`payload`]: the JSON the firmware parses.
 //! * [`rate`]: the slow-clock mood.
 //! * [`engine`]: all of the above as one I/O-free state machine.
-//! * [`autostart`], [`platform`]: start-at-login and host queries.
+//! * [`autostart`], [`launch`], [`platform`]: start-at-login, the path to
+//!   launch the app by, and host queries.
 
 #![warn(missing_docs)]
 
@@ -24,6 +25,7 @@ pub mod cadence;
 pub mod config;
 pub mod engine;
 pub mod events;
+pub mod launch;
 pub mod paths;
 pub mod payload;
 pub mod platform;

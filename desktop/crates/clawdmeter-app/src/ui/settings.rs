@@ -7,7 +7,7 @@
 //! values), so a hand-edited config and the GUI never disagree. The daemon
 //! re-reads the file every few seconds.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clawdmeter_core::autostart::{self, LaunchMode};
@@ -78,12 +78,16 @@ pub struct SettingsView {
     hooks: Vec<HookRow>,
     preview: Option<HookPreview>,
     hook_msg: Option<(Tone, String)>,
-    /// The binary hooks point at (`None`: couldn't be determined).
-    hook_exe: Option<PathBuf>,
+    /// The binary hooks and the login entry launch (`None`: couldn't be
+    /// determined). See [`clawdmeter_core::launch`].
+    launch_exe: Option<PathBuf>,
     device: DeviceState,
     /// Probe USB for a board (off in tests).
     usb: bool,
     autostart_on: bool,
+    /// The login entry launches something other than [`Self::launch_exe`]
+    /// (gone, or another copy): what it launches, if readable.
+    autostart_stale: Option<Option<PathBuf>>,
     /// The old daemon's login entry (systemd unit, LaunchAgent or Run value).
     legacy: Option<autostart::LegacyEntry>,
     notice: Option<(Tone, String)>,
@@ -120,10 +124,11 @@ impl SettingsView {
             hooks: Vec::new(),
             preview: None,
             hook_msg: None,
-            hook_exe: hooks::hook_binary().ok(),
+            launch_exe: hooks::hook_binary().ok(),
             device: DeviceState::default(),
             usb,
             autostart_on: false,
+            autostart_stale: None,
             legacy: None,
             notice: None,
             advanced: false,
@@ -203,13 +208,18 @@ impl SettingsView {
             .iter()
             .map(|d| HookRow {
                 dir: d.clone(),
-                status: match &self.hook_exe {
+                status: match &self.launch_exe {
                     Some(exe) => hooks::dir_status(d, exe),
                     None => HookStatus::Unreadable("Couldn't locate the Clawdmeter executable.".into()),
                 },
             })
             .collect();
         self.autostart_on = autostart::is_enabled(&self.paths.home, LaunchMode::Tray);
+        self.autostart_stale = self
+            .launch_exe
+            .as_ref()
+            .filter(|want| autostart::is_stale(&self.paths.home, LaunchMode::Tray, want))
+            .map(|_| autostart::entry_exe(&self.paths.home, LaunchMode::Tray));
         self.legacy = autostart::legacy_entry(&self.paths.home);
         self.snap = live_status(&self.paths);
     }
@@ -360,7 +370,7 @@ impl SettingsView {
 
     fn plan_hooks(&mut self, action: HookAction, dirs: Vec<PathBuf>) {
         self.hook_msg = None;
-        let Some(exe) = self.hook_exe.clone() else { return };
+        let Some(exe) = self.launch_exe.clone() else { return };
         let mut plans = Vec::new();
         for d in dirs {
             let plan = match action {
@@ -771,7 +781,11 @@ impl SettingsView {
                     Some(("Review update", HookAction::Install)),
                 ),
                 HookStatus::Stale(old) => (
-                    format!("Uses another Clawdmeter executable: {}.", tilde(old, &self.paths.home)),
+                    if Path::new(old).exists() {
+                        format!("Uses another Clawdmeter executable: {}.", tilde(old, &self.paths.home))
+                    } else {
+                        format!("Runs {}, which no longer exists.", tilde(old, &self.paths.home))
+                    },
                     ("Out of date", Tone::Warn),
                     Some(("Review update", HookAction::Install)),
                 ),
@@ -1003,10 +1017,10 @@ impl SettingsView {
             toggle(t, "autostart", on, true, move |_, _, cx| {
                 let home = home.clone();
                 let _ = me.update(cx, |v, cx| {
-                    let r = match std::env::current_exe() {
-                        Ok(exe) if !on => autostart::enable(&home, &exe, LaunchMode::Tray),
-                        Ok(_) => autostart::disable(&home, LaunchMode::Tray),
-                        Err(e) => Err(e),
+                    let r = match v.launch_exe.clone() {
+                        _ if on => autostart::disable(&home, LaunchMode::Tray),
+                        Some(exe) => autostart::enable(&home, &exe, LaunchMode::Tray),
+                        None => Err(std::io::Error::other("Couldn't locate the Clawdmeter executable.")),
                     };
                     if let Err(e) = r {
                         v.notice =
@@ -1017,6 +1031,37 @@ impl SettingsView {
                 });
             }),
         ));
+        if let (Some(old), Some(exe)) = (self.autostart_stale.clone(), self.launch_exe.clone()) {
+            let text = match old {
+                Some(o) if !o.exists() => format!(
+                    "Start at login opens {}, which no longer exists.",
+                    tilde(&o.display().to_string(), &self.paths.home)
+                ),
+                Some(o) => format!(
+                    "Start at login opens another copy of Clawdmeter: {}.",
+                    tilde(&o.display().to_string(), &self.paths.home)
+                ),
+                None => "Start at login can't be read.".into(),
+            };
+            let me = cx.entity().downgrade();
+            let home = self.paths.home.clone();
+            pane =
+                pane.child(div().pb(px(6.)).child(notice(t, Tone::Warn, text).child(div().flex().pl(px(18.)).child(
+                    button(t, "fix-autostart", "Use this copy", ButtonKind::Small, true, move |_, _, cx| {
+                        let r = autostart::enable(&home, &exe, LaunchMode::Tray);
+                        let _ = me.update(cx, |v, cx| {
+                            if let Err(e) = r {
+                                v.notice = Some((
+                                    Tone::Bad,
+                                    format!("Couldn't change Start at login. {}", errors::io_message(&e)),
+                                ));
+                            }
+                            v.reload();
+                            cx.notify();
+                        });
+                    }),
+                ))));
+        }
 
         let poll = if self.settings.poll_interval_explicit {
             PollChoice::Every(self.settings.poll_interval)
@@ -1298,6 +1343,24 @@ mod tests {
             assert_eq!(v.hooks[0].status, HookStatus::Installed);
             assert!(v.preview.is_none());
         });
+        let _ = std::fs::remove_dir_all(&paths.home);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[gpui::test]
+    fn stale_login_entry_is_offered_a_fix(cx: &mut TestAppContext) {
+        let paths = home("autostart");
+        let gone = Path::new("/tmp/.mount_Clawdgone/usr/bin/clawdmeter");
+        autostart::enable(&paths.home, gone, LaunchMode::Tray).unwrap();
+        let p = paths.clone();
+        let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Page::Settings, false, cx));
+        view.read_with(cx, |v, _| assert_eq!(v.autostart_stale, Some(Some(gone.to_path_buf()))));
+        click(cx, "fix-autostart");
+        let want = view.read_with(cx, |v, _| {
+            assert_eq!(v.autostart_stale, None);
+            v.launch_exe.clone().unwrap()
+        });
+        assert_eq!(autostart::entry_exe(&paths.home, LaunchMode::Tray), Some(want));
         let _ = std::fs::remove_dir_all(&paths.home);
     }
 

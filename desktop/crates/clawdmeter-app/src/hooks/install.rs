@@ -39,13 +39,10 @@ pub const HOOKS: [HookSpec; 5] = [
     HookSpec { event: "PreToolUse", matcher: Some("AskUserQuestion"), args: "alert event" },
 ];
 
-/// The binary hooks should run: the AppImage itself when running from one
-/// (its mount point changes every launch), otherwise this executable.
+/// The binary hooks should run: the path that outlives this process (the
+/// AppImage, a Nix profile's `bin/clawdmeter`, else this executable).
 pub fn hook_binary() -> io::Result<PathBuf> {
-    if let Some(app) = std::env::var_os("APPIMAGE").filter(|a| !a.is_empty()) {
-        return Ok(PathBuf::from(app));
-    }
-    std::env::current_exe()
+    clawdmeter_core::launch::stable_launch_path()
 }
 
 /// The command line for one hook. Windows paths are double-quoted with
