@@ -134,7 +134,15 @@ pub fn open(build: impl FnOnce(&mut Window, &mut gpui::Context<app::AppView>) ->
             app_id: Some("clawdmeter".into()),
             is_resizable: true,
             window_min_size: Some(size(px(MIN_SIZE.0), px(MIN_SIZE.1))),
-            window_decorations: Some(WindowDecorations::Server),
+            // On Linux the app draws its own title bar, as Zed does: GNOME on
+            // Wayland draws none, yet gpui 0.2.2 still records a request for
+            // server decorations there, so asking for them leaves the window
+            // with no title bar at all.
+            window_decorations: Some(if cfg!(target_os = "linux") {
+                WindowDecorations::Client
+            } else {
+                WindowDecorations::Server
+            }),
             ..Default::default()
         };
         if let Err(e) = cx.open_window(options, move |w, cx| cx.new(|cx| build(w, cx))) {
