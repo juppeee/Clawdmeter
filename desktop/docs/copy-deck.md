@@ -321,6 +321,26 @@ not proposals to replace the verbs with Connected.
 | desktop/crates/clawdmeter-app/src/ui/settings.rs:987 | {} talks to the device too, and the two will fight over it. | Disable {} so only one Clawdmeter process connects to the device. | Replace copy; preserve format arguments. |
 | desktop/crates/clawdmeter-app/src/ui/settings.rs:990 | Turn it off | Disable legacy service | Replace copy; preserve format arguments. |
 
+### Hooks: alert types (round 9)
+
+Final copy for the alert-type controls. These rows supersede any earlier
+wording for this block. Keep the existing event mapping and defaults;
+Idle sessions remains off by default. Alert expiry and dismissal belong
+with alert behavior, not this selection block, so omit them here.
+
+| File:line | Current text | New text | Note |
+| --- | --- | --- | --- |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:989 | Alert me for | Alert types | Section heading. |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:990 | Applies to every account. A turned-off kind never reaches the device or the tray. | Applies to all accounts, on the device and in the tray. | Shared scope; checkbox state explains inclusion. |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:980 | Permission requests | Tool approvals | Permission notification label. |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:980 | A tool is waiting for your approval. | Claude needs permission to run a tool. | One-line description. |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:981 | Questions | Questions | Keep the direct label. |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:981 | Claude asks you to choose an answer. | Claude has a question for you. | Does not imply answers must be selected from a list. |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:982 | Waiting for input | Idle sessions | Distinguishes idle reminders from questions and permission requests. Off by default. |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:982 | The prompt has sat idle for a while. | Claude has been waiting for your next prompt. | No unverified timeout promise. |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:983 | MCP input requests | MCP requests | Keep MCP for this technical audience. |
+| desktop/crates/clawdmeter-app/src/ui/settings.rs:983 | An MCP server asks you for details. | An MCP server needs information from you. | One-line description. |
+
 ## desktop/crates/clawdmeter-app/src/ui/decorations.rs
 
 | File:line | Current text | New text | Note |
