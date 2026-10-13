@@ -104,6 +104,11 @@ pub struct EngineStatus {
     pub mood: Option<Mood>,
     /// Unix seconds of the next scheduled poll.
     pub next_poll_at: Option<i64>,
+    /// The earliest a refresh of the shown account can poll it (the
+    /// per-account gap and backoff); `None`: right away.
+    pub refresh_at: Option<i64>,
+    /// The shown account is being polled.
+    pub polling: bool,
 }
 
 /// The daemon state machine.
@@ -224,15 +229,22 @@ impl Engine {
         }
     }
 
-    fn account_due(&self, dir: &PathBuf, now: i64) -> (i64, PollReason) {
+    fn clock(&self, dir: &PathBuf) -> AccountClock {
         let st = self.accounts.get(dir);
-        let clock = AccountClock {
+        AccountClock {
             shown: self.active.as_ref().is_none_or(|a| a == dir),
             last_attempt: st.and_then(|a| a.last_attempt_at),
             last_failed: st.is_some_and(|a| a.last_error.is_some()),
             blocked_until: st.and_then(|a| a.backoff.until()),
-        };
-        self.scheduler.account_due(&clock, &self.activity, self.hooks_installed, now)
+        }
+    }
+
+    fn account_due(&self, dir: &PathBuf, now: i64) -> (i64, PollReason) {
+        self.scheduler.account_due(&self.clock(dir), &self.activity, self.hooks_installed, now)
+    }
+
+    fn refresh_at(&self, dir: &PathBuf) -> Option<i64> {
+        self.scheduler.earliest_poll(&self.clock(dir))
     }
 
     /// The earliest account's next poll: (unix seconds, reason).
@@ -440,6 +452,8 @@ impl Engine {
             hooks: self.activity.hooks_seen,
             mood: st.and_then(|a| a.last.as_ref()).map(|_| self.rate.mood(self.activity.level(now))),
             next_poll_at: self.next_due(now).map(|(t, _)| t),
+            refresh_at: self.active.as_ref().and_then(|a| self.refresh_at(a)),
+            polling: self.active.as_ref().is_some_and(|a| self.in_flight.contains(a)),
         }
     }
 }
@@ -741,6 +755,7 @@ mod tests {
             assert!(e.begin_poll(t).is_none(), "nothing due at {t}");
         }
         assert_eq!(e.status(T0 + 700).next_poll_at, Some(T0 + 800));
+        assert_eq!(e.status(T0 + 700).refresh_at, Some(T0 + 800), "a refresh waits for the backoff too");
         // Second miss: 20 minutes.
         assert_eq!(poll(&mut e, T0 + 800, |_| Err(UsageError::RateLimited { retry_after_secs: 400 })), vec![a.clone()]);
         assert!(e.status(T0 + 800).errors[0].message.ends_with("about 20 minutes."));

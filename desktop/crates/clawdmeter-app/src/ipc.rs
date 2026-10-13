@@ -109,6 +109,13 @@ pub struct StatusSnapshot {
     pub device_firmware: Option<String>,
     /// Tray state name (see [`TrayState`]).
     pub tray: String,
+    /// The earliest a refresh can poll the shown account (the per-account
+    /// gap and backoff); `None`: right away.
+    #[serde(default)]
+    pub refresh_at: Option<i64>,
+    /// The shown account is being polled.
+    #[serde(default)]
+    pub polling: bool,
 }
 
 impl StatusSnapshot {
@@ -155,6 +162,8 @@ impl StatusSnapshot {
             latest_firmware: None,
             device_firmware: None,
             tray: format!("{:?}", tray_state(s, now)),
+            refresh_at: e.refresh_at,
+            polling: e.polling,
         }
     }
 

@@ -151,6 +151,14 @@ impl Scheduler {
         }
     }
 
+    /// The earliest a poll of this account may start, whatever asks for
+    /// it: [`Cadence::min_gap`] after its last attempt, and not while it is
+    /// backing off.
+    pub fn earliest_poll(&self, acct: &AccountClock) -> Option<i64> {
+        let gap = acct.last_attempt.map(|t| t + self.cadence.min_gap);
+        gap.max(acct.blocked_until)
+    }
+
     /// When this account's next poll is due, and why.
     pub fn account_due(
         &self,
@@ -238,6 +246,15 @@ mod tests {
     }
 
     // A prompt, Stop or request right after a poll waits out the 2-minute gap.
+    #[test]
+    fn earliest_poll_follows_gap_and_backoff() {
+        let s = Scheduler::default();
+        assert_eq!(s.earliest_poll(&AccountClock { shown: true, ..Default::default() }), None);
+        assert_eq!(s.earliest_poll(&shown(100)), Some(220));
+        let parked = AccountClock { blocked_until: Some(900), ..shown(100) };
+        assert_eq!(s.earliest_poll(&parked), Some(900));
+    }
+
     #[test]
     fn min_gap_defers_extra_polls() {
         let mut a = Activity::default();
