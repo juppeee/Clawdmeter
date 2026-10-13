@@ -669,7 +669,7 @@ bool director_debug(const char* name) {
         if (!minimal) to_meters(false);
         return true;
     }
-    if (strcmp(name, "attention") == 0)   { director_alert("Test: Clawd needs you"); return true; }
+    if (strcmp(name, "attention") == 0)   { director_alert("Clawdmeter test alert"); return true; }
     if (minimal) return true;             // nothing else exists in minimal mode
     if (strcmp(name, "joy") == 0) {
         joy_pending = true;

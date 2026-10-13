@@ -321,7 +321,7 @@ void ble_init(void) {
     // --- HID keyboard service ---
     hid_dev = new NimBLEHIDDevice(server);
     hid_dev->setReportMap((uint8_t*)HID_REPORT_MAP, sizeof(HID_REPORT_MAP));
-    hid_dev->setManufacturer("Anthropic");
+    hid_dev->setManufacturer("Clawdmeter");
     // PnP ID: (vendorIdSource, vendorId, productId, version).
     // Source 1 = Bluetooth SIG, vendor 0x02E5 = Espressif. Originally claimed
     // Apple's USB vendor 0x05AC + Magic Keyboard product 0x820A — macOS

@@ -48,7 +48,7 @@ struct Layout {
     const lv_font_t* title_font;     // screen title / clock
     const lv_font_t* pct_font;       // big percentage number
     const lv_font_t* ent_pct_font;   // enterprise spending number
-    const lv_font_t* pill_font;      // "Current" / "Weekly" pill
+    const lv_font_t* pill_font;      // "Session" / "Weekly" pill
     const lv_font_t* reset_font;     // "Resets in ..." line
     const lv_font_t* pace_font;      // enterprise "Under/On/Over pace" line
     const lv_font_t* anim_font;      // animated status line
@@ -224,7 +224,7 @@ static lv_obj_t* panel_session = nullptr;
 static lv_obj_t* panel_weekly = nullptr;
 // Enterprise-only widgets inside panel_session
 static lv_obj_t* lbl_session_pct_sym = nullptr;  // "%" in smaller font
-static lv_obj_t* lbl_spending_desc = nullptr;     // "of your monthly budget"
+static lv_obj_t* lbl_spending_desc = nullptr;     // "of spending limit"
 static lv_obj_t* lbl_spending_status = nullptr;   // "Under pace" / "On pace" / "Over pace"
 static lv_obj_t* lbl_anim;      // status line: connection state + whimsical idle
 
@@ -405,7 +405,7 @@ static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text
     lv_obj_t* panel = make_panel(parent, L.margin, y, L.content_w, L.usage_panel_h);
 
     *out_pct = lv_label_create(panel);
-    lv_label_set_text(*out_pct, "---%");
+    lv_label_set_text(*out_pct, "--%");
     lv_obj_set_style_text_font(*out_pct, L.pct_font, 0);
     lv_obj_set_style_text_color(*out_pct, COL_TEXT, 0);
     lv_obj_set_pos(*out_pct, 0, 0);
@@ -427,23 +427,23 @@ static lv_obj_t* make_usage_panel(lv_obj_t* parent, int y, const char* pill_text
 
 // Pairing hint — shown when disconnected so the screen isn't empty and the
 // user knows how to (re)pair. Boards with a PWR button name the 3-second
-// release gesture (main.cpp pair_tick); boards without one (LCD-4) pair from
-// the computer, and a 5 s touch hold here clears an old pairing
-// (pair_hold.h). The lines change while that hold runs and after a clear.
+// release gesture (main.cpp pair_tick); boards without one (LCD-4) name the
+// 5 s touch hold on this hint that clears an old pairing (pair_hold.h), and
+// only those lines change while the hold runs and after a clear.
 static void apply_pair_text(void) {
     if (!pair_lines[0]) return;
     const bool pwr = board_caps().has_pwr_button;
-    const char* l1 = pwr ? "To pair" : "Pair via Bluetooth";
-    const char* l2 = pwr ? "hold the power button" : "Choose Clawdmeter";
-    const char* l3 = pwr ? "for 3 seconds, then release" : "On your computer";
-    const char* l4 = pwr ? "" : "Paired before? Hold here 5s";
-    if (pair_hint == PAIR_HINT_HOLDING) {
-        l4 = "Keep holding...";
-    } else if (pair_hint == PAIR_HINT_CLEARED) {
+    const char* l1 = "To pair";
+    const char* l2 = pwr ? "hold the power button" : "touch and hold here";
+    const char* l3 = pwr ? "for 3 seconds, then release" : "for 5 seconds";
+    const char* l4 = "";
+    // Only the touch hold talks back; the PWR hint stays as it is.
+    if (!pwr && pair_hint == PAIR_HINT_HOLDING) {
+        l4 = "keep holding...";
+    } else if (!pwr && pair_hint == PAIR_HINT_CLEARED) {
         l1 = "Ready to pair";
-        l2 = "Choose Clawdmeter";
-        l3 = "On your computer";
-        l4 = "Old pairing cleared";
+        l2 = "choose Clawdmeter";
+        l3 = "on your computer";
     }
     lv_label_set_text(pair_lines[0], l1);
     lv_label_set_text(pair_lines[1], l2);
@@ -517,7 +517,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_clear_flag(usage_group, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(usage_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    panel_session = make_usage_panel(usage_group, L.content_y, "Current",
+    panel_session = make_usage_panel(usage_group, L.content_y, "Session",
                      &lbl_session_pct, &lbl_session_label,
                      &bar_session, &lbl_session_reset);
 
@@ -529,7 +529,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
 
     lbl_spending_desc = lv_label_create(panel_session);
-    lv_label_set_text(lbl_spending_desc, "of your monthly budget");
+    lv_label_set_text(lbl_spending_desc, "of spending limit");
     lv_obj_set_style_text_font(lbl_spending_desc, L.reset_font, 0);
     lv_obj_set_style_text_color(lbl_spending_desc, COL_DIM, 0);
     lv_obj_set_pos(lbl_spending_desc, 0, L.usage_reset_y);
@@ -654,7 +654,7 @@ void ui_update(const UsageData* data) {
         if (panel_weekly) lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_set_style_text_font(lbl_session_pct, L.pct_font, 0);
-        lv_label_set_text(lbl_session_label, "Current");
+        lv_label_set_text(lbl_session_label, "Session");
         lv_obj_clear_flag(lbl_session_reset, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_spending_desc,   LV_OBJ_FLAG_HIDDEN);
