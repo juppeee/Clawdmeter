@@ -5,7 +5,8 @@ name: Release
 #   manifest.json             {version, boards: [{env, chip, flash_size,
 #                             display_name, file, offset, size, sha256}]}
 #   webtools-<env>.json       ESP Web Tools manifest per board (browser flasher)
-#   clawdmeter-<tag>-*.tar.gz / .zip   desktop app for Linux, macOS, Windows
+#   clawdmeter-<tag>-*.tar.gz / .zip   desktop app: Linux binary, macOS
+#                             Clawdmeter.app (universal), Windows .exe
 #   SHA256SUMS
 # Tags with a hyphen (v1.9.0-rc.1) publish as prereleases, which the desktop
 # app's "latest release" check skips.
@@ -108,6 +109,10 @@ jobs:
         shell: bash
         working-directory: desktop
         run: |
+          # `clawdmeter --version`, the logs and the settings sidebar report
+          # this (clawdmeter_app::version()); without it they fall back to
+          # the crate version.
+          export CLAWDMETER_VERSION="${TAG#v}"
           IFS=, read -ra targets <<< "${{ matrix.targets }}"
           for t in "${targets[@]}"; do
             cargo build --release --locked -p clawdmeter-app --target "$t"
@@ -124,10 +129,36 @@ jobs:
               tar -C stage -czf "dist/clawdmeter-$tag-${{ matrix.name }}.tar.gz" .
               ;;
             macos-*)
-              lipo -create -output stage/clawdmeter \
+              # An app bundle, not a bare binary: CoreBluetooth needs
+              # NSBluetoothAlwaysUsageDescription in the responsible app's
+              # Info.plist, or macOS kills the process when it runs under the
+              # LaunchAgent. LSUIElement keeps the tray app out of the Dock.
+              # Ad-hoc signed only (no Developer ID), so Gatekeeper asks once.
+              app=stage/Clawdmeter.app
+              mkdir -p "$app/Contents/MacOS"
+              lipo -create -output "$app/Contents/MacOS/clawdmeter" \
                 desktop/target/aarch64-apple-darwin/release/clawdmeter \
                 desktop/target/x86_64-apple-darwin/release/clawdmeter
-              lipo -info stage/clawdmeter
+              lipo -info "$app/Contents/MacOS/clawdmeter"
+              ver="${tag#v}"
+              {
+                echo '<?xml version="1.0" encoding="UTF-8"?>'
+                echo '<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">'
+                echo '<plist version="1.0"><dict>'
+                echo '  <key>CFBundleIdentifier</key><string>com.clawdmeter.app</string>'
+                echo '  <key>CFBundleName</key><string>Clawdmeter</string>'
+                echo '  <key>CFBundleExecutable</key><string>clawdmeter</string>'
+                echo '  <key>CFBundlePackageType</key><string>APPL</string>'
+                echo "  <key>CFBundleShortVersionString</key><string>$ver</string>"
+                echo "  <key>CFBundleVersion</key><string>$ver</string>"
+                echo '  <key>LSMinimumSystemVersion</key><string>11.0</string>'
+                echo '  <key>LSUIElement</key><true/>'
+                echo '  <key>NSBluetoothAlwaysUsageDescription</key><string>Clawdmeter sends your Claude Code usage to your Clawdmeter over Bluetooth.</string>'
+                echo '</dict></plist>'
+              } > "$app/Contents/Info.plist"
+              plutil -lint "$app/Contents/Info.plist"
+              codesign --force --sign - "$app"
+              codesign --verify --verbose "$app"
               tar -C stage -czf "dist/clawdmeter-$tag-${{ matrix.name }}.tar.gz" .
               ;;
             windows-*)
