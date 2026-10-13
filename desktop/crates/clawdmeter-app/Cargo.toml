@@ -46,3 +46,33 @@ dispatch2 = "0.3"
 
 [dev-dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "wayland", "x11", "test-support"] }
+
+# `cargo deb -p clawdmeter-app` (release.yml). Icons and the .desktop entry
+# live in tools/packaging/; tools/packaging/make_icons.py renders the icons.
+[package.metadata.deb]
+name = "clawdmeter"
+maintainer = "Hermann Björgvin Haraldsson <hermann@hermann.is>"
+copyright = "Hermann Björgvin Haraldsson and contributors"
+section = "utils"
+priority = "optional"
+extended-description = """\
+Desktop companion for the Clawdmeter, a desk-side Claude Code usage monitor. \
+Reads usage from the Claude Code CLI, follows its hook events, and sends both \
+to the device over Bluetooth Low Energy. Bluetooth needs BlueZ and a D-Bus \
+session; the tray needs a StatusNotifierItem host."""
+# $auto covers the linked libraries (libxcb, libxkbcommon(-x11), libdbus-1).
+# GPUI loads Vulkan and the Wayland client at runtime, so name those too.
+depends = "$auto, libvulkan1, libwayland-client0"
+recommends = "bluez"
+assets = [
+    ["target/release/clawdmeter", "usr/bin/", "755"],
+    ["../../../tools/packaging/linux/clawdmeter.desktop", "usr/share/applications/", "644"],
+    ["../../../tools/packaging/icons/clawdmeter-16.png", "usr/share/icons/hicolor/16x16/apps/clawdmeter.png", "644"],
+    ["../../../tools/packaging/icons/clawdmeter-24.png", "usr/share/icons/hicolor/24x24/apps/clawdmeter.png", "644"],
+    ["../../../tools/packaging/icons/clawdmeter-32.png", "usr/share/icons/hicolor/32x32/apps/clawdmeter.png", "644"],
+    ["../../../tools/packaging/icons/clawdmeter-48.png", "usr/share/icons/hicolor/48x48/apps/clawdmeter.png", "644"],
+    ["../../../tools/packaging/icons/clawdmeter-64.png", "usr/share/icons/hicolor/64x64/apps/clawdmeter.png", "644"],
+    ["../../../tools/packaging/icons/clawdmeter-128.png", "usr/share/icons/hicolor/128x128/apps/clawdmeter.png", "644"],
+    ["../../../tools/packaging/icons/clawdmeter-256.png", "usr/share/icons/hicolor/256x256/apps/clawdmeter.png", "644"],
+    ["../../../tools/packaging/icons/clawdmeter-512.png", "usr/share/icons/hicolor/512x512/apps/clawdmeter.png", "644"],
+]
