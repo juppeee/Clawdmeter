@@ -93,17 +93,27 @@ impl Manifest {
     }
 
     /// Boards that fit a probed chip and flash size (probe 2 of the
-    /// flasher). A board whose flash size is unknown stays in the list.
+    /// flasher). An image fits when it needs no more flash than the board
+    /// has: a 16 MB board can run an 8 MB image (some boards ship with more
+    /// flash than their env assumes). Exact size matches come first, then
+    /// smaller images, largest first; manifest order breaks ties. A board
+    /// whose flash size is unknown on either side stays in the list, last.
     pub fn candidates(&self, chip: &str, flash_mb: Option<u32>) -> Vec<&BoardImage> {
         let chip = normalize_chip(chip);
-        self.boards
+        let mut out: Vec<(u8, u32, usize, &BoardImage)> = self
+            .boards
             .iter()
-            .filter(|b| b.chip_id() == chip)
-            .filter(|b| match (flash_mb, b.flash_mb()) {
-                (Some(have), Some(need)) => have == need,
-                _ => true,
+            .enumerate()
+            .filter(|(_, b)| b.chip_id() == chip)
+            .filter_map(|(i, b)| match (flash_mb, b.flash_mb()) {
+                (Some(have), Some(need)) if need == have => Some((0, 0, i, b)),
+                (Some(have), Some(need)) if need < have => Some((1, have - need, i, b)),
+                (Some(_), Some(_)) => None,
+                _ => Some((2, 0, i, b)),
             })
-            .collect()
+            .collect();
+        out.sort_by_key(|(rank, gap, i, _)| (*rank, *gap, *i));
+        out.into_iter().map(|(_, _, _, b)| b).collect()
     }
 }
 
@@ -175,12 +185,34 @@ mod tests {
     fn candidate_narrowing() {
         let m = Manifest::parse(SAMPLE).unwrap();
         let envs = |c: Vec<&BoardImage>| c.into_iter().map(|b| b.env.clone()).collect::<Vec<String>>();
-        assert_eq!(envs(m.candidates("ESP32-S3", Some(32))), ["waveshare_amoled_206", "waveshare_lcd_154"]);
+        // 32 MB: the exact match first, then the 16 MB images, then unknown.
+        assert_eq!(
+            envs(m.candidates("ESP32-S3", Some(32))),
+            ["waveshare_amoled_206", "waveshare_amoled_216", "waveshare_amoled_18", "waveshare_lcd_154"]
+        );
         assert_eq!(
             envs(m.candidates("esp32s3", Some(16))),
             ["waveshare_amoled_216", "waveshare_amoled_18", "waveshare_lcd_154"]
         );
+        assert_eq!(envs(m.candidates("esp32s3", Some(8))), ["waveshare_lcd_154"], "16 MB images never offered to 8 MB");
         assert_eq!(envs(m.candidates("esp32c6", None)), ["waveshare_amoled_216_c6"]);
+    }
+
+    #[test]
+    fn larger_flash_still_gets_smaller_images() {
+        // The original 2.16 env assumes 8 MB; some units ship with 16 MB.
+        let m = Manifest::parse(
+            r#"{"version":"2.0.0","boards":[
+              {"env":"waveshare_amoled_216","chip":"esp32s3","flash_size":"8MB","display_name":"2.16","file":"a","sha256":""},
+              {"env":"waveshare_amoled_18","chip":"esp32s3","flash_size":"16MB","display_name":"1.8","file":"b","sha256":""},
+              {"env":"tiny","chip":"esp32s3","flash_size":"4MB","display_name":"tiny","file":"c","sha256":""}]}"#,
+        )
+        .unwrap();
+        let envs = |c: Vec<&BoardImage>| c.into_iter().map(|b| b.env.clone()).collect::<Vec<String>>();
+        assert_eq!(envs(m.candidates("esp32s3", Some(16))), ["waveshare_amoled_18", "waveshare_amoled_216", "tiny"]);
+        assert_eq!(envs(m.candidates("esp32s3", Some(8))), ["waveshare_amoled_216", "tiny"]);
+        assert_eq!(envs(m.candidates("esp32s3", Some(4))), ["tiny"]);
+        assert!(m.candidates("esp32s3", Some(2)).is_empty());
     }
 
     #[test]

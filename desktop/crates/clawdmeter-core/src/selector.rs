@@ -1,7 +1,7 @@
 //! Which account to show when several are configured.
 //!
-//! Mirrors `PlanSelector` in `daemon/claude_usage_daemon.py` and `poll()` in
-//! the bash daemon: the account whose session % rose most recently wins. A
+//! Same rule as the legacy daemons' `PlanSelector` (macOS) and `poll()`
+//! (bash): the account whose session % rose most recently wins. A
 //! rise stamps a monotonic poll counter, so the choice is sticky and a window
 //! reset (a drop) is not activity. Before any rise, the highest current
 //! session % wins.
@@ -53,7 +53,7 @@ mod tests {
     const A: &str = "/a";
     const B: &str = "/b";
 
-    // Ported from daemon/tests/test_macos_multidir.py (PlanSelector).
+    // Ported from the legacy daemon test test_macos_multidir.py (PlanSelector).
     #[test]
     fn startup_picks_highest() {
         let mut s = PlanSelector::default();

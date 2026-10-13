@@ -1,9 +1,10 @@
 //! Where the daemon keeps its files.
 //!
-//! The state dir is `~/.config/claude-usage-monitor` on every OS because that
-//! is where `daemon/attention-hook.sh` writes (it uses `$HOME`, which Git Bash
-//! also sets on Windows). The config file follows the old daemons: the same
-//! state dir on Linux/macOS, `%LOCALAPPDATA%\Clawdmeter\config` on Windows.
+//! The state dir is `~/.config/claude-usage-monitor` on every OS: the hook
+//! (`clawdmeter hook`) writes there, and so did the legacy `attention-hook.sh`
+//! and daemons, so an existing install keeps its files. The config file also
+//! stays where the old daemons kept it: the state dir on Linux/macOS,
+//! `%LOCALAPPDATA%\Clawdmeter\config` on Windows.
 
 use std::path::{Path, PathBuf};
 

@@ -394,7 +394,7 @@ mod tests {
         UsageReading {
             session: Some(Window { pct: s, resets_at: Some(utc(T0 + 3600)) }),
             week: Some(Window { pct: 10, resets_at: Some(utc(T0 + 86_400)) }),
-            models: vec![],
+            ..Default::default()
         }
     }
 
@@ -499,6 +499,49 @@ mod tests {
         let w = write(&mut e, T0).unwrap();
         assert_eq!((w.kind, w.payload.to_json().as_str()), (WriteKind::NoData, r#"{"ok":false}"#));
         assert!(write(&mut e, T0 + 100).is_none());
+    }
+
+    // Ported from test_windows_reconnect.py::test_transient_poll_failure_does_not_set_error
+    // and test_freeride.py: only a login problem on every account is "no
+    // data"; a glitch (timeout, bad output, CLI missing) stays silent.
+    #[test]
+    fn transient_failures_are_not_no_data() {
+        let mut e = Engine::new(settings("config_dirs = ~/.claude, ~/.claude-work\n"));
+        let (a, b) = (PathBuf::from("/h/.claude"), PathBuf::from("/h/.claude-work"));
+        e.on_poll_results(
+            T0,
+            vec![(a.clone(), Err(UsageError::Timeout)), (b.clone(), Err(UsageError::Spawn("x".into())))],
+        );
+        assert!(!e.status(T0).logged_out);
+        assert!(write(&mut e, T0).is_none());
+        // One logged out, one glitching: still not "no data".
+        e.on_poll_results(
+            T0 + 30,
+            vec![(a.clone(), Err(UsageError::NotLoggedIn("x".into()))), (b.clone(), Err(UsageError::Timeout))],
+        );
+        assert!(write(&mut e, T0 + 30).is_none());
+        // Both need a login: no data, once.
+        e.on_poll_results(
+            T0 + 60,
+            vec![(a, Err(UsageError::NotSubscription)), (b, Err(UsageError::NotLoggedIn("x".into())))],
+        );
+        assert_eq!(write(&mut e, T0 + 60).unwrap().kind, WriteKind::NoData);
+    }
+
+    // A spend-capped account drives the device's enterprise layout and the
+    // multi-account choice by its spend %.
+    #[test]
+    fn spend_only_account() {
+        use crate::usage::Spend;
+        let mut e = Engine::new(settings(""));
+        let r = UsageReading {
+            spend: Some(Spend { pct: 41, resets_at: Some(utc(T0 + 86_400)), period: None }),
+            ..Default::default()
+        };
+        assert_eq!(r.session_pct(), 41);
+        e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(r))]);
+        let w = write(&mut e, T0).unwrap();
+        assert_eq!((w.payload.acct.as_deref(), w.payload.s, w.payload.pd), (Some("ent"), Some(41), Some(30)));
     }
 
     #[test]

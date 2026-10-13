@@ -30,12 +30,21 @@ const FONTS: [&[u8]; 3] = [
 /// How often windows re-read the tray process's status.
 pub const REFRESH: Duration = Duration::from_millis(500);
 
+/// Options for one window.
+#[derive(Debug, Clone, Default)]
+pub struct WindowArgs {
+    /// Settings tab to open on (`device`, `accounts`, `hooks`, `alerts`,
+    /// `background`).
+    pub tab: Option<String>,
+    /// Flasher: a local release `manifest.json` to use instead of GitHub.
+    pub manifest: Option<std::path::PathBuf>,
+}
+
 /// Open one window and run until it closes.
-/// `tab` picks the settings tab to open on (`device`, `accounts`, `hooks`,
-/// `alerts`, `background`).
-pub fn run(kind: WindowKind, paths: Paths, tab: Option<String>) -> i32 {
+pub fn run(kind: WindowKind, paths: Paths, args: WindowArgs) -> i32 {
     Application::new().run(move |cx: &mut App| {
-        let tab = tab.clone();
+        let tab = args.tab.clone();
+        let manifest = args.manifest.clone();
         if let Err(e) = cx.text_system().add_fonts(FONTS.iter().map(|f| Cow::Borrowed(*f)).collect()) {
             log::warn!("bundled fonts not registered ({e}); using system fonts");
         }
@@ -49,14 +58,18 @@ pub fn run(kind: WindowKind, paths: Paths, tab: Option<String>) -> i32 {
         let (title, w, h) = match kind {
             WindowKind::Settings => ("Clawdmeter settings", 780., 600.),
             WindowKind::Flasher => ("Flash your Clawdmeter", 620., 560.),
-            WindowKind::Status => ("Clawdmeter", 380., 470.),
+            WindowKind::Status => ("Clawdmeter", 380., status::HEIGHT_RUNNING),
         };
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(w), px(h)), cx))),
             titlebar: Some(TitlebarOptions { title: Some(title.into()), ..Default::default() }),
             app_id: Some("clawdmeter".into()),
             is_resizable: true,
-            window_min_size: Some(size(px(w * 0.8), px(h * 0.8))),
+            // The status window fits its height to its content, so only its width is floored.
+            window_min_size: Some(match kind {
+                WindowKind::Status => size(px(w * 0.8), px(status::HEIGHT_NOT_RUNNING)),
+                _ => size(px(w * 0.8), px(h * 0.8)),
+            }),
             window_decorations: Some(WindowDecorations::Server),
             ..Default::default()
         };
@@ -65,9 +78,9 @@ pub fn run(kind: WindowKind, paths: Paths, tab: Option<String>) -> i32 {
             WindowKind::Settings => cx
                 .open_window(options, move |w, cx| cx.new(|cx| settings::SettingsView::new(p, tab.as_deref(), w, cx)))
                 .map(|_| ()),
-            WindowKind::Flasher => {
-                cx.open_window(options, move |w, cx| cx.new(|cx| flasher::FlasherView::new(p, w, cx))).map(|_| ())
-            }
+            WindowKind::Flasher => cx
+                .open_window(options, move |w, cx| cx.new(|cx| flasher::FlasherView::new(p, manifest.clone(), w, cx)))
+                .map(|_| ()),
             WindowKind::Status => {
                 cx.open_window(options, move |w, cx| cx.new(|cx| status::StatusView::new(p, w, cx))).map(|_| ())
             }
@@ -152,7 +165,7 @@ pub fn command(paths: &Paths, cmd: AppCommand) {
 
 /// Text for "the daemon isn't running" banners.
 pub fn not_running_text() -> SharedString {
-    "The Clawdmeter tray app isn't running, so live status is unavailable. Start `clawdmeter` to bring it back.".into()
+    "Clawdmeter isn't running, so there's no live status. Start it from your app menu, or run clawdmeter.".into()
 }
 
 /// Run blocking work off the UI thread, then hand the result to the view.

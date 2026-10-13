@@ -1,9 +1,9 @@
-//! The `key = value` config file shared with the old daemons and the settings
-//! window.
+//! The `key = value` config file, shared with the settings window (and with
+//! the bash / Python daemons it replaces, so an existing file keeps working).
 //!
-//! Reading matches `daemon/claude-usage-daemon.sh` and the Python daemons:
-//! `#` starts a comment, whitespace and CR are trimmed, keys compare
-//! case-insensitively, and the last occurrence of a key wins. Writing edits
+//! Reading matches those daemons: `#` starts a comment, whitespace and CR are
+//! trimmed, keys compare case-insensitively, and the last occurrence of a key
+//! wins. Writing edits
 //! the file line by line so comments, blank lines, unknown keys and their
 //! order survive a round trip through the GUI.
 
@@ -245,11 +245,28 @@ impl Settings {
         }
     }
 
-    /// Load the user's config file (missing file → defaults).
+    /// Load the user's config file (missing file → defaults), with the
+    /// environment's `POLL_INTERVAL` and `CLAUDE_CONFIG_DIR` defaults.
     pub fn load(paths: &Paths) -> io::Result<Self> {
         let cfg = ConfigFile::load(&paths.config_file)?;
         let env = std::env::var("POLL_INTERVAL").ok();
-        Ok(Self::from_config(&cfg, paths, env.as_deref()))
+        let mut s = Self::from_config(&cfg, paths, env.as_deref());
+        s.apply_env_config_dir(&cfg, paths, std::env::var("CLAUDE_CONFIG_DIR").ok().as_deref());
+        Ok(s)
+    }
+
+    /// With no `config_dirs` in the file, a `CLAUDE_CONFIG_DIR` in the
+    /// environment names the account to poll: it is the dir the user's own
+    /// `claude` uses (the Windows daemon read its token from there too).
+    /// Only the daemon applies this; the settings window shows and saves the
+    /// file's value, so saving never pins the env dir into the file.
+    pub fn apply_env_config_dir(&mut self, cfg: &ConfigFile, paths: &Paths, env_dir: Option<&str>) {
+        if cfg.get("config_dirs").is_some_and(|v| !v.trim().is_empty()) {
+            return;
+        }
+        if let Some(d) = env_dir.map(str::trim).filter(|d| !d.is_empty()) {
+            self.config_dirs = vec![paths.expand_tilde(d)];
+        }
     }
 
     /// Write these settings into `cfg`, touching only keys whose value differs
@@ -324,7 +341,7 @@ mod tests {
         Settings::from_config(&ConfigFile::parse(text), &paths(), None)
     }
 
-    // Ported from daemon/tests/test_bash_heartbeat.sh (interval parsing).
+    // Ported from the legacy daemon test test_bash_heartbeat.sh (interval parsing).
     #[test]
     fn intervals_like_bash() {
         let s = settings("");
@@ -353,7 +370,7 @@ mod tests {
         assert_eq!(Settings::from_config(&file, &p, Some("45")).poll_interval, 200);
     }
 
-    // Ported from daemon/tests/test_macos_multidir.py (read_config_dirs).
+    // Ported from the legacy daemon test test_macos_multidir.py (read_config_dirs).
     #[test]
     fn config_dirs() {
         assert_eq!(settings("").config_dirs, vec![PathBuf::from("/home/u/.claude")]);
@@ -363,6 +380,26 @@ mod tests {
             vec![PathBuf::from("/home/u/.claude"), PathBuf::from("/home/u/.claude-work")]
         );
         assert_eq!(settings("config_dirs = , ,\n").config_dirs, vec![PathBuf::from("/home/u/.claude")]);
+    }
+
+    // The Windows daemon read the token from $CLAUDE_CONFIG_DIR when set
+    // (test_windows_token.py::test_read_token_config_dir_override).
+    #[test]
+    fn env_config_dir_is_the_default_account() {
+        let p = paths();
+        let with_env = |text: &str, env: Option<&str>| {
+            let cfg = ConfigFile::parse(text);
+            let mut s = Settings::from_config(&cfg, &p, None);
+            s.apply_env_config_dir(&cfg, &p, env);
+            s.config_dirs
+        };
+        assert_eq!(with_env("", Some("~/.claude-work")), vec![PathBuf::from("/home/u/.claude-work")]);
+        assert_eq!(with_env("", Some("/abs/dir")), vec![PathBuf::from("/abs/dir")]);
+        assert_eq!(with_env("", Some("  ")), vec![PathBuf::from("/home/u/.claude")]);
+        assert_eq!(with_env("", None), vec![PathBuf::from("/home/u/.claude")]);
+        // The file wins.
+        assert_eq!(with_env("config_dirs = ~/.claude\n", Some("/abs/dir")), vec![PathBuf::from("/home/u/.claude")]);
+        assert_eq!(with_env("config_dirs =\n", Some("/abs/dir")), vec![PathBuf::from("/abs/dir")]);
     }
 
     #[test]

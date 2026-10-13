@@ -40,3 +40,6 @@ tray-icon = { version = "0.26", default-features = false }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"] }
 dispatch2 = "0.3"
+
+[dev-dependencies]
+gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "wayland", "x11", "test-support"] }

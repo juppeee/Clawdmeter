@@ -1,5 +1,5 @@
-//! Attention alerts from `daemon/attention-hook.sh`, consumed exactly like the
-//! bash and macOS daemons do.
+//! Attention alerts from the hook (`clawdmeter hook alert|clear`), consumed
+//! the way the legacy bash and macOS daemons did.
 //!
 //! The hook writes `<state>/attention` (`{"m": message, "s": session id}`)
 //! when a session needs the user and touches `<state>/clear-<session id>` when
@@ -204,7 +204,7 @@ mod tests {
         File::options().write(true).open(p).unwrap().set_modified(t).unwrap();
     }
 
-    // Ported from daemon/tests/test_attention.py::test_attention_flag.
+    // Ported from the legacy daemon test test_attention.py::test_attention_flag.
     #[test]
     fn attention_flag() {
         let d = tmpdir("flag");
@@ -249,7 +249,7 @@ mod tests {
         Alert { message: msg.into(), session: sid.into(), at }
     }
 
-    // Ported from daemon/tests/test_bash_attention.sh.
+    // Ported from the legacy daemon test test_bash_attention.sh.
     #[test]
     fn session_matching_like_bash() {
         let t0 = SystemTime::now();

@@ -6,24 +6,25 @@
 //! values), so a hand-edited config and the GUI never disagree. The daemon
 //! re-reads the file every few seconds.
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::time::Duration;
 
-use clawdmeter_core::autostart::{self, LaunchMode, LEGACY_LAUNCH_AGENT_LABEL, LEGACY_SYSTEMD_UNIT};
+use clawdmeter_core::autostart::{self, LaunchMode};
 use clawdmeter_core::config::{ClockMode, ConfigFile};
-use clawdmeter_core::hooks::{self, HookPlan, HookStatus, HOOKS};
 use clawdmeter_core::{Paths, Settings};
 use clawdmeter_flash::device::{self, FirmwareInfo};
 use gpui::{div, prelude::*, px, Context, PathPromptOptions, SharedString, Window};
 
 use super::theme::{Theme, FONT_MONO, R_M, R_S};
 use super::widgets::{
-    board_thumb, button, card, dot, field, heading, kv, para, pill, segmented, toggle, ButtonKind, Tone,
+    board_thumb, button, caption, card, field, heading, kv, notice, para, pill, segmented, subheading, toggle,
+    ButtonKind, Tone,
 };
 use super::{chrome, command, live_status, not_running_text, run_blocking, REFRESH};
 use crate::boards;
 use crate::diff::{line_diff, with_context, DiffLine};
-use crate::hookscript;
+use crate::errors;
+use crate::hooks::install::{self as hooks, HookPlan, HookStatus, HOOKS};
 use crate::ipc::{self, AppCommand, FirmwareRecord, StatusSnapshot};
 use crate::tilde;
 
@@ -87,28 +88,26 @@ pub struct SettingsView {
     hooks: Vec<HookRow>,
     preview: Option<HookPreview>,
     hook_msg: Option<(Tone, String)>,
-    jq: bool,
+    /// The binary hooks point at (`None`: couldn't be determined).
+    hook_exe: Option<PathBuf>,
     device: DeviceState,
+    /// Probe USB for a board (off in tests).
+    usb: bool,
     autostart_on: bool,
-    legacy: Option<PathBuf>,
+    /// The old daemon's login entry (systemd unit, LaunchAgent or Run value).
+    legacy: Option<autostart::LegacyEntry>,
     notice: Option<(Tone, String)>,
     ticks: u32,
-}
-
-fn legacy_entry(home: &Path) -> Option<PathBuf> {
-    let p = if cfg!(target_os = "macos") {
-        home.join("Library/LaunchAgents").join(format!("{LEGACY_LAUNCH_AGENT_LABEL}.plist"))
-    } else if cfg!(windows) {
-        return None;
-    } else {
-        home.join(".config/systemd/user").join(LEGACY_SYSTEMD_UNIT)
-    };
-    p.exists().then_some(p)
 }
 
 impl SettingsView {
     /// Build, load the config, and start probing for a USB-attached device.
     pub fn new(paths: Paths, tab: Option<&str>, _window: &mut Window, cx: &mut Context<Self>) -> Self {
+        Self::with_usb(paths, tab, true, cx)
+    }
+
+    /// [`SettingsView::new`]; `usb: false` never touches serial ports (tests).
+    pub fn with_usb(paths: Paths, tab: Option<&str>, usb: bool, cx: &mut Context<Self>) -> Self {
         let tab =
             TABS.iter().find(|(_, l)| tab.is_some_and(|t| l.eq_ignore_ascii_case(t))).map_or(Tab::Device, |(t, _)| *t);
         cx.spawn(async move |this, cx| loop {
@@ -127,15 +126,18 @@ impl SettingsView {
             hooks: Vec::new(),
             preview: None,
             hook_msg: None,
-            jq: hookscript::jq_available(),
+            hook_exe: hooks::hook_binary().ok(),
             device: DeviceState::default(),
+            usb,
             autostart_on: false,
             legacy: None,
             notice: None,
             ticks: 0,
         };
         v.reload();
-        v.probe_device(cx);
+        if usb {
+            v.probe_device(cx);
+        }
         v
     }
 
@@ -145,16 +147,27 @@ impl SettingsView {
                 self.settings = s;
                 self.config_error = None;
             }
-            Err(e) => self.config_error = Some(format!("{}: {e}", self.paths.config_file.display())),
+            Err(e) => {
+                self.config_error = Some(format!(
+                    "Couldn't read {}: {e}",
+                    tilde(&self.paths.config_file.display().to_string(), &self.paths.home)
+                ))
+            }
         }
         self.hooks = self
             .settings
             .config_dirs
             .iter()
-            .map(|d| HookRow { dir: d.clone(), status: hooks::dir_status(d) })
+            .map(|d| HookRow {
+                dir: d.clone(),
+                status: match &self.hook_exe {
+                    Some(exe) => hooks::dir_status(d, exe),
+                    None => HookStatus::Unreadable("Couldn't find the Clawdmeter program itself.".into()),
+                },
+            })
             .collect();
         self.autostart_on = autostart::is_enabled(&self.paths.home, LaunchMode::Tray);
-        self.legacy = legacy_entry(&self.paths.home);
+        self.legacy = autostart::legacy_entry(&self.paths.home);
         self.snap = live_status(&self.paths);
     }
 
@@ -167,7 +180,7 @@ impl SettingsView {
             self.reload();
         }
         // Notice a board being plugged in.
-        if self.ticks.is_multiple_of(4) && !self.device.probing && self.device.port.is_none() {
+        if self.usb && self.ticks.is_multiple_of(4) && !self.device.probing && self.device.port.is_none() {
             if let Some(p) = device::list_ports().into_iter().next() {
                 self.device.port = Some(p.path);
                 self.probe_device(cx);
@@ -192,7 +205,7 @@ impl SettingsView {
         })();
         match result {
             Ok(()) => self.notice = None,
-            Err(e) => self.notice = Some((Tone::Bad, format!("Couldn't save {}: {e}", path.display()))),
+            Err(e) => self.notice = Some((Tone::Bad, errors::save_failed("settings", &path, &self.paths.home, &e))),
         }
         self.reload();
     }
@@ -242,9 +255,8 @@ impl SettingsView {
                         ))
                     }
                     Ok(None) => {
-                        v.device.error = Some(
-                            "The device didn't answer. Is it running Clawdmeter firmware with minimal mode?".into(),
-                        )
+                        v.device.error =
+                            Some("The device didn't answer. Unplug it, plug it back in and try again.".into())
                     }
                     Err(e) => v.device.error = Some(e.to_string()),
                 }
@@ -276,25 +288,25 @@ impl SettingsView {
 
     fn plan_hooks(&mut self, action: HookAction, dirs: Vec<PathBuf>) {
         self.hook_msg = None;
-        // The script itself is written when the change is applied.
-        let script = (action == HookAction::Install).then(|| hookscript::script_path(&self.paths));
+        let Some(exe) = self.hook_exe.clone() else { return };
         let mut plans = Vec::new();
         for d in dirs {
-            let plan = match &script {
-                Some(s) => hooks::plan_install(&d, s),
-                None => hooks::plan_uninstall(&d),
+            let plan = match action {
+                HookAction::Install => hooks::plan_install(&d, &exe),
+                HookAction::Remove => hooks::plan_uninstall(&d),
             };
             match plan {
                 Ok(p) if p.changes() => plans.push(p),
                 Ok(_) => {}
                 Err(e) => {
-                    self.hook_msg = Some((Tone::Bad, format!("{}: {e}", d.join("settings.json").display())));
+                    let f = tilde(&d.join("settings.json").display().to_string(), &self.paths.home);
+                    self.hook_msg = Some((Tone::Bad, format!("{f}: {e}")));
                     return;
                 }
             }
         }
         if plans.is_empty() {
-            self.hook_msg = Some((Tone::Ok, "Nothing to change.".into()));
+            self.hook_msg = Some((Tone::Ok, "Already up to date.".into()));
         } else {
             self.preview = Some(HookPreview { action, plans });
         }
@@ -302,28 +314,27 @@ impl SettingsView {
 
     fn apply_hooks(&mut self) {
         let Some(p) = self.preview.take() else { return };
-        if p.action == HookAction::Install {
-            if let Err(e) = hookscript::install_script(&self.paths) {
-                self.hook_msg = Some((Tone::Bad, format!("Couldn't write the hook script: {e}")));
-                return;
-            }
-        }
         let mut done = 0;
         for plan in &p.plans {
             if let Err(e) = plan.apply() {
-                self.hook_msg = Some((Tone::Bad, format!("{}: {e}", plan.path.display())));
+                let what = tilde(&plan.path.display().to_string(), &self.paths.home);
+                self.hook_msg = Some((Tone::Bad, format!("Couldn't write {what}. {}", errors::io_message(&e))));
                 self.reload();
                 return;
             }
             done += 1;
         }
-        let verb = if p.action == HookAction::Install { "Installed in" } else { "Removed from" };
+        let accounts = if done == 1 { "1 account".to_string() } else { format!("{done} accounts") };
         self.hook_msg = Some((
             Tone::Ok,
-            format!(
-                "{verb} {done} account{}. The previous settings.json is kept as settings.json.bak.",
-                if done == 1 { "" } else { "s" }
-            ),
+            match p.action {
+                HookAction::Install => {
+                    format!("Hooks set up in {accounts}. The old file is saved as settings.json.bak.")
+                }
+                HookAction::Remove => {
+                    format!("Hooks removed from {accounts}. The old file is saved as settings.json.bak.")
+                }
+            },
         ));
         self.reload();
     }
@@ -333,10 +344,11 @@ impl SettingsView {
         let body = serde_json::json!({"m": "Test alert from Clawdmeter settings", "s": "clawdmeter-test"});
         self.hook_msg = Some(
             match std::fs::create_dir_all(&self.paths.state_dir).and_then(|_| std::fs::write(&path, body.to_string())) {
-                Ok(()) => {
-                    (Tone::Ok, "Test alert sent. Clawd should come to fetch you; tap the device to dismiss.".into())
+                Ok(()) if self.snap.is_none() => {
+                    (Tone::Warn, "Alert queued, but Clawdmeter isn't running, so nothing will show it.".into())
                 }
-                Err(e) => (Tone::Bad, format!("{}: {e}", path.display())),
+                Ok(()) => (Tone::Ok, "Test alert sent. Clawd should come find you; tap the device to dismiss.".into()),
+                Err(e) => (Tone::Bad, format!("Couldn't send the test alert. {}", errors::io_message(&e))),
             },
         );
     }
@@ -347,31 +359,45 @@ impl SettingsView {
         let snap = self.snap.clone();
         let rec = ipc::load_firmware_record(&self.paths);
         let env = self.device.info.as_ref().map(|i| i.env.clone()).or_else(|| rec.as_ref().map(|r| r.env.clone()));
-        let ver = self.device.info.as_ref().map(|i| i.ver.clone()).or_else(|| rec.as_ref().map(|r| r.ver.clone()));
+        let ver = self
+            .device
+            .info
+            .as_ref()
+            .map(|i| i.ver.clone())
+            .or_else(|| rec.as_ref().map(|r| r.ver.clone()))
+            .or_else(|| snap.as_ref().and_then(|s| s.device_firmware.clone()));
         let board = env.as_deref().and_then(boards::board);
         let thumb = board.map(|b| b.thumb(96.)).unwrap_or((80., 80.));
         let board_text: SharedString = match (board, &env) {
             (Some(b), _) => format!("{} · {}", b.name, b.chip.trim_start_matches("ESP32-")).into(),
             (None, Some(e)) => e.clone().into(),
-            (None, None) => "Unknown (plug it in over USB to identify it)".into(),
+            (None, None) => "Not identified yet".into(),
         };
         let update = snap.as_ref().and_then(|s| s.update_available().map(str::to_owned));
         let link: SharedString = match snap.as_ref() {
-            None => "Daemon not running".into(),
+            None => "Clawdmeter isn't running".into(),
             Some(s) => match s.link.as_str() {
-                "connected" => format!("Bluetooth · {}", s.device_key.clone().unwrap_or_default()).into(),
-                "no_adapter" => format!("Bluetooth unavailable ({})", s.link_detail.clone().unwrap_or_default()).into(),
-                _ => "Searching for \"Clawdmeter\"…".into(),
+                "connected" => {
+                    format!("Connected over Bluetooth ({})", s.device_key.clone().unwrap_or_default()).into()
+                }
+                "no_adapter" => "Bluetooth is off or unavailable".into(),
+                "connecting" => "Connecting…".into(),
+                _ => "Looking for it over Bluetooth…".into(),
             },
         };
         let port_text: SharedString = match (&self.device.port, self.device.probing) {
             (_, true) => "Checking USB…".into(),
             (Some(p), _) => p.clone().into(),
-            (None, _) => "Not plugged in over USB".into(),
+            (None, _) if board.is_none() => "Not plugged in. Plug it in to identify the board.".into(),
+            (None, _) => "Not plugged in".into(),
         };
-        let mut fw_row = div().flex().items_center().gap(px(8.)).child(ver.clone().unwrap_or_else(|| "–".into()));
-        if let Some(u) = &update {
-            fw_row = fw_row.child(pill(t, format!("{u} available"), Tone::Warn));
+        let mut fw_row = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .child(ver.clone().map_or_else(|| "Unknown".into(), |v| format!("v{}", v.trim_start_matches('v'))));
+        if update.is_some() {
+            fw_row = fw_row.child(pill(t, "Update available", Tone::Accent));
         }
 
         let mut pane = div().flex().flex_col().gap(px(14.)).child(heading(t, "Device"));
@@ -394,20 +420,30 @@ impl SettingsView {
         );
         if let Some(u) = update {
             let p = self.paths.clone();
+            let have = ver.map_or_else(|| "an older version".into(), |v| format!("v{}", v.trim_start_matches('v')));
             pane = pane.child(
                 card(t)
                     .flex_row()
                     .items_center()
-                    .justify_between()
+                    .gap(px(16.))
                     .border_1()
-                    .border_color(t.warn)
-                    .child(div().flex().flex_col().gap(px(4.)).child(format!("Firmware {u} is available")).child(
-                        div().text_size(px(12.5)).text_color(t.mute).child(format!(
-                            "You have {}. The flasher downloads it from GitHub Releases and checks its hash.",
-                            ver.unwrap_or_else(|| "an older version".into())
-                        )),
-                    ))
-                    .child(button(t, "update-now", "Update now", ButtonKind::Primary, true, move |_, _, _| {
+                    .border_color(t.line)
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .flex_1()
+                            .min_w_0()
+                            .gap(px(4.))
+                            .child(format!("Firmware v{} is available", u.trim_start_matches('v')))
+                            .child(
+                                div()
+                                    .text_size(px(12.5))
+                                    .text_color(t.mute)
+                                    .child(format!("This device has {have}. Updating takes about a minute over USB.")),
+                            ),
+                    )
+                    .child(button(t, "update-now", "Update…", ButtonKind::Primary, true, move |_, _, _| {
                         command(&p, AppCommand::Open("flasher".into()))
                     })),
             );
@@ -418,13 +454,14 @@ impl SettingsView {
         let can_minimal = self.device.port.is_some() && self.device.minimal.is_some() && !self.device.busy;
         let me = cx.entity().downgrade();
         let minimal_help = match (&self.device.minimal, &self.device.port) {
-            (Some((eff, _)), _) => format!(
-                "Still Clawd, meters only, no animation. Always on for e-ink panels. Now {}.",
-                if *eff { "on" } else { "off" }
-            ),
+            (Some((eff, _)), _) => {
+                format!("A still Clawd and the meters, no animation. Currently {}.", if *eff { "on" } else { "off" })
+            }
             (None, Some(_)) if self.device.probing => "Asking the device…".into(),
-            (None, Some(_)) => "This firmware doesn't support minimal mode yet; update it first.".into(),
-            (None, None) => "Still Clawd, meters only, no animation. Plug the device in over USB to change it.".into(),
+            (None, Some(_)) => "This firmware is too old for minimal mode. Update it first.".into(),
+            (None, None) => {
+                "A still Clawd and the meters, no animation. Plug the device in over USB to change it.".into()
+            }
         };
         pane = pane.child(field(
             t,
@@ -454,7 +491,7 @@ impl SettingsView {
         pane = pane.child(field(
             t,
             "Clock on the device",
-            "Shows the time in the header instead of \"Usage\". Auto follows this computer's 12/24-hour setting.",
+            "Shows the time at the top of the screen. Auto follows this computer's 12/24-hour setting.",
             segmented(
                 t,
                 "clock",
@@ -479,7 +516,7 @@ impl SettingsView {
         pane = pane.child(field(
             t,
             "Forget this device",
-            "Clears the cached address and looks again. Use it after swapping boards.",
+            "Forgets the remembered address and picks up whichever paired Clawdmeter is around. Use it after swapping boards.",
             button(t, "forget", "Forget", ButtonKind::Small, true, move |_, _, _| command(&p, AppCommand::Forget)),
         ));
         let me = cx.entity().downgrade();
@@ -487,7 +524,7 @@ impl SettingsView {
         pane = pane.child(field(
             t,
             "Check for firmware updates",
-            "Once a day, against the project's latest GitHub Release. The device reports its version with the info command.",
+            "Looks for new firmware on GitHub once a day and tells you in the tray.",
             toggle(t, "update-check", on, true, move |_, _, cx| {
                 let _ = me.update(cx, |v, cx| {
                     v.save(|s, _| s.update_check = !on);
@@ -518,7 +555,7 @@ impl SettingsView {
             .child(div().flex().items_center().justify_between().child(heading(t, "Accounts")).child(button(
                 t,
                 "add-dir",
-                "Add config folder",
+                "Add folder…",
                 ButtonKind::Small,
                 true,
                 move |_, _, cx| {
@@ -527,8 +564,8 @@ impl SettingsView {
             )))
             .child(para(
                 t,
-                "Each Claude Code config folder is one account (CLAUDE_CONFIG_DIR). All are polled with claude /usage; \
-                 the device shows the one whose usage moved most recently.",
+                "Each Claude Code config folder is an account (the CLAUDE_CONFIG_DIR you run claude with). \
+                 Clawdmeter checks all of them; the device shows whichever you used most recently.",
             ));
         let active = self.snap.as_ref().and_then(|s| s.account.clone());
         let errors: Vec<(String, String)> = self.snap.as_ref().map(|s| s.errors.clone()).unwrap_or_default();
@@ -538,16 +575,11 @@ impl SettingsView {
             let ds = d.display().to_string();
             let err = errors.iter().find(|(p, _)| *p == ds).map(|(_, e)| e.clone());
             let is_active = active.as_deref() == Some(ds.as_str());
-            let (tone, meta, chip) = match (&err, is_active) {
-                (Some(e), _) => (Tone::Bad, e.clone(), pill(t, "Error", Tone::Bad).into_any_element()),
-                (None, true) => (
-                    Tone::Ok,
-                    "Polling · shown on the device".to_string(),
-                    pill(t, "On device", Tone::Accent).into_any_element(),
-                ),
-                (None, false) => {
-                    (Tone::Plain, "Polling".to_string(), pill(t, "Polling", Tone::Plain).into_any_element())
-                }
+            let (meta, chip) = match (&err, is_active) {
+                (Some(e), _) => (e.clone(), Some(pill(t, "Problem", Tone::Bad))),
+                (None, true) => ("Shown on the device".to_string(), Some(pill(t, "On device", Tone::Ok))),
+                (None, false) if self.snap.is_some() => ("Checked, not shown".to_string(), None),
+                (None, false) => ("Not checked while Clawdmeter is stopped".to_string(), None),
             };
             let me = cx.entity().downgrade();
             let dir = d.clone();
@@ -557,9 +589,8 @@ impl SettingsView {
                     .items_center()
                     .gap(px(12.))
                     .px(px(14.))
-                    .py(px(10.))
+                    .py(px(12.))
                     .when(i > 0, |r| r.border_t_1().border_color(t.line))
-                    .child(dot(t, tone))
                     .child(
                         div()
                             .flex()
@@ -568,9 +599,9 @@ impl SettingsView {
                             .min_w_0()
                             .gap(px(2.))
                             .child(div().font_family(FONT_MONO).text_size(px(13.)).child(tilde(&ds, &self.paths.home)))
-                            .child(div().text_size(px(12.)).text_color(t.mute).truncate().child(meta)),
+                            .child(div().text_size(px(12.5)).text_color(t.mute).child(meta)),
                     )
-                    .child(chip)
+                    .when_some(chip, |r, c| r.child(c))
                     .child(button(
                         t,
                         SharedString::from(format!("rm-{i}")),
@@ -589,146 +620,120 @@ impl SettingsView {
         }
         pane = pane.child(list);
         if self.snap.is_none() {
-            pane = pane.child(div().text_size(px(12.5)).text_color(t.mute).child(not_running_text()));
+            pane = pane.child(notice(t, Tone::Plain, not_running_text()));
         }
         pane
     }
 
     fn hooks_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
-        let mut pane = div().flex().flex_col().gap(px(14.)).child(heading(t, "Attention hooks")).child(para(
+        let mut pane = div().flex().flex_col().gap(px(14.)).child(heading(t, "Hooks")).child(para(
             t,
-            "Clawd notices when you send a prompt, keeps up with tools, and comes to find you when Claude Code is \
-             waiting. That's five small hooks in each account's settings.json. They record the event type and session \
-             only. Without them Clawdmeter still works, polling every 2 minutes.",
+            "Hooks let Clawd react while you work: he notices prompts, keeps up with tools, and comes to find you \
+             when Claude Code is waiting. Each account gets five small entries in its settings.json that record only \
+             the event type and session ID. Without them Clawdmeter still works; it just checks every 2 minutes.",
         ));
-        if !self.jq {
-            pane = pane.child(
-                card(t).border_1().border_color(t.warn).child(div().text_size(px(13.)).text_color(t.warn).child(
-                    "The hook script needs jq on PATH (apt install jq / brew install jq). Without it the hooks run but record nothing.",
-                )),
-            );
-        }
+        let busy = self.preview.is_some();
         let mut list = div().flex().flex_col().rounded(px(R_M)).border_1().border_color(t.line);
         for (i, row) in self.hooks.iter().enumerate() {
-            let (tone, meta, chip, label, action) = match row.status {
+            let (meta, chip, action): (String, (&str, Tone), Option<(&str, HookAction)>) = match &row.status {
                 HookStatus::Installed => (
-                    Tone::Ok,
-                    format!("{n} of {n} hooks installed", n = HOOKS.len()),
-                    pill(t, "Installed", Tone::Ok),
-                    "Remove",
-                    HookAction::Remove,
-                ),
-                HookStatus::Partial => (
-                    Tone::Warn,
-                    "Some hooks missing or from an older version".into(),
-                    pill(t, "Update", Tone::Warn),
-                    "Update",
-                    HookAction::Install,
+                    format!("All {} hooks set up", HOOKS.len()),
+                    ("Installed", Tone::Ok),
+                    Some(("Remove", HookAction::Remove)),
                 ),
                 HookStatus::Missing => (
-                    Tone::Plain,
-                    "Not installed · other hooks are kept".into(),
-                    pill(t, "Missing", Tone::Warn),
-                    "Install",
-                    HookAction::Install,
+                    "Not set up. Hooks you added yourself stay as they are.".into(),
+                    ("Not installed", Tone::Plain),
+                    Some(("Install", HookAction::Install)),
                 ),
+                HookStatus::Legacy => (
+                    "Uses the old attention-hook.sh script. Updating switches to the built-in hook.".into(),
+                    ("Old script", Tone::Warn),
+                    Some(("Update", HookAction::Install)),
+                ),
+                HookStatus::Stale(old) => (
+                    format!("Points at {}, not this copy of Clawdmeter.", tilde(old, &self.paths.home)),
+                    ("Out of date", Tone::Warn),
+                    Some(("Update", HookAction::Install)),
+                ),
+                HookStatus::Partial => (
+                    "Some hooks are missing.".into(),
+                    ("Incomplete", Tone::Warn),
+                    Some(("Update", HookAction::Install)),
+                ),
+                HookStatus::Unreadable(e) => (e.clone(), ("Can't read", Tone::Bad), None),
             };
-            let me = cx.entity().downgrade();
-            let dir = row.dir.clone();
-            let kind = if action == HookAction::Install { ButtonKind::Primary } else { ButtonKind::Small };
-            list =
-                list.child(
+            let mut r = div()
+                .flex()
+                .items_center()
+                .gap(px(12.))
+                .px(px(14.))
+                .py(px(12.))
+                .when(i > 0, |r| r.border_t_1().border_color(t.line))
+                .child(
                     div()
                         .flex()
-                        .items_center()
-                        .gap(px(12.))
-                        .px(px(14.))
-                        .py(px(10.))
-                        .when(i > 0, |r| r.border_t_1().border_color(t.line))
-                        .child(dot(t, tone))
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .gap(px(3.))
                         .child(
                             div()
-                                .flex()
-                                .flex_col()
-                                .flex_1()
-                                .min_w_0()
-                                .gap(px(2.))
-                                .child(div().font_family(FONT_MONO).text_size(px(13.)).child(tilde(
-                                    &row.dir.join("settings.json").display().to_string(),
-                                    &self.paths.home,
-                                )))
-                                .child(div().text_size(px(12.)).text_color(t.mute).child(meta)),
+                                .font_family(FONT_MONO)
+                                .text_size(px(13.))
+                                .truncate()
+                                .child(tilde(&row.dir.join("settings.json").display().to_string(), &self.paths.home)),
                         )
-                        .child(chip)
-                        .child(button(
-                            t,
-                            SharedString::from(format!("hook-{i}")),
-                            label,
-                            kind,
-                            self.preview.is_none(),
-                            move |_, _, cx| {
-                                let dir = dir.clone();
-                                let _ = me.update(cx, |v, cx| {
-                                    v.plan_hooks(action, vec![dir]);
-                                    cx.notify();
-                                });
-                            },
-                        )),
-                );
+                        .child(div().text_size(px(12.5)).text_color(t.mute).child(meta)),
+                )
+                .child(pill(t, chip.0, chip.1));
+            if let Some((label, action)) = action {
+                let me = cx.entity().downgrade();
+                let dir = row.dir.clone();
+                r = r.child(button(
+                    t,
+                    SharedString::from(format!("hook-{i}")),
+                    label,
+                    ButtonKind::Small,
+                    !busy,
+                    move |_, _, cx| {
+                        let dir = dir.clone();
+                        let _ = me.update(cx, |v, cx| {
+                            v.plan_hooks(action, vec![dir]);
+                            cx.notify();
+                        });
+                    },
+                ));
+            }
+            list = list.child(r);
         }
         pane = pane.child(list);
 
         if let Some(p) = &self.preview {
-            for plan in &p.plans {
-                let diff = with_context(line_diff(plan.before.as_deref().unwrap_or(""), &plan.after), 2);
-                let mut block = div()
-                    .flex()
-                    .flex_col()
-                    .p(px(12.))
-                    .rounded(px(R_S))
-                    .bg(t.bg)
-                    .border_1()
-                    .border_color(t.line)
-                    .font_family(FONT_MONO)
-                    .text_size(px(12.));
-                for l in diff {
-                    block = block.child(match l {
-                        DiffLine::Same(s) => div().text_color(t.mute).child(format!("  {s}")),
-                        DiffLine::Added(s) => div().text_color(t.ok).bg(with_alpha(t.ok, 0.10)).child(format!("+ {s}")),
-                        DiffLine::Removed(s) => {
-                            div().text_color(t.bad).bg(with_alpha(t.bad, 0.10)).child(format!("- {s}"))
-                        }
-                    });
-                }
-                let verb = if p.action == HookAction::Install { "Will change" } else { "Will remove our hooks from" };
-                pane = pane
-                    .child(
-                        div()
-                            .text_size(px(11.5))
-                            .text_color(t.mute)
-                            .child(format!("{verb} {}", tilde(&plan.path.display().to_string(), &self.paths.home))),
-                    )
-                    .child(block);
-            }
-            let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
             let n = p.plans.len();
+            let title = match (p.action, n) {
+                (HookAction::Install, 1) => "Review the change to 1 file".to_string(),
+                (HookAction::Install, n) => format!("Review the changes to {n} files"),
+                (HookAction::Remove, _) => "Review the removal".to_string(),
+            };
+            let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
+            let apply = match p.action {
+                HookAction::Install => "Save changes",
+                HookAction::Remove => "Remove hooks",
+            };
             pane = pane.child(
                 div()
                     .flex()
+                    .items_center()
                     .gap(px(8.))
-                    .child(button(
-                        t,
-                        "apply-hooks",
-                        format!("Write {n} settings.json{} (keeps a .bak)", if n == 1 { "" } else { " files" }),
-                        ButtonKind::Primary,
-                        true,
-                        move |_, _, cx| {
-                            let _ = me1.update(cx, |v, cx| {
-                                v.apply_hooks();
-                                cx.notify();
-                            });
-                        },
-                    ))
+                    .pt(px(6.))
+                    .child(div().flex_1().child(subheading(t, title)))
+                    .child(button(t, "apply-hooks", apply, ButtonKind::Primary, true, move |_, _, cx| {
+                        let _ = me1.update(cx, |v, cx| {
+                            v.apply_hooks();
+                            cx.notify();
+                        });
+                    }))
                     .child(button(t, "cancel-hooks", "Cancel", ButtonKind::Normal, true, move |_, _, cx| {
                         let _ = me2.update(cx, |v, cx| {
                             v.preview = None;
@@ -736,30 +741,73 @@ impl SettingsView {
                         });
                     })),
             );
+            pane =
+                pane.child(caption(t, "Nothing is written until you save. The old file is kept as settings.json.bak."));
+            for plan in &p.plans {
+                // Diff what changes, not how the file was formatted: compare
+                // against the old file pretty-printed the way it will be saved.
+                let before = plan.before.as_deref().unwrap_or("");
+                let pretty_before = serde_json::from_str::<serde_json::Value>(before)
+                    .ok()
+                    .and_then(|v| serde_json::to_string_pretty(&v).ok())
+                    .map(|s| s + "\n");
+                let reformatted = pretty_before.as_deref().is_some_and(|p| p.trim() != before.trim());
+                let diff = with_context(line_diff(pretty_before.as_deref().unwrap_or(before), &plan.after), 2);
+                let mut block = div()
+                    .flex()
+                    .flex_col()
+                    .py(px(10.))
+                    .rounded(px(R_S))
+                    .bg(t.bg)
+                    .border_1()
+                    .border_color(t.line)
+                    .font_family(FONT_MONO)
+                    .text_size(px(12.))
+                    .line_height(px(18.));
+                for l in diff {
+                    let (sign, text, fg, bg) = match l {
+                        DiffLine::Same(s) => (" ", s, t.mute, None),
+                        DiffLine::Added(s) => ("+", s, t.ok, Some(with_alpha(t.ok, 0.10))),
+                        DiffLine::Removed(s) => ("-", s, t.bad, Some(with_alpha(t.bad, 0.10))),
+                    };
+                    block = block.child(
+                        div()
+                            .flex()
+                            .px(px(12.))
+                            .text_color(fg)
+                            .when_some(bg, |d, bg| d.bg(bg))
+                            .child(div().w(px(16.)).flex_shrink_0().child(sign))
+                            .child(div().flex_1().min_w_0().child(text)),
+                    );
+                }
+                let file = tilde(&plan.path.display().to_string(), &self.paths.home);
+                let what = match (plan.before.is_none(), reformatted) {
+                    (true, _) => format!("{file} (new file)"),
+                    (false, true) => format!("{file} (also re-indented)"),
+                    (false, false) => file,
+                };
+                pane = pane.child(div().flex().flex_col().gap(px(6.)).child(caption(t, what)).child(block));
+            }
         } else {
-            let missing: Vec<PathBuf> =
-                self.hooks.iter().filter(|h| h.status != HookStatus::Installed).map(|h| h.dir.clone()).collect();
+            let pending: Vec<PathBuf> =
+                self.hooks.iter().filter(|h| h.status.needs_install()).map(|h| h.dir.clone()).collect();
+            let any_old = self.hooks.iter().any(|h| h.status.needs_install() && h.status != HookStatus::Missing);
             let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
-            let n = missing.len();
+            let n = pending.len();
+            let accounts = if n == 1 { "1 account".to_string() } else { format!("{n} accounts") };
+            let label = if any_old { format!("Update {accounts}") } else { format!("Install in {accounts}") };
             pane = pane.child(
                 div()
                     .flex()
                     .gap(px(8.))
                     .when(n > 0, |d| {
-                        d.child(button(
-                            t,
-                            "install-all",
-                            format!("Install in {n} account{}", if n == 1 { "" } else { "s" }),
-                            ButtonKind::Primary,
-                            true,
-                            move |_, _, cx| {
-                                let missing = missing.clone();
-                                let _ = me1.update(cx, |v, cx| {
-                                    v.plan_hooks(HookAction::Install, missing);
-                                    cx.notify();
-                                });
-                            },
-                        ))
+                        d.child(button(t, "install-all", label, ButtonKind::Primary, true, move |_, _, cx| {
+                            let pending = pending.clone();
+                            let _ = me1.update(cx, |v, cx| {
+                                v.plan_hooks(HookAction::Install, pending);
+                                cx.notify();
+                            });
+                        }))
                     })
                     .child(button(t, "test-alert", "Send a test alert", ButtonKind::Normal, true, move |_, _, cx| {
                         let _ = me2.update(cx, |v, cx| {
@@ -770,8 +818,7 @@ impl SettingsView {
             );
         }
         if let Some((tone, m)) = &self.hook_msg {
-            pane =
-                pane.child(div().text_size(px(13.)).text_color(super::widgets::tone_color(t, *tone)).child(m.clone()));
+            pane = pane.child(notice(t, *tone, m.clone()));
         }
         pane
     }
@@ -787,7 +834,7 @@ impl SettingsView {
             .child(field(
                 t,
                 "Beep when Claude needs you",
-                "Off by default. Plays on boards with a speaker. The tray can mute it for a while.",
+                "Plays on boards with a speaker. You can mute it from the tray.",
                 toggle(t, "beep", beep, true, move |_, _, cx| {
                     let _ = me1.update(cx, |v, cx| {
                         v.save(|s, _| s.beep = !beep);
@@ -815,7 +862,7 @@ impl SettingsView {
         let mut pane = div().flex().flex_col().gap(px(6.)).child(heading(t, "Background")).child(field(
             t,
             "Start at login",
-            "Windows: Run key · macOS: LaunchAgent · Linux: XDG autostart entry.",
+            "Starts Clawdmeter in the tray when you log in.",
             toggle(t, "autostart", on, true, move |_, _, cx| {
                 let home = home.clone();
                 let _ = me.update(cx, |v, cx| {
@@ -825,7 +872,8 @@ impl SettingsView {
                         Err(e) => Err(e),
                     };
                     if let Err(e) = r {
-                        v.notice = Some((Tone::Bad, format!("Start at login: {e}")));
+                        v.notice =
+                            Some((Tone::Bad, format!("Couldn't change Start at login. {}", errors::io_message(&e))));
                     }
                     v.reload();
                     cx.notify();
@@ -854,8 +902,8 @@ impl SettingsView {
         pane = pane.child(field(
             t,
             "Usage checks",
-            "Automatic: every 60 s while you're working, every 15 min otherwise, using claude /usage. Nothing is sent \
-             to the model, so checks never start a window. Without the hooks: every 2 min.",
+            "Automatic checks every minute while you work and every 15 minutes otherwise (every 2 minutes without \
+             hooks). Checks never start a session window.",
             segmented(t, "poll", &options, &poll, true, move |c, _, cx| {
                 let _ = me.update(cx, |v, cx| {
                     let paths = v.paths.clone();
@@ -879,8 +927,8 @@ impl SettingsView {
         let me = cx.entity().downgrade();
         pane = pane.child(field(
             t,
-            "Keep-alive every",
-            "Resends the last numbers so the device doesn't go stale between checks.",
+            "Keep-alive",
+            "Resends the last numbers so the device doesn't mark them stale between checks.",
             segmented(t, "hb", &[(60u64, "60 s"), (30u64, "30 s")], &hb, true, move |n, _, cx| {
                 let _ = me.update(cx, |v, cx| {
                     v.save(|s, _| s.heartbeat_interval = n);
@@ -893,16 +941,16 @@ impl SettingsView {
             t,
             "Claude Code CLI",
             match &claude {
-                Some(c) => format!("Using {c}"),
+                Some(c) => format!("Using {}", tilde(c, &self.paths.home)),
                 None if self.snap.is_some() => "Not found. Set claude_path in the config file.".into(),
-                None => "Shown while the tray app is running.".into(),
+                None => "Shown while Clawdmeter is running.".into(),
             },
             div(),
         ));
         let log = self.paths.state_dir.join("daemon.log");
         pane = pane.child(field(
             t,
-            "Daemon log",
+            "Log file",
             tilde(&log.display().to_string(), &self.paths.home),
             button(t, "open-log", "Open", ButtonKind::Small, log.exists(), move |_, _, cx| cx.open_with_system(&log)),
         ));
@@ -918,10 +966,10 @@ impl SettingsView {
             let home = self.paths.home.clone();
             pane = pane.child(field(
                 t,
-                "The old daemon is still installed",
+                "The old background service is still installed",
                 format!(
-                    "{} also drives the device and will fight this app for it.",
-                    tilde(&legacy.display().to_string(), &self.paths.home)
+                    "{} talks to the device too, and the two will fight over it.",
+                    tilde(&legacy.describe(), &self.paths.home)
                 ),
                 button(t, "legacy", "Turn it off", ButtonKind::Primary, true, move |_, _, cx| {
                     autostart::disable_legacy(&home);
@@ -945,7 +993,7 @@ fn with_alpha(c: gpui::Rgba, a: f32) -> gpui::Hsla {
 impl Render for SettingsView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = Theme::for_appearance(window.appearance());
-        let pending_hooks = self.hooks.iter().filter(|h| h.status != HookStatus::Installed).count();
+        let pending_hooks = self.hooks.iter().filter(|h| h.status.needs_install()).count();
         let mut tabs = div()
             .flex()
             .flex_col()
@@ -961,6 +1009,7 @@ impl Render for SettingsView {
             tabs = tabs.child(
                 div()
                     .id(label)
+                    .debug_selector(|| format!("tab-{label}"))
                     .flex()
                     .items_center()
                     .justify_between()
@@ -991,6 +1040,12 @@ impl Render for SettingsView {
                     }),
             );
         }
+        tabs =
+            tabs.child(div().flex_1()).child(
+                div().flex().items_center().gap(px(10.)).px(px(12.)).pb(px(4.)).child(super::widgets::clawd(1.)).child(
+                    div().text_size(px(12.)).text_color(t.mute).child(format!("Clawdmeter {}", crate::version())),
+                ),
+            );
         let pane = match self.tab {
             Tab::Device => self.device_pane(&t, cx),
             Tab::Accounts => self.accounts_pane(&t, cx),
@@ -1004,5 +1059,75 @@ impl Render for SettingsView {
         }
         let body = div().size_full().flex().bg(t.surface).child(tabs.bg(t.bg)).child(content);
         chrome(&t, "Clawdmeter settings", window, body)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use gpui::{Modifiers, TestAppContext, VisualTestContext};
+
+    use super::*;
+
+    fn home(tag: &str) -> Paths {
+        let root = std::env::temp_dir().join(format!("cm-settings-{tag}-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let paths = Paths::under(&root);
+        std::fs::create_dir_all(&paths.state_dir).unwrap();
+        std::fs::create_dir_all(root.join("acct")).unwrap();
+        std::fs::write(&paths.config_file, format!("# mine\nconfig_dirs = {}\n", root.join("acct").display())).unwrap();
+        paths
+    }
+
+    fn click(cx: &mut VisualTestContext, selector: &'static str) {
+        cx.run_until_parked();
+        let b = cx.debug_bounds(selector).unwrap_or_else(|| panic!("{selector} isn't on screen"));
+        cx.simulate_click(b.center(), Modifiers::none());
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn toggles_and_choices_write_the_config(cx: &mut TestAppContext) {
+        let paths = home("cfg");
+        let p = paths.clone();
+        let (_view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Some("alerts"), false, cx));
+        click(cx, "chime");
+        let text = std::fs::read_to_string(&paths.config_file).unwrap();
+        assert!(text.starts_with("# mine\n"), "comments kept: {text}");
+        assert!(text.contains("chime = on"), "{text}");
+
+        click(cx, "tab-Background");
+        click(cx, "poll-2"); // Every 5 min
+        let text = std::fs::read_to_string(&paths.config_file).unwrap();
+        assert!(text.contains("poll_interval = 300"), "{text}");
+        click(cx, "poll-0"); // Automatic removes the key again.
+        assert!(!std::fs::read_to_string(&paths.config_file).unwrap().contains("poll_interval"));
+        let _ = std::fs::remove_dir_all(&paths.home);
+    }
+
+    #[gpui::test]
+    fn hooks_install_after_preview(cx: &mut TestAppContext) {
+        let paths = home("hooks");
+        let settings = paths.home.join("acct/settings.json");
+        let before = r#"{"hooks":{"Stop":[{"hooks":[{"type":"command","command":"/old/attention-hook.sh event"}]}]}}"#;
+        std::fs::write(&settings, before).unwrap();
+        let p = paths.clone();
+        let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Some("hooks"), false, cx));
+        view.read_with(cx, |v, _| assert_eq!(v.hooks[0].status, HookStatus::Legacy));
+
+        click(cx, "install-all");
+        // Nothing is written until the preview is confirmed.
+        assert_eq!(std::fs::read_to_string(&settings).unwrap(), before);
+        view.read_with(cx, |v, _| assert!(v.preview.is_some()));
+        click(cx, "apply-hooks");
+
+        let after = std::fs::read_to_string(&settings).unwrap();
+        assert!(!after.contains("attention-hook.sh"), "{after}");
+        assert!(after.contains(" hook clear event"), "{after}");
+        assert_eq!(std::fs::read_to_string(settings.with_extension("json.bak")).unwrap(), before);
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.hooks[0].status, HookStatus::Installed);
+            assert!(v.preview.is_none());
+        });
+        let _ = std::fs::remove_dir_all(&paths.home);
     }
 }

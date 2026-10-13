@@ -14,15 +14,17 @@ type Handler = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 /// Button look.
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum ButtonKind {
-    /// Accent fill: the one action that moves things forward.
+    /// Accent fill: the one action that moves things forward. At most one
+    /// per view.
     Primary,
     /// Hairline outline.
     Normal,
-    /// Hairline outline, compact.
+    /// Hairline outline, compact (row actions).
     Small,
 }
 
-/// A pill-shaped button.
+/// A pill-shaped button. Disabled buttons are flat and grey whatever their
+/// kind, so a disabled primary never reads as a dimmed-but-clickable one.
 pub fn button(
     t: &Theme,
     id: impl Into<ElementId>,
@@ -31,23 +33,27 @@ pub fn button(
     enabled: bool,
     on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
 ) -> impl IntoElement {
-    let (bg, fg, border) = match kind {
-        ButtonKind::Primary => (t.accent, t.accent_ink, t.accent),
-        _ => (t.surface, t.text, t.line),
+    let (bg, fg, border) = match (kind, enabled) {
+        (_, false) => (t.panel, t.mute, t.panel),
+        (ButtonKind::Primary, true) => (t.accent, t.accent_ink, t.accent),
+        (_, true) => (t.surface, t.text, t.line),
     };
     let hover_bg = match kind {
         ButtonKind::Primary => t.focus,
         _ => t.panel,
     };
-    let (pad_x, pad_y, size) = if kind == ButtonKind::Small { (12., 4., 13.) } else { (16., 7., 14.) };
+    let (pad_x, h, size) = if kind == ButtonKind::Small { (12., 28., 13.) } else { (16., 34., 14.) };
+    let id: ElementId = id.into();
+    let selector = id.to_string();
     let el = div()
-        .id(id.into())
+        .id(id)
+        .debug_selector(|| selector)
         .flex()
         .flex_shrink_0()
         .items_center()
         .justify_center()
+        .h(px(h))
         .px(px(pad_x))
-        .py(px(pad_y))
         .rounded(px(R_PILL))
         .border_1()
         .border_color(border)
@@ -60,12 +66,90 @@ pub fn button(
         let handler: Handler = Box::new(on_click);
         el.cursor_pointer().hover(move |s| s.bg(hover_bg)).on_click(move |e, w, cx| handler(e, w, cx))
     } else {
-        el.opacity(0.45)
+        el
     }
 }
 
+/// A full-width row in a menu-style list: label on the left, an optional
+/// quiet hint on the right.
+pub fn menu_row(
+    t: &Theme,
+    id: impl Into<ElementId>,
+    label: impl Into<SharedString>,
+    hint: Option<SharedString>,
+    enabled: bool,
+    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
+) -> impl IntoElement {
+    let id: ElementId = id.into();
+    let selector = id.to_string();
+    let el = div()
+        .id(id)
+        .debug_selector(|| selector)
+        .flex()
+        .items_center()
+        .justify_between()
+        .gap(px(12.))
+        .h(px(34.))
+        .px(px(10.))
+        .rounded(px(R_S))
+        .text_size(px(14.))
+        .text_color(if enabled { t.text } else { t.mute })
+        .child(label.into())
+        .when_some(hint, |d, h| d.child(div().text_size(px(12.5)).text_color(t.mute).child(h)));
+    if enabled {
+        let handler: Handler = Box::new(on_click);
+        el.cursor_pointer().hover(|s| s.bg(t.panel)).on_click(move |e, w, cx| handler(e, w, cx))
+    } else {
+        el
+    }
+}
+
+/// A message box: tone-coloured edge and dot, body text in the normal
+/// colour so it stays readable, optional actions underneath.
+pub fn notice(t: &Theme, tone: Tone, text: impl Into<SharedString>) -> gpui::Div {
+    let c = tone_color(t, tone);
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(10.))
+        .px(px(14.))
+        .py(px(12.))
+        .rounded(px(R_M))
+        .bg(tint(c, 0.08))
+        .border_1()
+        .border_color(tint(c, 0.45))
+        .child(div().flex().items_start().gap(px(10.)).child(div().mt(px(6.)).child(dot(t, tone))).child(
+            div().flex_1().min_w_0().text_size(px(13.)).line_height(px(19.)).text_color(t.text).child(text.into()),
+        ))
+}
+
+/// Small uppercase-free caption above a block (diffs, logs).
+pub fn caption(t: &Theme, text: impl Into<SharedString>) -> impl IntoElement {
+    div().text_size(px(12.)).text_color(t.mute).child(text.into())
+}
+
+/// The device's bar colour for a usage percentage: green below 50 %,
+/// accent (the device's amber) below 80 %, red from 80 %.
+pub fn usage_tone(pct: u32) -> Tone {
+    match pct {
+        0..50 => Tone::Ok,
+        50..80 => Tone::Accent,
+        _ => Tone::Bad,
+    }
+}
+
+/// A rounded progress bar, `frac` 0..1.
+pub fn bar(t: &Theme, frac: f32, color: Rgba) -> impl IntoElement {
+    div()
+        .h(px(8.))
+        .w_full()
+        .rounded(px(R_PILL))
+        .bg(t.track)
+        .child(div().h_full().w(gpui::relative(frac.clamp(0., 1.))).rounded(px(R_PILL)).bg(color))
+}
+
 /// Semantic tone for pills and dots.
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
     /// Neutral.
     Plain,
@@ -130,8 +214,11 @@ pub fn toggle(
 ) -> impl IntoElement {
     let track = if on { t.accent } else { t.track };
     let knob = if on { t.accent_ink } else { t.dim };
+    let id: ElementId = id.into();
+    let selector = id.to_string();
     let el = div()
-        .id(id.into())
+        .id(id)
+        .debug_selector(|| selector)
         .flex()
         .flex_shrink_0()
         .items_center()
@@ -146,7 +233,7 @@ pub fn toggle(
         let handler: Handler = Box::new(on_click);
         el.cursor_pointer().on_click(move |e, w, cx| handler(e, w, cx))
     } else {
-        el.opacity(0.45)
+        el.opacity(0.5)
     }
 }
 
@@ -167,21 +254,23 @@ pub fn segmented<V: Clone + PartialEq + 'static>(
         let cb = on_select.clone();
         let mut seg = div()
             .id(SharedString::from(format!("{id}-{i}")))
+            .debug_selector(|| format!("{id}-{i}"))
             .px(px(10.))
             .py(px(4.))
             .rounded(px(R_S))
             .text_size(px(13.))
             .whitespace_nowrap()
-            .text_color(if on { t.text } else { t.dim })
-            .when(on, |d| d.bg(t.surface))
+            .text_color(match (enabled, on) {
+                (false, _) => t.mute,
+                (true, true) => t.text,
+                (true, false) => t.dim,
+            })
+            .when(on, |d| d.bg(if enabled { t.surface } else { t.panel }))
             .child(SharedString::from(label.to_string()));
         if enabled && !on {
-            seg = seg.cursor_pointer().on_click(move |_, w, cx| cb(v.clone(), w, cx));
+            seg = seg.cursor_pointer().hover(|s| s.text_color(t.text)).on_click(move |_, w, cx| cb(v.clone(), w, cx));
         }
         row = row.child(seg);
-    }
-    if !enabled {
-        row = row.opacity(0.45);
     }
     row
 }
@@ -218,6 +307,11 @@ pub fn heading(t: &Theme, text: impl Into<SharedString>) -> impl IntoElement {
     div().font_family(FONT_DISPLAY).text_size(px(20.)).text_color(t.text).child(text.into())
 }
 
+/// A heading inside a pane.
+pub fn subheading(t: &Theme, text: impl Into<SharedString>) -> impl IntoElement {
+    div().text_size(px(15.)).text_color(t.text).child(text.into())
+}
+
 /// Secondary paragraph text.
 pub fn para(t: &Theme, text: impl Into<SharedString>) -> impl IntoElement {
     div().text_size(px(13.5)).line_height(px(20.)).text_color(t.dim).child(text.into())
@@ -234,15 +328,16 @@ pub fn card(t: &Theme) -> gpui::Div {
 }
 
 /// Key/value rows (`dl`).
+/// Values that don't fit are cut with an ellipsis (paths, addresses).
 pub fn kv(t: &Theme, rows: Vec<(&'static str, SharedString)>) -> impl IntoElement {
-    let mut d = div().flex().flex_col().gap(px(6.)).flex_1();
+    let mut d = div().flex().flex_col().gap(px(6.)).flex_1().min_w_0();
     for (k, v) in rows {
         d = d.child(
             div()
                 .flex()
                 .gap(px(12.))
                 .child(div().w(px(76.)).flex_shrink_0().text_size(px(13.)).text_color(t.mute).child(k))
-                .child(div().flex_1().text_size(px(13.)).text_color(t.text).child(v)),
+                .child(div().flex_1().min_w_0().truncate().text_size(px(13.)).text_color(t.text).child(v)),
         );
     }
     d
@@ -288,4 +383,20 @@ pub fn board_thumb(t: &Theme, panel: (f32, f32), box_px: f32) -> impl IntoElemen
                 .child(clawd(if w.min(h) >= 60. { 2. } else { 1. })),
         ),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn usage_colours_follow_the_device() {
+        // firmware/src/ui.cpp pct_color(): <50 green, <80 amber, else red.
+        assert_eq!(usage_tone(0), Tone::Ok);
+        assert_eq!(usage_tone(49), Tone::Ok);
+        assert_eq!(usage_tone(50), Tone::Accent);
+        assert_eq!(usage_tone(79), Tone::Accent);
+        assert_eq!(usage_tone(80), Tone::Bad);
+        assert_eq!(usage_tone(100), Tone::Bad);
+    }
 }

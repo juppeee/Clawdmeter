@@ -2,18 +2,31 @@
 //!
 //! The CLI answers locally (`"local_command": "usage"`, zero tokens), so
 //! polling it never sends a message or starts a window. The numbers live in
-//! human-readable lines of the `result` text:
+//! human-readable lines of the `result` text. A subscription account
+//! (Pro / Max / Team / seat-based Enterprise) prints:
 //!
 //! ```text
+//! You are currently using your subscription to power your Claude Code usage
+//!
 //! Current session: 15% used · resets Oct 13, 7am (Atlantic/Reykjavik)
 //! Current week (all models): 6% used · resets Oct 18, 10pm (Atlantic/Reykjavik)
 //! Current week (Fable): 0% used · resets Oct 18, 10pm (Atlantic/Reykjavik)
 //! ```
 //!
-//! Reset times are local wall-clock text with an IANA zone and no year; the
-//! parser takes the next occurrence. A missing session line (or one with no
-//! reset) means the 5-hour window hasn't started. A text with neither a
-//! session nor a week line is a parse failure, never a zero.
+//! The first line says "using your overages" instead while extra usage is
+//! paying for requests. An account billed against a spend limit (the old
+//! daemons' "enterprise" header path) prints one of:
+//!
+//! ```text
+//! Spend limit: $41.20 / $200.00 spent this month (21%) · resets Nov 1, 12am (UTC)
+//! Spend limit: 21% used · resets Nov 1, 12am (UTC)
+//! ```
+//!
+//! Reset times are local wall-clock text with an IANA zone; the year is only
+//! printed when it differs from the current one, otherwise the parser takes
+//! the next occurrence. A missing session line (or one with no reset) means
+//! the 5-hour window hasn't started. A text with no session, week or spend
+//! line is a parse failure, never a zero.
 
 use std::io::Read;
 use std::path::{Path, PathBuf};
@@ -32,6 +45,29 @@ pub struct Window {
     pub resets_at: Option<DateTime<Utc>>,
 }
 
+/// The period a spend limit covers (`spent today / this week / this month`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpendPeriod {
+    /// `today`.
+    Daily,
+    /// `this week`.
+    Weekly,
+    /// `this month` (also assumed when the line names no period, like the
+    /// old daemons: the enterprise spend-limit period is monthly today).
+    Monthly,
+}
+
+/// A `Spend limit:` line: an account billed against a spending cap.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Spend {
+    /// Percent of the limit spent, rounded. Can exceed 100.
+    pub pct: u32,
+    /// When the period resets.
+    pub resets_at: Option<DateTime<Utc>>,
+    /// The period the limit covers, when the line names one.
+    pub period: Option<SpendPeriod>,
+}
+
 /// Everything `/usage` told us for one account.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct UsageReading {
@@ -41,17 +77,42 @@ pub struct UsageReading {
     pub week: Option<Window>,
     /// `Current week (<model>)` lines, in order. Not sent to the device yet.
     pub models: Vec<(String, Window)>,
+    /// `Spend limit:` (spend-capped accounts, sent as the enterprise view).
+    pub spend: Option<Spend>,
+    /// The CLI says extra usage ("overages") is paying for requests.
+    pub overage: bool,
 }
 
 impl UsageReading {
-    /// Session % used, 0 when the window hasn't started.
+    /// The device's main meter (`s`): session % used (0 when the window
+    /// hasn't started), or the spend % for a spend-capped account.
     pub fn session_pct(&self) -> u32 {
-        self.session.as_ref().map_or(0, |w| w.pct)
+        match (&self.session, &self.spend) {
+            (Some(w), _) => w.pct,
+            (None, Some(sp)) if self.week.is_none() => sp.pct,
+            _ => 0,
+        }
     }
 
     /// True when a 5-hour window is running (a session line with a reset).
     pub fn window_started(&self) -> bool {
         self.session.as_ref().is_some_and(|w| w.resets_at.is_some())
+    }
+
+    /// A spend-capped account with no session/week windows: the device shows
+    /// it in its enterprise layout (spend % and billing period).
+    pub fn is_spend_only(&self) -> bool {
+        self.session.is_none() && self.week.is_none() && self.spend.is_some()
+    }
+
+    /// A window (or the spend cap) is used up and extra usage isn't covering
+    /// it: the old daemons' `rejected` status.
+    pub fn limited(&self) -> bool {
+        if self.overage {
+            return false;
+        }
+        let full = |w: &Option<Window>| w.as_ref().is_some_and(|w| w.pct >= 100);
+        full(&self.session) || full(&self.week) || self.spend.as_ref().is_some_and(|s| s.pct >= 100)
     }
 }
 
@@ -137,10 +198,20 @@ fn classify_auth(text: &str) -> Option<UsageError> {
 
 /// Parse the human-readable `/usage` text.
 pub fn parse_usage_text(text: &str, now: DateTime<Utc>) -> Result<UsageReading, UsageError> {
-    let mut r = UsageReading::default();
+    let mut r = UsageReading { overage: text.contains("using your overages"), ..Default::default() };
     let mut matched = false;
     for raw in text.lines() {
         let line = raw.trim();
+        if let Some(body) = line.strip_prefix("Spend limit:") {
+            match parse_spend(body, now) {
+                Some(sp) => {
+                    r.spend = Some(sp);
+                    matched = true;
+                }
+                None => log::warn!("/usage line stopped matching: {line:?}"),
+            }
+            continue;
+        }
         let Some(rest) = line.strip_prefix("Current ") else { continue };
         let Some((label, body)) = rest.split_once(':') else { continue };
         let Some(window) = parse_window(body, now) else {
@@ -175,6 +246,37 @@ pub fn parse_usage_text(text: &str, now: DateTime<Utc>) -> Result<UsageReading, 
     }
 }
 
+/// `" $41.20 / $200.00 spent this month (21%) · resets Nov 1, 12am (UTC)"` or
+/// `" 21% used · resets Nov 1, 12am (UTC)"` → Spend.
+fn parse_spend(body: &str, now: DateTime<Utc>) -> Option<Spend> {
+    let (head, reset) = match body.find("resets") {
+        Some(i) => (&body[..i], Some(body[i + "resets".len()..].trim())),
+        None => (body, None),
+    };
+    let head = head.trim().trim_end_matches('·').trim();
+    let pct_text = if let Some(used) = head.strip_suffix("used") {
+        used.trim().strip_suffix('%')?
+    } else {
+        // "... spent this month (21%)": the last parenthesised percentage.
+        let open = head.rfind('(')?;
+        head[open + 1..].trim_end_matches(')').trim().strip_suffix('%')?
+    };
+    let pct: f64 = pct_text.trim().parse().ok()?;
+    if !pct.is_finite() || pct < 0.0 {
+        return None;
+    }
+    let period = if head.contains("spent today") {
+        Some(SpendPeriod::Daily)
+    } else if head.contains("spent this week") {
+        Some(SpendPeriod::Weekly)
+    } else if head.contains("spent this month") {
+        Some(SpendPeriod::Monthly)
+    } else {
+        None
+    };
+    Some(Spend { pct: pct.round().min(9999.0) as u32, resets_at: reset.and_then(|t| parse_reset(t, now)), period })
+}
+
 /// `" 15% used · resets Oct 13, 7am (Atlantic/Reykjavik)"` → Window.
 fn parse_window(body: &str, now: DateTime<Utc>) -> Option<Window> {
     let pct_end = body.find('%')?;
@@ -190,10 +292,11 @@ fn parse_window(body: &str, now: DateTime<Utc>) -> Option<Window> {
 const MONTHS: [&str; 12] = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
 
 /// Parse reset text such as `Oct 13, 9:59am (Atlantic/Reykjavik)`,
-/// `Oct 13 at 7 PM (Europe/Berlin)`, `10pm (UTC)` or `Oct 13, 19:00 (UTC)`.
-/// No year: the next occurrence after `now` wins (a reset that passed less
-/// than an hour ago is kept, so a lagging CLI reads as "resets in 0m").
-/// Without a zone the machine's local zone is used.
+/// `Oct 13 at 7 PM (Europe/Berlin)`, `10pm (UTC)`, `Oct 13, 19:00 (UTC)` or
+/// `Jan 2, 2027, 9:59pm (UTC)` (the CLI adds the year only when it isn't the
+/// current one). With no year the next occurrence after `now` wins (a reset
+/// that passed less than an hour ago is kept, so a lagging CLI reads as
+/// "resets in 0m"). Without a zone the machine's local zone is used.
 pub fn parse_reset(text: &str, now: DateTime<Utc>) -> Option<DateTime<Utc>> {
     let text = text.trim();
     let (when, zone) = match (text.rfind('('), text.rfind(')')) {
@@ -220,7 +323,7 @@ fn parse_reset_parts(
 ) -> Option<DateTime<Utc>> {
     let time = parse_time(time_part)?;
     let md = match date_part {
-        Some(d) if !d.is_empty() => Some(parse_month_day(d)?),
+        Some(d) if !d.is_empty() => Some(parse_date(d)?),
         _ => None,
     };
     match zone {
@@ -230,6 +333,27 @@ fn parse_reset_parts(
         }
         None => next_occurrence(&chrono::Local, md, time, now),
     }
+}
+
+/// `Oct 13` / `October 13` / `13 Oct`, optionally followed by `, 2027`.
+fn parse_date(s: &str) -> Option<MonthDay> {
+    if let Some((md, year)) = s.rsplit_once(',') {
+        let year = year.trim();
+        if year.len() == 4 && year.bytes().all(|b| b.is_ascii_digit()) {
+            let (m, d) = parse_month_day(md.trim())?;
+            return Some(MonthDay { month: m, day: d, year: year.parse().ok() });
+        }
+    }
+    let (m, d) = parse_month_day(s)?;
+    Some(MonthDay { month: m, day: d, year: None })
+}
+
+/// A reset date: month, day and (when the CLI printed one) the year.
+#[derive(Debug, Clone, Copy)]
+struct MonthDay {
+    month: u32,
+    day: u32,
+    year: Option<i32>,
 }
 
 /// `Oct 13` / `October 13` / `13 Oct`.
@@ -296,7 +420,7 @@ const PAST_GRACE_MINUTES: i64 = 60;
 
 fn next_occurrence<Z: TimeZone>(
     tz: &Z,
-    md: Option<(u32, u32)>,
+    md: Option<MonthDay>,
     time: NaiveTime,
     now: DateTime<Utc>,
 ) -> Option<DateTime<Utc>> {
@@ -312,9 +436,13 @@ fn next_occurrence<Z: TimeZone>(
         Some(local.with_timezone(&Utc))
     };
     let candidates: Vec<NaiveDate> = match md {
-        Some((m, d)) => {
-            (local_now.year() - 1..=local_now.year() + 1).filter_map(|y| NaiveDate::from_ymd_opt(y, m, d)).collect()
+        // An explicit year is taken as printed, past or not.
+        Some(MonthDay { month, day, year: Some(y) }) => {
+            return NaiveDate::from_ymd_opt(y, month, day).and_then(&resolve);
         }
+        Some(MonthDay { month, day, year: None }) => (local_now.year() - 1..=local_now.year() + 1)
+            .filter_map(|y| NaiveDate::from_ymd_opt(y, month, day))
+            .collect(),
         None => {
             let today = local_now.date();
             vec![today - ChronoDuration::days(1), today, today + ChronoDuration::days(1)]
@@ -532,6 +660,55 @@ mod tests {
         assert_eq!(parse_reset("someday", now), None);
         assert_eq!(parse_reset("Oct 13, 13pm (UTC)", now), None);
         assert_eq!(parse_reset("Feb 30, 1am (UTC)", now), None);
+    }
+
+    #[test]
+    fn reset_with_explicit_year() {
+        // The CLI prints the year only when it isn't the current one.
+        let now = at("2026-12-30T12:00:00Z");
+        assert_eq!(parse_reset("Jan 2, 2027, 9:59pm (UTC)", now), Some(at("2027-01-02T21:59:00Z")));
+        assert_eq!(parse_reset("Jan 2, 2027, 3am (Asia/Tokyo)", now), Some(at("2027-01-01T18:00:00Z")));
+        // Taken as printed even when it lies in the past.
+        assert_eq!(parse_reset("Dec 1, 2025, 1am (UTC)", now), Some(at("2025-12-01T01:00:00Z")));
+        assert_eq!(parse_reset("Jan 2, 27, 1am (UTC)", now), None);
+    }
+
+    // The enterprise path of the old daemons read the overage-utilization
+    // header; /usage reports a spend cap as a "Spend limit:" line.
+    #[test]
+    fn spend_limit_lines() {
+        let now = at("2026-10-13T05:40:00Z");
+        let r =
+            parse_usage_text("Spend limit: $41.20 / $200.00 spent this month (21%) · resets Nov 1, 12am (UTC)", now)
+                .unwrap();
+        assert!(r.is_spend_only());
+        assert_eq!(
+            r.spend,
+            Some(Spend { pct: 21, resets_at: Some(at("2026-11-01T00:00:00Z")), period: Some(SpendPeriod::Monthly) })
+        );
+        let r = parse_usage_text("Spend limit: 104% used · resets Nov 1, 12am (UTC)", now).unwrap();
+        assert_eq!(r.spend.as_ref().map(|s| (s.pct, s.period)), Some((104, None)));
+        assert!(r.limited());
+        let r = parse_usage_text("Spend limit: €3,00 / €10,00 spent today (30%)", now).unwrap();
+        assert_eq!(r.spend, Some(Spend { pct: 30, resets_at: None, period: Some(SpendPeriod::Daily) }));
+        let r =
+            parse_usage_text("Spend limit: $1 / $10 spent this week (10%) · resets Oct 19, 12am (UTC)", now).unwrap();
+        assert_eq!(r.spend.unwrap().period, Some(SpendPeriod::Weekly));
+        assert!(matches!(parse_usage_text("Spend limit: lots", now), Err(UsageError::NoUsageLines(_))));
+    }
+
+    #[test]
+    fn overage_and_limited() {
+        let now = at("2026-10-13T05:40:00Z");
+        let full = "Current session: 100% used · resets Oct 13, 7am (UTC)\nCurrent week (all models): 3% used";
+        let r = parse_usage_text(full, now).unwrap();
+        assert!(!r.overage);
+        assert!(r.limited());
+        let r = parse_usage_text(&format!("You are currently using your overages to power it\n\n{full}"), now).unwrap();
+        assert!(r.overage);
+        assert!(!r.limited(), "extra usage is covering the requests");
+        let week_full = "Current session: 3% used\nCurrent week (all models): 100% used · resets Oct 18, 10pm (UTC)";
+        assert!(parse_usage_text(week_full, now).unwrap().limited());
     }
 
     #[test]

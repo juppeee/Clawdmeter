@@ -57,7 +57,7 @@
  },
  "safety_stops": 0,
  "subtype": "success",
- "result": "Monthly spend: $41.20 of $200.00 limit · resets Nov 1\n",
+ "result": "\u001b[2mTotal cost:            $0.0000\nTotal duration (API):  0s\nTotal duration (wall): 1s\nTotal code changes:    0 lines added, 0 lines removed\u001b[22m\n\nSpend limit: $41.20 / $200.00 spent this month (21%) · resets Nov 1, 12am (UTC)",
  "local_command": "usage",
  "type": "result",
  "duration_ms": 276,

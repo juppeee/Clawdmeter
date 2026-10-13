@@ -363,6 +363,10 @@ pub fn once(paths: &Paths) -> i32 {
     let mut ok = false;
     for (d, r) in &results {
         match r {
+            Ok(r) if r.is_spend_only() => {
+                ok = true;
+                println!("{}: spend limit {}% used", d.display(), r.session_pct());
+            }
             Ok(r) => {
                 ok = true;
                 println!(

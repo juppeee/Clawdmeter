@@ -1,6 +1,8 @@
 //! Pins the `/usage` parser against captured CLI output (`max.json`,
 //! `work.json`, trimmed of the "What's contributing" section) and synthesized
-//! variants for other plans and formats.
+//! variants for other plans and formats. The spend-limit, overage and
+//! next-year fixtures follow the strings Claude Code 2.1.296 builds in its
+//! `/usage` command.
 
 use chrono::{DateTime, Utc};
 use clawdmeter_core::payload::Payload;
@@ -87,8 +89,32 @@ fn enterprise_like_week_only() {
 }
 
 #[test]
-fn enterprise_spend_is_not_a_zero() {
-    assert!(matches!(parse("enterprise-spend.json"), Err(UsageError::NoUsageLines(_))));
+fn enterprise_spend_limit() {
+    let utc: chrono_tz::Tz = "UTC".parse().unwrap();
+    let r = parse("enterprise-spend.json").unwrap();
+    assert!(r.is_spend_only());
+    assert_eq!(
+        Payload::from_reading_in(&r, now(), &utc).to_json(),
+        r#"{"s":21,"sr":27020,"w":0,"wr":0,"st":"allowed","acct":"ent","tp":39,"pd":31,"rd":"Nov 1","ok":true}"#
+    );
+    let r = parse("enterprise-spend-pct.json").unwrap();
+    let p = Payload::from_reading_in(&r, now(), &utc);
+    assert_eq!((p.s, p.st.as_deref(), p.acct.as_deref()), (Some(104), Some("limited"), Some("ent")));
+}
+
+#[test]
+fn overage_status() {
+    let r = parse("overage.json").unwrap();
+    assert!(r.overage);
+    let p = Payload::from_reading(&r, now());
+    assert_eq!((p.s, p.st.as_deref(), p.acct.as_deref()), (Some(100), Some("overage"), Some("pro")));
+}
+
+#[test]
+fn reset_in_another_year() {
+    let r = parse("year-rollover.json").unwrap();
+    assert_eq!(r.week.as_ref().unwrap().resets_at, Some(at("2027-01-02T21:59:00Z")));
+    assert_eq!(Payload::from_reading(&r, now()).st.as_deref(), Some("limited"));
 }
 
 #[test]

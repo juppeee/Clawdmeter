@@ -12,11 +12,28 @@ pub mod art;
 pub mod boards;
 pub mod daemon;
 pub mod diff;
-pub mod hookscript;
+pub mod errors;
+pub mod hooks;
 pub mod ipc;
 pub mod logger;
 pub mod tray;
 pub mod ui;
+
+/// The app's version: `CLAWDMETER_VERSION` at build time (CI sets it from
+/// the release tag; a leading `v` is dropped), else the crate version.
+pub fn version() -> &'static str {
+    const RAW: &str = match option_env!("CLAWDMETER_VERSION") {
+        Some(v) => v,
+        None => env!("CARGO_PKG_VERSION"),
+    };
+    let v = RAW.trim();
+    let v = v.strip_prefix('v').unwrap_or(v);
+    if v.is_empty() {
+        env!("CARGO_PKG_VERSION")
+    } else {
+        v
+    }
+}
 
 /// The app's windows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]

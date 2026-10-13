@@ -4,11 +4,11 @@
 //! daemons wrote them, plus the additive fast-clock fields `a`, `e`, `es`,
 //! `n`, `rp` (old firmware ignores unknown keys).
 
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Datelike, Months, TimeZone, Utc};
 use serde::Serialize;
 
 use crate::config::ClockMode;
-use crate::usage::UsageReading;
+use crate::usage::{SpendPeriod, UsageReading};
 
 /// One device payload. `None` fields are omitted.
 #[derive(Debug, Clone, Default, PartialEq, Serialize)]
@@ -25,7 +25,8 @@ pub struct Payload {
     /// Minutes until the weekly reset; -1 = unknown.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub wr: Option<i64>,
-    /// Status string ("allowed" / "limited").
+    /// Status: "allowed", "limited" (a window or the spend cap is used up)
+    /// or "overage" (extra usage is paying). Stored, not shown, by the firmware.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub st: Option<String>,
     /// Account kind: "pro" (5h/7d windows) or "ent" (spending limit).
@@ -126,10 +127,99 @@ pub fn clock_fields(
     Some(ClockFields { local_epoch: now.timestamp() + utc_offset_secs, hour_format })
 }
 
+/// Billing-period fields for a spend-capped account.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BillingPeriod {
+    /// `tp`: % of the period elapsed (0-100).
+    pub elapsed_pct: u32,
+    /// `pd`: period length in days.
+    pub days: u32,
+    /// `rd`: reset date as "Nov 1" (host-local), empty when unknown.
+    pub reset_date: String,
+}
+
+impl BillingPeriod {
+    /// What the old daemons sent when the reset was missing or garbage.
+    pub fn unknown() -> Self {
+        BillingPeriod { elapsed_pct: 0, days: 30, reset_date: String::new() }
+    }
+}
+
+/// `tp` / `pd` / `rd` for a period ending at `reset`, like the old daemons'
+/// `_billing_period_info`: a monthly period starts on the same day and time
+/// one calendar month earlier (clamped to the month's length), in `tz`.
+/// Weekly and daily periods are 7 days and 1 day.
+pub fn billing_period<Tz: TimeZone>(
+    reset: Option<DateTime<Utc>>,
+    period: SpendPeriod,
+    tz: &Tz,
+    now: DateTime<Utc>,
+) -> BillingPeriod
+where
+    Tz::Offset: std::fmt::Display,
+{
+    let Some(end_utc) = reset else { return BillingPeriod::unknown() };
+    let end = end_utc.with_timezone(tz);
+    let start_utc = match period {
+        SpendPeriod::Daily => Some(end_utc - chrono::Duration::days(1)),
+        SpendPeriod::Weekly => Some(end_utc - chrono::Duration::days(7)),
+        SpendPeriod::Monthly => end
+            .naive_local()
+            .checked_sub_months(Months::new(1))
+            .and_then(|n| tz.from_local_datetime(&n).earliest())
+            .map(|d| d.with_timezone(&Utc)),
+    };
+    let Some(start_utc) = start_utc else { return BillingPeriod::unknown() };
+    let len = (end_utc - start_utc).num_seconds();
+    if len <= 0 {
+        return BillingPeriod::unknown();
+    }
+    let elapsed = (now - start_utc).num_seconds() as f64 / len as f64 * 100.0;
+    BillingPeriod {
+        elapsed_pct: elapsed.round().clamp(0.0, 100.0) as u32,
+        days: (len as f64 / 86_400.0).round() as u32,
+        reset_date: format!("{} {}", end.format("%b"), end.day()),
+    }
+}
+
 impl Payload {
     /// The usage part for a reading, as of `now`. Reset countdowns are
-    /// recomputed from the absolute reset time, so a replay is exact.
+    /// recomputed from the absolute reset time, so a replay is exact. The
+    /// billing-period date is in the host's local zone.
     pub fn from_reading(r: &UsageReading, now: DateTime<Utc>) -> Self {
+        Self::from_reading_in(r, now, &chrono::Local)
+    }
+
+    /// [`Payload::from_reading`] with an explicit zone for `rd` / `tp`.
+    pub fn from_reading_in<Tz: TimeZone>(r: &UsageReading, now: DateTime<Utc>, tz: &Tz) -> Self
+    where
+        Tz::Offset: std::fmt::Display,
+    {
+        let st = if r.overage {
+            "overage"
+        } else if r.limited() {
+            "limited"
+        } else {
+            "allowed"
+        };
+        if let (true, Some(sp)) = (r.is_spend_only(), &r.spend) {
+            // The old daemons' "ent" payload: s is the spend %, the weekly
+            // meter becomes the billing-period box.
+            let bp = billing_period(sp.resets_at, sp.period.unwrap_or(SpendPeriod::Monthly), tz, now);
+            return Payload {
+                s: Some(sp.pct),
+                sr: Some(sp.resets_at.map_or(0, |t| minutes_until(t, now))),
+                w: Some(0),
+                wr: Some(0),
+                st: Some(st.to_owned()),
+                acct: Some("ent".to_owned()),
+                tp: Some(bp.elapsed_pct),
+                pd: Some(bp.days),
+                rd: Some(bp.reset_date),
+                ok: true,
+                ..Default::default()
+            };
+        }
         let (s, sr) = match &r.session {
             Some(w) => (w.pct, w.resets_at.map_or(-1, |t| minutes_until(t, now))),
             None => (0, -1),
@@ -143,7 +233,7 @@ impl Payload {
             sr: Some(sr),
             w: Some(w),
             wr: Some(wr),
-            st: Some(if s >= 100 { "limited" } else { "allowed" }.to_owned()),
+            st: Some(st.to_owned()),
             acct: Some("pro".to_owned()),
             ok: true,
             ..Default::default()
@@ -232,7 +322,7 @@ mod tests {
         }
     }
 
-    // Ported from daemon/tests/test_bash_heartbeat.sh (payload aging).
+    // Ported from the legacy daemon test test_bash_heartbeat.sh (payload aging).
     #[test]
     fn aging_like_bash() {
         assert_eq!(
@@ -265,7 +355,7 @@ mod tests {
         let r = UsageReading {
             session: Some(Window { pct: 15, resets_at: Some(at("2026-10-13T07:00:00Z")) }),
             week: Some(Window { pct: 6, resets_at: Some(at("2026-10-18T22:00:00Z")) }),
-            models: vec![],
+            ..Default::default()
         };
         assert_eq!(
             Payload::from_reading(&r, now).to_json(),
@@ -285,6 +375,71 @@ mod tests {
         assert_eq!(Payload::no_data().to_json(), r#"{"ok":false}"#);
     }
 
+    // Ported from the enterprise branch of the old daemons
+    // (`_billing_period_info`, test_windows_poll.py's guards).
+    #[test]
+    fn billing_period_like_the_old_daemons() {
+        use chrono_tz::Tz;
+        let utc: Tz = "UTC".parse().unwrap();
+        let now = at("2026-10-16T00:00:00Z");
+        // Oct 1 -> Nov 1: 31 days, 15 elapsed.
+        let bp = billing_period(Some(at("2026-11-01T00:00:00Z")), SpendPeriod::Monthly, &utc, now);
+        assert_eq!(bp, BillingPeriod { elapsed_pct: 48, days: 31, reset_date: "Nov 1".into() });
+        // Mar 31 reset: the period starts Feb 28 (clamped), like calendar.monthrange.
+        let bp =
+            billing_period(Some(at("2027-03-31T00:00:00Z")), SpendPeriod::Monthly, &utc, at("2027-03-01T00:00:00Z"));
+        assert_eq!((bp.days, bp.reset_date.as_str()), (31, "Mar 31"));
+        assert_eq!(bp.elapsed_pct, 3);
+        // January reset steps back into December of the previous year.
+        let bp = billing_period(Some(at("2027-01-15T00:00:00Z")), SpendPeriod::Monthly, &utc, now);
+        assert_eq!((bp.days, bp.elapsed_pct), (31, 0), "before the period: clamped at 0");
+        // After the reset: clamped at 100.
+        let bp = billing_period(Some(at("2026-10-10T00:00:00Z")), SpendPeriod::Weekly, &utc, now);
+        assert_eq!((bp.days, bp.elapsed_pct), (7, 100));
+        // The date is host-local: midnight UTC is still Oct 31 in New York.
+        let ny: Tz = "America/New_York".parse().unwrap();
+        let bp = billing_period(Some(at("2026-11-01T00:00:00Z")), SpendPeriod::Monthly, &ny, now);
+        assert_eq!(bp.reset_date, "Oct 31");
+        // No reset: the old daemons' neutral default.
+        assert_eq!(billing_period(None, SpendPeriod::Monthly, &utc, now), BillingPeriod::unknown());
+    }
+
+    #[test]
+    fn spend_only_reading_is_the_enterprise_payload() {
+        use crate::usage::Spend;
+        let utc: chrono_tz::Tz = "UTC".parse().unwrap();
+        let now = at("2026-10-16T00:00:00Z");
+        let r = UsageReading {
+            spend: Some(Spend { pct: 41, resets_at: Some(at("2026-11-01T00:00:00Z")), period: None }),
+            ..Default::default()
+        };
+        assert_eq!(
+            Payload::from_reading_in(&r, now, &utc).to_json(),
+            r#"{"s":41,"sr":23040,"w":0,"wr":0,"st":"allowed","acct":"ent","tp":48,"pd":31,"rd":"Nov 1","ok":true}"#
+        );
+        // Session/week lines win over a spend line (subscription view).
+        let both = UsageReading { session: Some(Window { pct: 5, resets_at: None }), ..r.clone() };
+        assert_eq!(Payload::from_reading_in(&both, now, &utc).acct.as_deref(), Some("pro"));
+        // Over the cap, no reset known.
+        let over =
+            UsageReading { spend: Some(Spend { pct: 104, resets_at: None, period: None }), ..Default::default() };
+        let p = Payload::from_reading_in(&over, now, &utc);
+        assert_eq!(
+            (p.st.as_deref(), p.sr, p.tp, p.pd, p.rd.as_deref()),
+            (Some("limited"), Some(0), Some(0), Some(30), Some(""))
+        );
+    }
+
+    #[test]
+    fn status_string() {
+        let now = at("2026-10-13T05:40:00Z");
+        let w = |pct| Some(Window { pct, resets_at: None });
+        let st = |r: UsageReading| Payload::from_reading(&r, now).st.unwrap();
+        assert_eq!(st(UsageReading { session: w(40), week: w(99), ..Default::default() }), "allowed");
+        assert_eq!(st(UsageReading { session: w(40), week: w(100), ..Default::default() }), "limited");
+        assert_eq!(st(UsageReading { session: w(100), week: w(10), overage: true, ..Default::default() }), "overage");
+    }
+
     #[test]
     fn clock() {
         let now = at("2026-10-13T12:00:00Z");
@@ -294,7 +449,7 @@ mod tests {
         assert_eq!(clock_fields(ClockMode::H24, now, 0, true).unwrap().hour_format, 24);
     }
 
-    // Ported from daemon/tests/test_attention.py::test_encode_payload_fits.
+    // Ported from the legacy daemon test test_attention.py::test_encode_payload_fits.
     #[test]
     fn encode_fits() {
         let base = Payload { s: Some(4), ok: true, b: Some(1), ..Default::default() };

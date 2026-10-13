@@ -10,6 +10,23 @@
 //! The chosen device's address is cached in
 //! `~/.config/claude-usage-monitor/ble-address`; a failed connect drops the
 //! cache so the next attempt re-derives it.
+//!
+//! Per-OS recovery carried over from the legacy daemons:
+//!
+//! * Linux: the device is marked trusted in BlueZ on connect (the bash
+//!   daemon's `bluetoothctl trust`), so BlueZ reconnects it by itself.
+//! * macOS: a connect that fails to encrypt (CoreBluetooth error 15, a bond
+//!   left over from before a reflash or the on-device bond clear) unpairs
+//!   the stale bond with `blueutil` when it is installed, so the next attempt
+//!   re-bonds silently.
+//! * Windows: a bonded device the OS isn't currently connected to is reached
+//!   by address: `CLAWDMETER_BLE_ADDRESS`, the cached address, or the
+//!   address in the Bluetooth PnP table.
+//! * `CLAWDMETER_BLE_ADDRESS` (every OS) names the device to try first,
+//!   like the bash daemon's `DEVICE_MAC`.
+//! * Everywhere: writes that keep failing on a link that still reports
+//!   itself connected (a half-open "zombie" link) make
+//!   [`DeviceLink::is_connected`] report false, so the caller reconnects.
 
 #![warn(missing_docs)]
 
@@ -17,6 +34,7 @@ use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::time::Duration;
 
 use btleplug::api::{
@@ -276,6 +294,84 @@ pub async fn scan(adapter: &Adapter, time: Duration) -> Vec<Candidate> {
     out
 }
 
+/// Consecutive failed writes after which a link that still claims to be
+/// connected is treated as dead. The Windows daemon broke after one; two
+/// rides out a single transient error without stalling the 120 s budget.
+pub const ZOMBIE_WRITE_FAILURES: u32 = 2;
+
+/// Counts consecutive write failures (the zombie-link breaker).
+#[derive(Debug, Default)]
+pub struct WriteHealth {
+    failures: AtomicU32,
+}
+
+impl WriteHealth {
+    /// Record one write outcome.
+    pub fn record(&self, ok: bool) {
+        if ok {
+            self.failures.store(0, Ordering::Relaxed);
+        } else {
+            self.failures.fetch_add(1, Ordering::Relaxed);
+        }
+    }
+
+    /// Too many failures in a row: abandon the link.
+    pub fn is_zombie(&self) -> bool {
+        self.failures.load(Ordering::Relaxed) >= ZOMBIE_WRITE_FAILURES
+    }
+}
+
+/// A canonical MAC from a Windows Bluetooth PnP instance id:
+/// `BTHLE\DEV_98A316A5D706\7&B8081D1&0&98A316A5D706` → `98:A3:16:A5:D7:06`.
+pub fn mac_from_pnp_instance_id(instance_id: &str) -> Option<String> {
+    let up = instance_id.to_ascii_uppercase();
+    let mut rest = up.as_str();
+    while let Some(i) = rest.find("DEV_") {
+        let tail = &rest[i + 4..];
+        let hex: String = tail.chars().take_while(char::is_ascii_hexdigit).collect();
+        if hex.len() == 12 {
+            let pairs: Vec<&str> = (0..6).map(|k| &hex[k * 2..k * 2 + 2]).collect();
+            return Some(pairs.join(":"));
+        }
+        rest = tail;
+    }
+    None
+}
+
+/// A MAC string (`AA:BB:CC:DD:EE:FF`, any case) as a [`BDAddr`].
+pub fn parse_mac(s: &str) -> Option<BDAddr> {
+    let s = s.trim();
+    if !is_mac(s) {
+        return None;
+    }
+    BDAddr::from_str_delim(s).ok()
+}
+
+/// True when a connect error is macOS's stale-bond failure (CBErrorDomain
+/// code 15, "Failed to encrypt the connection").
+pub fn is_encryption_error(msg: &str) -> bool {
+    let m = msg.to_ascii_lowercase();
+    m.contains("code=15") || m.contains("encrypt")
+}
+
+/// The address of the paired device named `name` in `blueutil --paired`
+/// output (`address: 28-84-85-55-5c-3d, ... name: "Clawdmeter", ...`).
+pub fn blueutil_paired_address(out: &str, name: &str) -> Option<String> {
+    let needle = format!("name: \"{name}\"");
+    out.lines().filter(|l| l.contains(&needle)).find_map(|l| {
+        let rest = &l[l.find("address:")? + "address:".len()..];
+        let addr: String =
+            rest.trim_start().chars().take_while(|c| c.is_ascii_hexdigit() || *c == '-' || *c == ':').collect();
+        (!addr.is_empty()).then_some(addr)
+    })
+}
+
+/// `CLAWDMETER_BLE_ADDRESS`: a MAC (or, on macOS, a CoreBluetooth UUID)
+/// to try before any other known device.
+pub fn pinned_address() -> Option<String> {
+    std::env::var("CLAWDMETER_BLE_ADDRESS").ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
+}
+
 /// Refresh requests from the device (one item per REQ notification).
 pub type RefreshRequests = mpsc::UnboundedReceiver<()>;
 
@@ -285,6 +381,7 @@ pub struct DeviceLink {
     rx: Characteristic,
     key: String,
     name: Option<String>,
+    health: WriteHealth,
 }
 
 impl std::fmt::Debug for DeviceLink {
@@ -301,8 +398,13 @@ impl DeviceLink {
         cache: &AddressCache,
         opts: &LinkOptions,
     ) -> Result<(DeviceLink, RefreshRequests), LinkError> {
-        let cached = cache.load();
+        // CLAWDMETER_BLE_ADDRESS pins the device to try first (the bash
+        // daemon's DEVICE_MAC, the Windows daemon's override); else the cache.
+        let cached = pinned_address().or_else(|| cache.load());
         let mut cands = known_devices(adapter).await;
+        if cands.is_empty() {
+            cands = bonded_by_address(adapter, cached.as_deref()).await;
+        }
         if cands.is_empty() && opts.allow_scan {
             cands = scan(adapter, opts.scan_time).await;
         }
@@ -317,6 +419,10 @@ impl DeviceLink {
                 }
                 Err(e) => {
                     log::warn!("connect to {} failed: {e}", cand.key);
+                    if cfg!(target_os = "macos") && is_encryption_error(&e.to_string()) {
+                        log::warn!("encryption failed: likely a stale macOS bond; trying to unpair it");
+                        let _ = tokio::task::spawn_blocking(macos_unpair_stale_bond).await;
+                    }
                     cache.invalidate(&cand.key);
                     last_err = e;
                 }
@@ -363,20 +469,40 @@ impl DeviceLink {
                 Err(_) => log::warn!("refresh subscription timed out; polling without it"),
             }
         }
-        Ok((DeviceLink { key: cand.key, name: cand.name, peripheral: p, rx }, refresh))
+        #[cfg(target_os = "linux")]
+        {
+            // `bluetoothctl trust`, as the bash daemon did: BlueZ then
+            // reconnects the device on its own after it drops.
+            let id = p.id().to_string();
+            if let Ok(Err(e)) = tokio::task::spawn_blocking(move || bluez::trust(&id)).await {
+                log::debug!("could not mark the device trusted: {e}");
+            }
+        }
+        Ok((DeviceLink { key: cand.key, name: cand.name, peripheral: p, rx, health: WriteHealth::default() }, refresh))
     }
 
     /// Write one payload (already encoded to at most [`MAX_WRITE`] bytes).
     pub async fn write(&self, data: &[u8]) -> Result<(), LinkError> {
-        tokio::time::timeout(Duration::from_secs(10), self.peripheral.write(&self.rx, data, WriteType::WithResponse))
-            .await
-            .map_err(|_| LinkError::Timeout("write"))??;
-        Ok(())
+        let r = match tokio::time::timeout(
+            Duration::from_secs(10),
+            self.peripheral.write(&self.rx, data, WriteType::WithResponse),
+        )
+        .await
+        {
+            Ok(r) => r.map_err(LinkError::Ble),
+            Err(_) => Err(LinkError::Timeout("write")),
+        };
+        self.health.record(r.is_ok());
+        if self.health.is_zombie() {
+            log::warn!("{ZOMBIE_WRITE_FAILURES} writes in a row failed on a live-looking link; dropping it");
+        }
+        r
     }
 
-    /// Still connected?
+    /// Still connected? False once writes keep failing (a zombie link), so
+    /// the caller drops it and reconnects.
     pub async fn is_connected(&self) -> bool {
-        self.peripheral.is_connected().await.unwrap_or(false)
+        !self.health.is_zombie() && self.peripheral.is_connected().await.unwrap_or(false)
     }
 
     /// Drop the GATT connection (the OS may keep the HID link).
@@ -397,6 +523,115 @@ impl DeviceLink {
     /// Platform id string (BlueZ: `hci0/dev_AA_BB_...`).
     pub fn id(&self) -> String {
         self.peripheral.id().to_string()
+    }
+}
+
+/// Windows: a bonded device that Windows isn't connected to right now is
+/// absent from `known_devices` (which lists connected peripherals only), but
+/// WinRT can still connect to it by address. Addresses come from
+/// `CLAWDMETER_BLE_ADDRESS`, then the cache, then the PnP table. Elsewhere
+/// this finds nothing: BlueZ already lists paired devices, and macOS has no
+/// way to reach a peripheral the OS doesn't hold.
+#[cfg(not(windows))]
+async fn bonded_by_address(_adapter: &Adapter, _cached: Option<&str>) -> Vec<Candidate> {
+    Vec::new()
+}
+
+#[cfg(windows)]
+async fn bonded_by_address(adapter: &Adapter, cached: Option<&str>) -> Vec<Candidate> {
+    use btleplug::platform::PeripheralId;
+    // `cached` already prefers CLAWDMETER_BLE_ADDRESS over the cache file.
+    let mut addrs: Vec<String> = cached.map(str::to_owned).into_iter().collect();
+    if addrs.iter().all(|a| parse_mac(a).is_none()) {
+        if let Ok(Some(mac)) = tokio::task::spawn_blocking(windows_pnp_address).await {
+            addrs.push(mac);
+        }
+    }
+    let mut out: Vec<Candidate> = Vec::new();
+    for addr in addrs.iter().filter_map(|a| parse_mac(a)) {
+        if out.iter().any(|c| c.key.eq_ignore_ascii_case(&addr.to_string())) {
+            continue;
+        }
+        if let Ok(p) = adapter.add_peripheral(&PeripheralId::from(addr)).await {
+            log::info!("trying bonded address {addr}");
+            out.push(Candidate {
+                key: addr.to_string(),
+                peripheral: p,
+                name: Some(DEVICE_NAME.into()),
+                has_service: false,
+            });
+        }
+    }
+    out
+}
+
+/// The bonded Clawdmeter's MAC from the Windows PnP table (the Windows
+/// daemon's `Get-PnpDevice` lookup). `None` on any failure.
+#[cfg(windows)]
+fn windows_pnp_address() -> Option<String> {
+    use std::os::windows::process::CommandExt;
+    let script = format!(
+        "Get-PnpDevice -Class Bluetooth -ErrorAction SilentlyContinue | \
+         Where-Object {{ $_.FriendlyName -eq '{DEVICE_NAME}' }} | Select-Object -ExpandProperty InstanceId"
+    );
+    let out = std::process::Command::new("powershell")
+        .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+        .stdin(std::process::Stdio::null())
+        .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+        .output()
+        .ok()?;
+    String::from_utf8_lossy(&out.stdout).lines().find_map(mac_from_pnp_instance_id)
+}
+
+/// macOS: forget a stale bond for the device with `blueutil` (CoreBluetooth
+/// has no unpair API). The firmware pairs "just works", so the next connect
+/// re-bonds with no prompt. Logs a manual fix when blueutil is missing or
+/// lacks Bluetooth permission (it hangs then, hence the timeout).
+fn macos_unpair_stale_bond() {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let run = |args: &[&str]| -> Option<String> {
+        let mut child = std::process::Command::new("blueutil")
+            .args(args)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::null())
+            .spawn()
+            .ok()?;
+        let start = std::time::Instant::now();
+        loop {
+            match child.try_wait() {
+                Ok(Some(st)) if st.success() => break,
+                Ok(Some(_)) | Err(_) => return None,
+                Ok(None) if start.elapsed() > Duration::from_secs(8) => {
+                    let _ = child.kill();
+                    log::warn!(
+                        "blueutil timed out; it likely lacks Bluetooth permission (System Settings > \
+                         Privacy & Security > Bluetooth)"
+                    );
+                    return None;
+                }
+                Ok(None) => std::thread::sleep(Duration::from_millis(100)),
+            }
+        }
+        let mut s = String::new();
+        io::Read::read_to_string(&mut child.stdout.take()?, &mut s).ok()?;
+        Some(s)
+    };
+    let Some(paired) = run(&["--paired"]) else {
+        log::warn!(
+            "can't clear the stale bond automatically: install blueutil (`brew install blueutil`), or forget \
+             '{DEVICE_NAME}' in System Settings > Bluetooth and connect again"
+        );
+        return;
+    };
+    match blueutil_paired_address(&paired, DEVICE_NAME) {
+        Some(addr) if run(&["--unpair", &addr]).is_some() => {
+            log::info!("unpaired the stale bond for '{DEVICE_NAME}' [{addr}]; it re-pairs on the next connect")
+        }
+        Some(addr) => log::warn!("blueutil could not unpair {addr}"),
+        None => log::info!("no paired '{DEVICE_NAME}' to unpair"),
     }
 }
 
@@ -443,6 +678,17 @@ mod bluez {
         let path = object_path(id);
         let proxy = conn.with_proxy("org.bluez", path, Duration::from_secs(5));
         proxy.get::<bool>("org.bluez.Device1", "Paired").map_err(|e| e.to_string())
+    }
+
+    /// `org.bluez.Device1.Trusted = true` (`bluetoothctl trust`).
+    pub fn trust(id: &str) -> Result<(), String> {
+        use dbus::blocking::stdintf::org_freedesktop_dbus::Properties as _;
+        let conn = Connection::new_system().map_err(|e| e.to_string())?;
+        let proxy = conn.with_proxy("org.bluez", object_path(id), Duration::from_secs(5));
+        if proxy.get::<bool>("org.bluez.Device1", "Trusted").unwrap_or(false) {
+            return Ok(());
+        }
+        proxy.set("org.bluez.Device1", "Trusted", true).map_err(|e| e.to_string())
     }
 
     /// `org.bluez.Adapter1.RemoveDevice` on the device's adapter.
@@ -504,6 +750,49 @@ mod tests {
         c.save("6F1C2E3A-0000-4000-8000-123456789ABC").unwrap();
         assert_eq!(c.load().as_deref(), Some("6F1C2E3A-0000-4000-8000-123456789ABC"));
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    // Ported from the legacy daemon test test_windows_bonded.py.
+    #[test]
+    fn pnp_instance_ids() {
+        assert_eq!(
+            mac_from_pnp_instance_id(r"BTHLE\DEV_98A316A5D706\7&B8081D1&0&98A316A5D706").as_deref(),
+            Some("98:A3:16:A5:D7:06")
+        );
+        assert_eq!(mac_from_pnp_instance_id(r"BTHLE\dev_98a316a5d706\x").as_deref(), Some("98:A3:16:A5:D7:06"));
+        assert_eq!(mac_from_pnp_instance_id(r"BTHLE\SOMETHING\7&B8081D1"), None);
+        assert_eq!(mac_from_pnp_instance_id(""), None);
+        // A short hex run after DEV_ is not a MAC; neither is a 13-digit one.
+        assert_eq!(mac_from_pnp_instance_id(r"BTHENUM\DEV_1234\x"), None);
+        assert_eq!(mac_from_pnp_instance_id(r"BTHLE\DEV_98A316A5D7061\x"), None);
+        assert_eq!(parse_mac("98:a3:16:a5:d7:06").map(|a| a.to_string()).as_deref(), Some("98:A3:16:A5:D7:06"));
+        assert_eq!(parse_mac("6F1C2E3A-0000-4000-8000-123456789ABC"), None);
+    }
+
+    // Ported from test_windows_reconnect.py's zombie-link tests.
+    #[test]
+    fn zombie_breaker() {
+        let h = WriteHealth::default();
+        assert!(!h.is_zombie());
+        h.record(false);
+        assert!(!h.is_zombie(), "one transient failure is ridden out");
+        h.record(true);
+        h.record(false);
+        assert!(!h.is_zombie(), "a success resets the count");
+        h.record(false);
+        assert!(h.is_zombie());
+    }
+
+    // The macOS daemon's stale-bond self-heal (unpair_macos).
+    #[test]
+    fn stale_bond_helpers() {
+        assert!(is_encryption_error("Error Domain=CBErrorDomain Code=15 \"Failed to encrypt the connection\""));
+        assert!(is_encryption_error("Failed to encrypt"));
+        assert!(!is_encryption_error("timed out during connect"));
+        let out = "address: 11-22-33-44-55-66, connected (master, -50 dBm), not favourite, paired, name: \"Keyboard\", recent access date: 2026\n\
+                   address: 28-84-85-55-5c-3d, not connected, not favourite, paired, name: \"Clawdmeter\", recent access date: 2026\n";
+        assert_eq!(blueutil_paired_address(out, "Clawdmeter").as_deref(), Some("28-84-85-55-5c-3d"));
+        assert_eq!(blueutil_paired_address(out, "Other"), None);
     }
 
     #[test]

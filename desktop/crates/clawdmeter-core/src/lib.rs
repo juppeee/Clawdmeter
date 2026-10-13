@@ -5,8 +5,8 @@
 //! * [`paths`], [`config`]: the shared `~/.config/claude-usage-monitor` files.
 //! * [`usage`]: run and parse `claude --output-format json -p /usage`.
 //! * [`events`]: the hook events log (fast clock) and the activity tracker.
-//! * [`attention`]: the attention hook's alert / clear files.
-//! * [`hooks`]: install the hooks into each account's settings.json.
+//! * [`attention`]: the attention hook's alert / clear files (written by
+//!   `clawdmeter hook`; the installer lives in the app crate).
 //! * [`cadence`]: when to poll, when to heartbeat.
 //! * [`selector`]: which account to show.
 //! * [`payload`]: the JSON the firmware parses.
@@ -22,7 +22,6 @@ pub mod cadence;
 pub mod config;
 pub mod engine;
 pub mod events;
-pub mod hooks;
 pub mod paths;
 pub mod payload;
 pub mod platform;

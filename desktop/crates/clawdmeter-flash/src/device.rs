@@ -24,12 +24,34 @@ pub const USB_JTAG_PID: u16 = 0x1001;
 /// The 2.06 is the only 32 MB S3 board.
 pub const THIRTY_TWO_MB_S3_ENV: &str = "waveshare_amoled_206";
 
-/// Device-side errors.
+/// Device-side errors. `Display` is written for people: what happened and
+/// what to do about it.
 #[derive(Debug)]
 pub enum DeviceError {
-    /// Opening or using the serial port failed.
+    /// The OS refused access to the port.
+    PermissionDenied {
+        /// The port.
+        port: String,
+    },
+    /// Another program has the port open.
+    Busy {
+        /// The port.
+        port: String,
+    },
+    /// The board went away (unplugged, or reset onto another port).
+    Disconnected,
+    /// The board didn't answer the ROM bootloader handshake.
+    NoBootloader(String),
+    /// The board's chip doesn't match the image.
+    WrongChip {
+        /// What the board has, e.g. `esp32c6`.
+        found: String,
+        /// What the image is built for.
+        expected: String,
+    },
+    /// Some other serial failure.
     Serial(String),
-    /// espflash failed.
+    /// espflash failed while writing.
     Flash(String),
     /// The port isn't a USB port we can describe to espflash.
     NotUsb(String),
@@ -38,9 +60,62 @@ pub enum DeviceError {
 impl std::fmt::Display for DeviceError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            DeviceError::Serial(e) => write!(f, "serial: {e}"),
-            DeviceError::Flash(e) => write!(f, "flash: {e}"),
-            DeviceError::NotUsb(p) => write!(f, "{p} is not a USB serial port"),
+            DeviceError::PermissionDenied { port } if cfg!(target_os = "linux") => write!(
+                f,
+                "No permission to open {port}. Add yourself to the dialout group (uucp on Arch): \
+                 sudo usermod -aG dialout $USER, then log out and back in."
+            ),
+            DeviceError::PermissionDenied { port } => write!(f, "No permission to open {port}."),
+            DeviceError::Busy { port } => {
+                write!(f, "{port} is in use by another program, like a serial monitor. Close it and try again.")
+            }
+            DeviceError::Disconnected => write!(f, "The board disconnected. Plug it back in and try again."),
+            DeviceError::NoBootloader(_) => {
+                write!(f, "The board didn't respond. Unplug it, hold BOOT while you plug it back in, then try again.")
+            }
+            DeviceError::WrongChip { found, expected } => write!(
+                f,
+                "This board has an {}, but that firmware is for an {}. Go back and pick your board again.",
+                pretty_chip(found),
+                pretty_chip(expected)
+            ),
+            DeviceError::Serial(e) => write!(f, "Couldn't talk to the board ({e})."),
+            DeviceError::Flash(e) => write!(f, "Flashing stopped ({e}). Unplug the board, plug it back in and retry."),
+            DeviceError::NotUsb(p) => write!(f, "{p} isn't a USB serial port."),
+        }
+    }
+}
+
+/// `esp32s3` → `ESP32-S3`.
+pub fn pretty_chip(id: &str) -> String {
+    let up = id.to_ascii_uppercase();
+    match up.strip_prefix("ESP32") {
+        Some(rest) if !rest.is_empty() && !rest.starts_with('-') => format!("ESP32-{rest}"),
+        _ => up,
+    }
+}
+
+impl DeviceError {
+    /// Classify a failure to open `port`.
+    pub fn from_open(port: &str, e: serialport::Error) -> Self {
+        use serialport::ErrorKind as K;
+        match e.kind() {
+            K::Io(std::io::ErrorKind::PermissionDenied) => DeviceError::PermissionDenied { port: port.to_owned() },
+            K::Io(std::io::ErrorKind::NotFound) => DeviceError::Disconnected,
+            // EBUSY / TIOCEXCL on POSIX, ACCESS_DENIED on Windows (another
+            // handle holds it), or a vanished device.
+            K::NoDevice if list_ports().iter().any(|p| p.path == port) => DeviceError::Busy { port: port.to_owned() },
+            K::NoDevice => DeviceError::Disconnected,
+            _ => DeviceError::Serial(e.to_string()),
+        }
+    }
+
+    fn from_io(e: std::io::Error) -> Self {
+        match e.kind() {
+            std::io::ErrorKind::BrokenPipe | std::io::ErrorKind::NotFound | std::io::ErrorKind::NotConnected => {
+                DeviceError::Disconnected
+            }
+            _ => DeviceError::Serial(e.to_string()),
         }
     }
 }
@@ -121,9 +196,9 @@ pub fn probe_info(port: &str, timeout: Duration) -> Result<Option<FirmwareInfo>,
     let mut sp = serialport::new(port, 115_200)
         .timeout(Duration::from_millis(100))
         .open()
-        .map_err(|e| DeviceError::Serial(format!("{port}: {e}")))?;
+        .map_err(|e| DeviceError::from_open(port, e))?;
     let _ = sp.clear(serialport::ClearBuffer::Input);
-    sp.write_all(b"\ninfo\n").map_err(|e| DeviceError::Serial(e.to_string()))?;
+    sp.write_all(b"\ninfo\n").map_err(DeviceError::from_io)?;
     let _ = sp.flush();
     let start = Instant::now();
     let mut acc = String::new();
@@ -138,7 +213,7 @@ pub fn probe_info(port: &str, timeout: Duration) -> Result<Option<FirmwareInfo>,
             }
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-            Err(e) => return Err(DeviceError::Serial(e.to_string())),
+            Err(e) => return Err(DeviceError::from_io(e)),
         }
     }
     Ok(None)
@@ -156,9 +231,9 @@ pub fn query_json(
     let mut sp = serialport::new(port, 115_200)
         .timeout(Duration::from_millis(100))
         .open()
-        .map_err(|e| DeviceError::Serial(format!("{port}: {e}")))?;
+        .map_err(|e| DeviceError::from_open(port, e))?;
     let _ = sp.clear(serialport::ClearBuffer::Input);
-    sp.write_all(format!("\n{command}\n").as_bytes()).map_err(|e| DeviceError::Serial(e.to_string()))?;
+    sp.write_all(format!("\n{command}\n").as_bytes()).map_err(DeviceError::from_io)?;
     let _ = sp.flush();
     let start = Instant::now();
     let mut acc = String::new();
@@ -173,7 +248,7 @@ pub fn query_json(
             }
             Ok(_) => {}
             Err(e) if e.kind() == std::io::ErrorKind::TimedOut => {}
-            Err(e) => return Err(DeviceError::Serial(e.to_string())),
+            Err(e) => return Err(DeviceError::from_io(e)),
         }
     }
     Ok(None)
@@ -234,18 +309,17 @@ fn usb_info(port: &str) -> Result<UsbPortInfo, DeviceError> {
 
 fn connect(port: &str) -> Result<Flasher, DeviceError> {
     let info = usb_info(port)?;
-    let serial =
-        serialport::new(port, 115_200).open_native().map_err(|e| DeviceError::Serial(format!("{port}: {e}")))?;
+    let serial = serialport::new(port, 115_200).open_native().map_err(|e| DeviceError::from_open(port, e))?;
     let conn =
         Connection::new(serial, info, ResetAfterOperation::HardReset, ResetBeforeOperation::DefaultReset, 115_200);
-    Flasher::connect(conn, true, true, false, None, None).map_err(|e| DeviceError::Flash(e.to_string()))
+    Flasher::connect(conn, true, true, false, None, None).map_err(|e| DeviceError::NoBootloader(e.to_string()))
 }
 
 /// Probe 2: enter the ROM bootloader, read chip and flash size, reset back
 /// into the app.
 pub fn probe_chip(port: &str) -> Result<ChipInfo, DeviceError> {
     let mut f = connect(port)?;
-    let di = f.device_info().map_err(|e| DeviceError::Flash(e.to_string()))?;
+    let di = f.device_info().map_err(|e| DeviceError::NoBootloader(e.to_string()))?;
     let out = ChipInfo {
         chip: chip_id(di.chip),
         flash_mb: flash_size_mb(di.flash_size),
@@ -269,7 +343,9 @@ pub enum Identification {
     Unsupported(ChipInfo),
 }
 
-/// Narrow the manifest with a chip probe. A 32 MB S3 is the 2.06.
+/// Narrow the manifest with a chip probe (see [`Manifest::candidates`]: an
+/// image fits when it needs no more flash than the board has, exact sizes
+/// first). A 32 MB S3 is the 2.06: no other supported board ships with 32 MB.
 pub fn identify_from_chip(manifest: &Manifest, chip: &ChipInfo) -> Identification {
     if chip.chip == "esp32s3" && chip.flash_mb == Some(32) && manifest.board(THIRTY_TWO_MB_S3_ENV).is_some() {
         return Identification::Unique(THIRTY_TWO_MB_S3_ENV.to_owned());
@@ -343,11 +419,7 @@ pub fn flash_merged(
     let got = chip_id(f.chip());
     if got != expected_chip.chip_id() {
         let _ = f.connection().reset();
-        return Err(DeviceError::Flash(format!(
-            "this board is an {got}, but {} is built for {}",
-            expected_chip.env,
-            expected_chip.chip_id()
-        )));
+        return Err(DeviceError::WrongChip { found: got, expected: expected_chip.chip_id() });
     }
     let mut cb = Progress(progress);
     f.write_bin_to_flash(0x0, image, &mut cb).map_err(|e| DeviceError::Flash(e.to_string()))?;
@@ -433,5 +505,34 @@ mod tests {
             Identification::Choose(vec!["waveshare_amoled_216_c6".into(), "waveshare_amoled_18_c6".into()])
         );
         assert!(matches!(identify_from_chip(&m, &chip("esp32c3", Some(4))), Identification::Unsupported(_)));
+        assert!(matches!(identify_from_chip(&m, &chip("esp32s3", Some(4))), Identification::Unsupported(_)));
+    }
+
+    #[test]
+    fn sixteen_mb_original_216_is_offered_its_8mb_image() {
+        let mut m = manifest();
+        m.boards[0].flash_size = "8MB".into();
+        let chip = ChipInfo { chip: "esp32s3".into(), flash_mb: Some(16), mac: None, features: vec![] };
+        assert_eq!(
+            identify_from_chip(&m, &chip),
+            Identification::Choose(vec!["waveshare_amoled_18".into(), "waveshare_amoled_216".into()])
+        );
+        let eight = ChipInfo { flash_mb: Some(8), ..chip };
+        assert_eq!(identify_from_chip(&m, &eight), Identification::Unique("waveshare_amoled_216".into()));
+    }
+
+    #[test]
+    fn error_copy() {
+        assert_eq!(pretty_chip("esp32s3"), "ESP32-S3");
+        assert_eq!(pretty_chip("esp32"), "ESP32");
+        let e = DeviceError::WrongChip { found: "esp32c6".into(), expected: "esp32s3".into() };
+        assert_eq!(
+            e.to_string(),
+            "This board has an ESP32-C6, but that firmware is for an ESP32-S3. Go back and pick your board again."
+        );
+        let p = DeviceError::PermissionDenied { port: "/dev/ttyACM0".into() }.to_string();
+        assert!(p.starts_with("No permission to open /dev/ttyACM0."));
+        #[cfg(target_os = "linux")]
+        assert!(p.contains("dialout"));
     }
 }

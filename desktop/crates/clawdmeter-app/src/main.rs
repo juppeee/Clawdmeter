@@ -25,9 +25,12 @@ OPTIONS:
     --daemon          Run headless: poll usage, follow hooks, drive the device over BLE
     --window KIND     Open one window: settings, flasher or status
       [--tab NAME]    settings tab: device, accounts, hooks, alerts, background
+      [--manifest P]  flasher: use a local release manifest.json instead of GitHub
     --once            Poll /usage for every account once, print the payload, exit (no BLE)
     --ports           List attached Espressif USB ports
     --info PORT       Ask the firmware on PORT for its env/version
+    hook MODE [event] Claude Code hook (MODE: alert, clear or event); reads the
+                      hook JSON on stdin, prints nothing, always exits 0
     -V, --version
     -h, --help
 
@@ -51,9 +54,15 @@ fn attach_console() {}
 
 fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
+    // Claude Code runs this on every hook event: no console, no logger, no
+    // GPUI, no tray; read stdin, write a file, exit 0.
+    if args.first().map(String::as_str) == Some("hook") {
+        std::process::exit(clawdmeter_app::hooks::main(&args[1..]));
+    }
     let paths = Paths::for_user();
     if args.is_empty() {
         logger::init_with_file(&paths.state_dir.join("daemon.log"));
+        warn_if_legacy_daemon(&paths);
         std::process::exit(tray::run(paths));
     }
     attach_console();
@@ -62,8 +71,8 @@ fn main() {
         "--daemon" => run_daemon(paths),
         "--window" => match args.get(1).and_then(|k| WindowKind::parse(k)) {
             Some(kind) => {
-                let tab = (args.get(2).map(String::as_str) == Some("--tab")).then(|| args.get(3).cloned()).flatten();
-                ui::run(kind, paths, tab)
+                let opt = |name: &str| args.iter().position(|a| a == name).and_then(|i| args.get(i + 1)).cloned();
+                ui::run(kind, paths, ui::WindowArgs { tab: opt("--tab"), manifest: opt("--manifest").map(Into::into) })
             }
             None => {
                 eprintln!("--window needs one of: settings, flasher, status");
@@ -98,7 +107,7 @@ fn main() {
             }
         },
         "-V" | "--version" => {
-            println!("clawdmeter {}", env!("CARGO_PKG_VERSION"));
+            println!("clawdmeter {}", clawdmeter_app::version());
             0
         }
         "-h" | "--help" => {
@@ -113,7 +122,20 @@ fn main() {
     std::process::exit(code);
 }
 
+/// The bash / Python daemon this app replaces would fight it for the device.
+/// Settings > Background turns it off (`autostart::disable_legacy`).
+fn warn_if_legacy_daemon(paths: &Paths) {
+    if let Some(e) = clawdmeter_core::autostart::legacy_entry(&paths.home) {
+        log::warn!(
+            "the old Clawdmeter daemon is still set to start at login ({}); it will fight this app for the \
+             device. Turn it off in Settings > Background",
+            e.describe()
+        );
+    }
+}
+
 fn run_daemon(paths: Paths) -> i32 {
+    warn_if_legacy_daemon(&paths);
     let _lock = match clawdmeter_app::ipc::acquire_instance_lock(&paths) {
         Ok(Some(f)) => Some(f),
         Ok(None) => {
@@ -133,7 +155,7 @@ fn run_daemon(paths: Paths) -> i32 {
         }
     };
     rt.block_on(async move {
-        log::info!("=== Clawdmeter daemon {} ===", env!("CARGO_PKG_VERSION"));
+        log::info!("=== Clawdmeter daemon {} ===", clawdmeter_app::version());
         let (cmd_tx, cmd_rx) = tokio::sync::mpsc::unbounded_channel();
         let (st_tx, _st_rx) = tokio::sync::watch::channel(daemon::Status::default());
         tokio::spawn(async move {

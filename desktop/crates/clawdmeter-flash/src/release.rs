@@ -16,10 +16,17 @@ pub const MANIFEST_ASSET: &str = "manifest.json";
 /// Update checks run at most this often.
 pub const CHECK_INTERVAL_SECS: i64 = 24 * 3600;
 
-/// Errors from the release side.
+/// Errors from the release side. `Display` is written for people; the
+/// technical detail, where there is one, is in [`ReleaseError::detail`].
 #[derive(Debug)]
 pub enum ReleaseError {
-    /// HTTP failure.
+    /// `releases/latest` is 404: nothing published yet (or no such repo).
+    NoRelease,
+    /// No network, DNS failure, refused or timed-out connection.
+    Offline(String),
+    /// GitHub's API rate limit (HTTP 403/429).
+    RateLimited,
+    /// Any other HTTP failure.
     Http(String),
     /// The release has no `manifest.json`, or it doesn't parse.
     Manifest(String),
@@ -38,16 +45,51 @@ pub enum ReleaseError {
     Io(io::Error),
 }
 
+impl ReleaseError {
+    /// The technical detail behind the message, for logs.
+    pub fn detail(&self) -> Option<String> {
+        match self {
+            ReleaseError::Offline(d) | ReleaseError::Http(d) | ReleaseError::Manifest(d) => Some(d.clone()),
+            ReleaseError::HashMismatch { expected, actual, .. } => Some(format!("expected {expected}, got {actual}")),
+            ReleaseError::Io(e) => Some(e.to_string()),
+            _ => None,
+        }
+    }
+
+    fn from_ureq(url: &str, e: ureq::Error) -> Self {
+        match e {
+            ureq::Error::StatusCode(404) if url.ends_with("/releases/latest") => ReleaseError::NoRelease,
+            ureq::Error::StatusCode(403 | 429) => ReleaseError::RateLimited,
+            ureq::Error::StatusCode(c) => ReleaseError::Http(format!("HTTP {c} from {url}")),
+            ureq::Error::HostNotFound
+            | ureq::Error::ConnectionFailed
+            | ureq::Error::Timeout(_)
+            | ureq::Error::Io(_) => ReleaseError::Offline(format!("{url}: {e}")),
+            other => ReleaseError::Http(format!("{url}: {other}")),
+        }
+    }
+}
+
 impl std::fmt::Display for ReleaseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ReleaseError::Http(e) => write!(f, "download failed: {e}"),
-            ReleaseError::Manifest(e) => write!(f, "bad release manifest: {e}"),
-            ReleaseError::MissingAsset(n) => write!(f, "release has no asset {n}"),
-            ReleaseError::HashMismatch { file, expected, actual } => {
-                write!(f, "{file}: sha256 {actual} does not match manifest {expected}")
+            ReleaseError::NoRelease => write!(f, "No firmware has been published yet."),
+            ReleaseError::Offline(_) => write!(f, "Couldn't reach GitHub. Check your internet connection and try again."),
+            ReleaseError::RateLimited => {
+                write!(f, "GitHub is limiting requests from this network right now. Try again in a few minutes.")
             }
-            ReleaseError::Io(e) => write!(f, "{e}"),
+            ReleaseError::Http(_) => write!(f, "GitHub didn't answer properly. Try again in a minute."),
+            ReleaseError::Manifest(_) => write!(f, "This release's manifest.json is damaged or from a newer app."),
+            ReleaseError::MissingAsset(n) => write!(f, "This release is missing {n}."),
+            ReleaseError::HashMismatch { file, .. } => write!(
+                f,
+                "{file} doesn't match its checksum, so it wasn't used. Try again; if it keeps happening, the release is broken."
+            ),
+            ReleaseError::Io(e) => match e.kind() {
+                io::ErrorKind::PermissionDenied => write!(f, "No permission to read or write that file."),
+                io::ErrorKind::NotFound => write!(f, "File not found."),
+                _ => write!(f, "{e}"),
+            },
         }
     }
 }
@@ -85,16 +127,21 @@ pub struct Release {
 
 const USER_AGENT: &str = concat!("clawdmeter/", env!("CARGO_PKG_VERSION"));
 
+/// The `releases/latest` API URL for `repo`.
+pub fn latest_url(repo: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/latest")
+}
+
 fn get(url: &str) -> Result<ureq::http::Response<ureq::Body>, ReleaseError> {
     ureq::get(url)
         .header("User-Agent", USER_AGENT)
         .header("Accept", "application/vnd.github+json, application/octet-stream, */*")
         .call()
-        .map_err(|e| ReleaseError::Http(format!("{url}: {e}")))
+        .map_err(|e| ReleaseError::from_ureq(url, e))
 }
 
 fn get_string(url: &str) -> Result<String, ReleaseError> {
-    get(url)?.body_mut().read_to_string().map_err(|e| ReleaseError::Http(format!("{url}: {e}")))
+    get(url)?.body_mut().read_to_string().map_err(|e| ReleaseError::Offline(format!("{url}: {e}")))
 }
 
 /// Turn a GitHub "latest release" API response into a [`Release`], given a
@@ -112,7 +159,7 @@ fn release_from_api(
 
 /// Fetch the latest release of `repo` (`owner/name`).
 pub fn latest_release(repo: &str) -> Result<Release, ReleaseError> {
-    let api = get_string(&format!("https://api.github.com/repos/{repo}/releases/latest"))?;
+    let api = get_string(&latest_url(repo))?;
     release_from_api(&api, get_string)
 }
 
@@ -161,7 +208,7 @@ pub fn fetch_image(
     let mut data = Vec::with_capacity(total as usize);
     let mut buf = [0u8; 16 * 1024];
     loop {
-        let n = reader.read(&mut buf).map_err(|e| ReleaseError::Http(e.to_string()))?;
+        let n = reader.read(&mut buf).map_err(|e| ReleaseError::Offline(format!("{url}: {e}")))?;
         if n == 0 {
             break;
         }
@@ -251,6 +298,26 @@ mod tests {
         // Path components are stripped: it looks for `passwd` in the cache.
         assert!(fetch_image(&r, &evil, &dir, |_, _| {}).is_err());
         let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn error_copy() {
+        let latest = latest_url("o/r");
+        assert_eq!(
+            ReleaseError::from_ureq(&latest, ureq::Error::StatusCode(404)).to_string(),
+            "No firmware has been published yet."
+        );
+        assert!(matches!(
+            ReleaseError::from_ureq("https://x/a.bin", ureq::Error::StatusCode(404)),
+            ReleaseError::Http(_)
+        ));
+        assert!(matches!(ReleaseError::from_ureq(&latest, ureq::Error::StatusCode(403)), ReleaseError::RateLimited));
+        let off = ReleaseError::from_ureq(&latest, ureq::Error::HostNotFound);
+        assert!(matches!(off, ReleaseError::Offline(_)));
+        assert!(!off.to_string().contains("http"), "no URL dumps in the message");
+        assert!(off.detail().unwrap().contains(&latest), "but the log keeps it");
+        let bad = ReleaseError::HashMismatch { file: "a.bin".into(), expected: "aa".into(), actual: "bb".into() };
+        assert!(bad.to_string().starts_with("a.bin doesn't match its checksum"));
     }
 
     #[test]

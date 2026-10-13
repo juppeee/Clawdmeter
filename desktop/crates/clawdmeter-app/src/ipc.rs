@@ -338,7 +338,7 @@ mod tests {
                 reading: reading.then(|| UsageReading {
                     session: Some(Window { pct: 3, resets_at: None }),
                     week: Some(Window { pct: 12, resets_at: None }),
-                    models: vec![],
+                    ..Default::default()
                 }),
                 ..Default::default()
             },

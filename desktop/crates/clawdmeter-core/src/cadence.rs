@@ -237,7 +237,7 @@ mod tests {
         assert_eq!(Cadence::from_settings(300, false), Cadence::default());
     }
 
-    // Ported from daemon/tests/test_bash_heartbeat.sh: heartbeat timing.
+    // Ported from the legacy daemon test test_bash_heartbeat.sh: heartbeat timing.
     #[test]
     fn heartbeat_timing() {
         assert!(!heartbeat_due(None, 60, 1000));

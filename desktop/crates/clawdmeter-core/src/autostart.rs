@@ -213,25 +213,117 @@ pub fn disable(home: &Path, mode: LaunchMode) -> io::Result<()> {
     }
 }
 
-/// Whether the login entry is present.
+/// Whether the login entry is present. On Windows the Run value must be
+/// ours: the old Python tray used the same value name.
 pub fn is_enabled(home: &Path, mode: LaunchMode) -> bool {
     if cfg!(windows) {
-        return run_quiet("reg", &["query", RUN_KEY, "/v", RUN_VALUE]).unwrap_or(false);
+        return windows_run_value().is_some_and(|cmd| !is_legacy_run_command(&cmd));
     }
     entry_path(home, mode).is_some_and(|p| p.exists())
 }
 
-/// Stop and disable the old daemon's login entry (bash systemd unit or the
-/// Python LaunchAgent) so it doesn't fight the app for the device. Best effort.
-pub fn disable_legacy(home: &Path) {
-    if cfg!(target_os = "macos") {
-        let p = home.join("Library/LaunchAgents").join(format!("{LEGACY_LAUNCH_AGENT_LABEL}.plist"));
-        if p.exists() {
-            let _ = run_quiet("launchctl", &["unload", "-w", &p.to_string_lossy()]);
+/// The current `Clawdmeter` Run value (Windows), if any.
+fn windows_run_value() -> Option<String> {
+    let out = Command::new("reg")
+        .args(["query", RUN_KEY, "/v", RUN_VALUE])
+        .stdin(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .output()
+        .ok()?;
+    out.status.success().then(|| parse_reg_value(&String::from_utf8_lossy(&out.stdout), RUN_VALUE)).flatten()
+}
+
+/// The data of value `name` in `reg query ... /v name` output:
+/// `    Clawdmeter    REG_SZ    "C:\...\pythonw.exe" "C:\...\tray_windows.py"`.
+pub fn parse_reg_value(out: &str, name: &str) -> Option<String> {
+    out.lines().find_map(|l| {
+        let rest = l.trim_start().strip_prefix(name)?;
+        let rest = rest.trim_start();
+        let (ty, data) = rest.split_once(char::is_whitespace)?;
+        ty.starts_with("REG_").then(|| data.trim().to_owned())
+    })
+}
+
+/// True for the old Windows tray's Run command (`pythonw.exe ...
+/// daemon\tray_windows.py`), as opposed to the app's own.
+pub fn is_legacy_run_command(cmd: &str) -> bool {
+    let c = cmd.to_ascii_lowercase();
+    c.contains("tray_windows.py") || c.contains("claude_usage_daemon_windows.py") || c.contains("pythonw")
+}
+
+/// An old daemon's login entry that is still installed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LegacyEntry {
+    /// The bash daemon's systemd user unit (Linux).
+    SystemdUnit(PathBuf),
+    /// The Python daemon's LaunchAgent (macOS).
+    LaunchAgent(PathBuf),
+    /// The Python tray's `HKCU\...\Run\Clawdmeter` value (Windows); the
+    /// command line it runs.
+    RunValue(String),
+}
+
+impl LegacyEntry {
+    /// Where it lives, for the UI.
+    pub fn describe(&self) -> String {
+        match self {
+            LegacyEntry::SystemdUnit(p) | LegacyEntry::LaunchAgent(p) => p.display().to_string(),
+            LegacyEntry::RunValue(_) => format!("{RUN_KEY}\\{RUN_VALUE}"),
         }
-    } else if !cfg!(windows) {
-        let _ = run_quiet("systemctl", &["--user", "disable", "--now", LEGACY_SYSTEMD_UNIT]);
     }
+}
+
+/// The old daemon's login entry on this OS, if it is still installed.
+pub fn legacy_entry(home: &Path) -> Option<LegacyEntry> {
+    if cfg!(windows) {
+        return windows_run_value().filter(|c| is_legacy_run_command(c)).map(LegacyEntry::RunValue);
+    }
+    let p = legacy_entry_path(home);
+    if !p.exists() {
+        return None;
+    }
+    Some(if cfg!(target_os = "macos") { LegacyEntry::LaunchAgent(p) } else { LegacyEntry::SystemdUnit(p) })
+}
+
+/// Where the old daemon's unit / LaunchAgent lives (Linux / macOS).
+pub fn legacy_entry_path(home: &Path) -> PathBuf {
+    if cfg!(target_os = "macos") {
+        home.join("Library/LaunchAgents").join(format!("{LEGACY_LAUNCH_AGENT_LABEL}.plist"))
+    } else {
+        home.join(".config/systemd/user").join(LEGACY_SYSTEMD_UNIT)
+    }
+}
+
+/// Stop the old daemon and remove its login entry (bash systemd unit,
+/// Python LaunchAgent, or the Python tray's Run value) so it doesn't fight
+/// the app for the device. Best effort; returns what it turned off.
+///
+/// The entry is removed, not just disabled, so [`legacy_entry`] stops
+/// reporting it. A running Windows tray keeps running until it is quit or
+/// the user logs out (it can't be told apart from other `pythonw.exe`s).
+pub fn disable_legacy(home: &Path) -> Option<LegacyEntry> {
+    disable_legacy_with(home, &mut |cmd, args| {
+        let _ = run_quiet(cmd, args);
+    })
+}
+
+/// [`disable_legacy`] with the service-manager commands handed to `run`
+/// (tests record them instead of stopping a real service).
+pub fn disable_legacy_with(home: &Path, run: &mut dyn FnMut(&str, &[&str])) -> Option<LegacyEntry> {
+    let entry = legacy_entry(home)?;
+    match &entry {
+        LegacyEntry::SystemdUnit(p) => {
+            run("systemctl", &["--user", "disable", "--now", LEGACY_SYSTEMD_UNIT]);
+            let _ = fs::remove_file(p);
+            run("systemctl", &["--user", "daemon-reload"]);
+        }
+        LegacyEntry::LaunchAgent(p) => {
+            run("launchctl", &["unload", "-w", &p.to_string_lossy()]);
+            let _ = fs::remove_file(p);
+        }
+        LegacyEntry::RunValue(_) => run("reg", &["delete", RUN_KEY, "/v", RUN_VALUE, "/f"]),
+    }
+    Some(entry)
 }
 
 #[cfg(test)]
@@ -270,6 +362,54 @@ mod tests {
             r#""C:\Program Files\Clawdmeter\clawdmeter.exe""#
         );
         assert!(windows_run_command(Path::new("c.exe"), LaunchMode::Daemon).ends_with(" --daemon"));
+    }
+
+    // Ported from test_windows_autostart.py: the Run value name and the
+    // pythonw command the old tray wrote.
+    #[test]
+    fn windows_legacy_run_value() {
+        let out = "\r\nHKEY_CURRENT_USER\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\r\n    Clawdmeter    REG_SZ    \"C:\\Python313\\pythonw.exe\" \"C:\\Users\\me\\Clawdmeter\\daemon\\tray_windows.py\"\r\n\r\n";
+        let cmd = parse_reg_value(out, RUN_VALUE).unwrap();
+        assert_eq!(cmd, r#""C:\Python313\pythonw.exe" "C:\Users\me\Clawdmeter\daemon\tray_windows.py""#);
+        assert!(is_legacy_run_command(&cmd));
+        let ours = windows_run_command(Path::new(r"C:\Program Files\Clawdmeter\clawdmeter.exe"), LaunchMode::Tray);
+        assert!(!is_legacy_run_command(&ours));
+        assert_eq!(
+            parse_reg_value(&format!("    Clawdmeter    REG_SZ    {ours}\r\n"), RUN_VALUE).as_deref(),
+            Some(ours.as_str())
+        );
+        assert_eq!(
+            parse_reg_value("ERROR: The system was unable to find the specified registry key or value.", RUN_VALUE),
+            None
+        );
+        assert_eq!(parse_reg_value("    ClawdmeterX    REG_SZ    x", RUN_VALUE), None);
+    }
+
+    // Never runs a real systemctl: that would stop the developer's own
+    // legacy daemon.
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_legacy_unit_is_detected_and_removed() {
+        let home = std::env::temp_dir().join(format!("cm-legacy-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&home);
+        let mut ran: Vec<String> = Vec::new();
+        let mut record = |c: &str, a: &[&str]| ran.push(format!("{c} {}", a.join(" ")));
+        assert_eq!(legacy_entry(&home), None);
+        assert_eq!(disable_legacy_with(&home, &mut record), None);
+        let unit = home.join(".config/systemd/user").join(LEGACY_SYSTEMD_UNIT);
+        write_file(&unit, "[Service]\nExecStart=/x/claude-usage-daemon.sh\n").unwrap();
+        assert_eq!(legacy_entry(&home), Some(LegacyEntry::SystemdUnit(unit.clone())));
+        assert_eq!(disable_legacy_with(&home, &mut record), Some(LegacyEntry::SystemdUnit(unit.clone())));
+        assert!(!unit.exists());
+        assert_eq!(legacy_entry(&home), None);
+        assert_eq!(
+            ran,
+            [
+                "systemctl --user disable --now claude-usage-daemon.service".to_owned(),
+                "systemctl --user daemon-reload".to_owned()
+            ]
+        );
+        let _ = fs::remove_dir_all(&home);
     }
 
     #[cfg(target_os = "linux")]

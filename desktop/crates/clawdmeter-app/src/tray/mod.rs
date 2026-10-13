@@ -118,7 +118,7 @@ impl Items {
         self.account.set_text(match (account, snap.age(now)) {
             (Some(a), Some(age)) => format!("{a} · updated {}", ago(age)),
             (Some(a), None) => a,
-            (None, _) if snap.logged_out => "Run claude to log in again".into(),
+            (None, _) if snap.logged_out => "Run claude to sign in again".into(),
             (None, _) => "No data yet".into(),
         });
         self.session.set_text(match snap.session_pct {
@@ -378,7 +378,7 @@ fn spawn_update_checker(paths: Paths, latest: Arc<Mutex<Option<String>>>, now_fl
                             *l = Some(r.manifest.version);
                         }
                     }
-                    Err(e) => log::info!("update check: {e}"),
+                    Err(e) => log::info!("update check: {e} ({})", e.detail().unwrap_or_default()),
                 }
                 let _ = check.mark(unix_now());
             }
@@ -439,7 +439,7 @@ pub fn run(paths: Paths) -> i32 {
 }
 
 fn run_locked(paths: Paths, _lock: Option<std::fs::File>) -> i32 {
-    log::info!("=== Clawdmeter {} ===", env!("CARGO_PKG_VERSION"));
+    log::info!("=== Clawdmeter {} ===", crate::version());
     // Commands left by windows while no tray process ran (a "quit" among
     // them would end this run on its first tick).
     let stale = ipc::take_commands(&paths);
