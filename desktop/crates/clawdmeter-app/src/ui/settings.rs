@@ -977,17 +977,17 @@ impl SettingsView {
     fn alert_kinds(&self, t: &Theme, cx: &mut Context<Self>) -> impl IntoElement {
         type Pick = fn(&mut AlertOn) -> &mut bool;
         let rows: [(&'static str, &'static str, &'static str, Pick); 4] = [
-            ("alert-permission", "Permission requests", "A tool is waiting for your approval.", |a| &mut a.permission),
-            ("alert-question", "Questions", "Claude asks you to choose an answer.", |a| &mut a.question),
-            ("alert-idle", "Waiting for input", "The prompt has sat idle for a while.", |a| &mut a.idle),
-            ("alert-elicitation", "MCP input requests", "An MCP server asks you for details.", |a| &mut a.elicitation),
+            ("alert-permission", "Tool approvals", "Claude needs permission to run a tool.", |a| &mut a.permission),
+            ("alert-question", "Questions", "Claude has a question for you.", |a| &mut a.question),
+            ("alert-idle", "Idle sessions", "Claude has been waiting for your next prompt.", |a| &mut a.idle),
+            ("alert-elicitation", "MCP requests", "An MCP server needs information from you.", |a| &mut a.elicitation),
         ];
         let mut list = div()
             .flex()
             .flex_col()
             .pt(px(10.))
-            .child(subheading(t, "Alert me for"))
-            .child(caption(t, "Applies to every account. A turned-off kind never reaches the device or the tray."));
+            .child(subheading(t, "Alert types"))
+            .child(caption(t, "Applies to all accounts, on the device and in the tray."));
         let current = self.settings.alert_on;
         for (id, label, help, pick) in rows {
             let mut probe = current;
