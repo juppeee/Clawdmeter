@@ -12,6 +12,7 @@ use std::time::{Duration, Instant};
 
 use espflash::connection::{Connection, ResetAfterOperation, ResetBeforeOperation};
 use espflash::flasher::{FlashSize, Flasher};
+use espflash::image_format::Segment;
 use espflash::target::{Chip, ProgressCallbacks};
 use serde::Deserialize;
 use serialport::{SerialPortType, UsbPortInfo};
@@ -390,24 +391,28 @@ pub enum FlashProgress {
     Done,
 }
 
-/// Reports one segment's progress as bytes of the whole image, so a write
-/// split around NVS still reads as a single 0..total run.
+/// Reports espflash's per-segment progress as bytes of the whole image, so a
+/// write split around NVS still reads as a single 0..total run.
 struct Progress<'a, F: FnMut(FlashProgress)> {
     report: &'a mut F,
-    /// Image bytes written by earlier segments.
-    base: usize,
-    /// This segment's length in bytes.
-    len: usize,
-    /// espflash's unit count for this segment, from `init`.
+    /// `(flash address, image bytes before it, length)` per segment.
+    segments: Vec<(u32, usize, usize)>,
+    /// The segment being written, as `(bytes before it, length)`.
+    current: (usize, usize),
+    /// espflash's unit count for the current segment, from `init`.
     units: usize,
 }
 
 impl<F: FnMut(FlashProgress)> ProgressCallbacks for Progress<'_, F> {
-    fn init(&mut self, _addr: u32, total: usize) {
+    fn init(&mut self, addr: u32, total: usize) {
         self.units = total.max(1);
+        if let Some(&(_, base, len)) = self.segments.iter().find(|s| s.0 == addr) {
+            self.current = (base, len);
+        }
     }
     fn update(&mut self, current: usize) {
-        let done = self.base + current.min(self.units) * self.len / self.units;
+        let (base, len) = self.current;
+        let done = base + current.min(self.units) * len / self.units;
         (self.report)(FlashProgress::Write { done });
     }
     fn verifying(&mut self) {
@@ -476,15 +481,23 @@ pub fn flash_merged(
         let _ = f.connection().reset();
         return Err(DeviceError::WrongChip { found: got, expected: expected_chip.chip_id() });
     }
-    let segments = write_segments(image.len(), &preserved_ranges(image));
-    progress(FlashProgress::Start { total: segments.iter().map(|r| r.len()).sum() });
+    // One write session for every segment: espflash reboots the chip when a
+    // session ends, so a second session would find no bootloader.
+    let ranges = write_segments(image.len(), &preserved_ranges(image));
+    let total = ranges.iter().map(|r| r.len()).sum();
     let mut base = 0;
-    for r in segments {
-        let mut cb = Progress { report: &mut progress, base, len: r.len(), units: 1 };
-        f.write_bin_to_flash(r.start as u32, &image[r.clone()], &mut cb)
-            .map_err(|e| DeviceError::Flash(e.to_string()))?;
+    let mut table = Vec::new();
+    let mut segments = Vec::new();
+    for r in ranges {
+        table.push((r.start as u32, base, r.len()));
         base += r.len();
+        let mut data = image[r.clone()].to_vec();
+        data.resize(data.len().next_multiple_of(4), 0xFF);
+        segments.push(Segment { addr: r.start as u32, data: data.into() });
     }
+    progress(FlashProgress::Start { total });
+    let mut cb = Progress { report: &mut progress, segments: table, current: (0, 0), units: 1 };
+    f.write_bins_to_flash(&segments, &mut cb).map_err(|e| DeviceError::Flash(e.to_string()))?;
     progress(FlashProgress::Done);
     // With the stub loader the host does the reboot.
     let chip = f.chip();
