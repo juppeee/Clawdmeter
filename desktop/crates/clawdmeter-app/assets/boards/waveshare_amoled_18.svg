@@ -1,44 +1,14 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="132" height="172" viewBox="62.0 12.5 132.0 172.5">
-<title>Waveshare ESP32-S3 AMOLED 1.8</title>
-<ellipse cx="128.0" cy="172" rx="60.0" ry="7" fill="#000000" opacity="0.14"/>
-<g transform="translate(120 98) skewY(-6) translate(-120 -98)">
-<rect x="81.7" y="29.1" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="81.2" y="28.9" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="80.8" y="28.6" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="80.3" y="28.3" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="79.9" y="28.1" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="79.5" y="27.8" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="79.0" y="27.5" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="78.5" y="27.2" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="78.1" y="26.9" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="77.7" y="26.7" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="77.2" y="26.4" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="76.8" y="26.1" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="76.3" y="25.9" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="75.8" y="25.6" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="75.4" y="25.3" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="75.0" y="25.0" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="74.5" y="24.8" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="74.0" y="24.5" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="73.6" y="24.2" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="73.2" y="23.9" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="72.7" y="23.6" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="72.2" y="23.4" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="71.8" y="23.1" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="71.3" y="22.8" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="70.9" y="22.6" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="70.5" y="22.3" width="100.0" height="134.0" rx="18.0" fill="#0c0c0c"/>
-<rect x="70.0" y="22.0" width="100.0" height="134.0" rx="18.0" fill="#1d1d1c"/>
-<rect x="70.6" y="22.6" width="98.8" height="132.8" rx="17.4" fill="none" stroke="#3a3936" stroke-width="1.2"/>
-<rect x="178.5" y="52.0" width="5.0" height="13.0" rx="2.5" fill="#2e2d2a"/>
-<rect x="178.5" y="72.0" width="5.0" height="13.0" rx="2.5" fill="#2e2d2a"/>
-<rect x="114.0" y="162.0" width="16.0" height="4.0" rx="2.0" fill="#3a3936"/>
-<rect x="78.0" y="31.0" width="84.0" height="116.0" rx="11.0" fill="#000000"/>
-<path d="M110.48 54.20h2.38v2.38h-2.38zM112.86 54.20h2.38v2.38h-2.38zM115.24 54.20h2.38v2.38h-2.38zM117.62 54.20h2.38v2.38h-2.38zM120.00 54.20h2.38v2.38h-2.38zM122.38 54.20h2.38v2.38h-2.38zM124.76 54.20h2.38v2.38h-2.38zM127.14 54.20h2.38v2.38h-2.38zM110.48 56.58h2.38v2.38h-2.38zM115.24 56.58h2.38v2.38h-2.38zM117.62 56.58h2.38v2.38h-2.38zM120.00 56.58h2.38v2.38h-2.38zM122.38 56.58h2.38v2.38h-2.38zM127.14 56.58h2.38v2.38h-2.38zM105.72 58.96h2.38v2.38h-2.38zM108.10 58.96h2.38v2.38h-2.38zM110.48 58.96h2.38v2.38h-2.38zM112.86 58.96h2.38v2.38h-2.38zM115.24 58.96h2.38v2.38h-2.38zM117.62 58.96h2.38v2.38h-2.38zM120.00 58.96h2.38v2.38h-2.38zM122.38 58.96h2.38v2.38h-2.38zM124.76 58.96h2.38v2.38h-2.38zM127.14 58.96h2.38v2.38h-2.38zM129.52 58.96h2.38v2.38h-2.38zM131.90 58.96h2.38v2.38h-2.38zM105.72 61.34h2.38v2.38h-2.38zM108.10 61.34h2.38v2.38h-2.38zM110.48 61.34h2.38v2.38h-2.38zM112.86 61.34h2.38v2.38h-2.38zM115.24 61.34h2.38v2.38h-2.38zM117.62 61.34h2.38v2.38h-2.38zM120.00 61.34h2.38v2.38h-2.38zM122.38 61.34h2.38v2.38h-2.38zM124.76 61.34h2.38v2.38h-2.38zM127.14 61.34h2.38v2.38h-2.38zM129.52 61.34h2.38v2.38h-2.38zM131.90 61.34h2.38v2.38h-2.38zM110.48 63.72h2.38v2.38h-2.38zM112.86 63.72h2.38v2.38h-2.38zM115.24 63.72h2.38v2.38h-2.38zM117.62 63.72h2.38v2.38h-2.38zM120.00 63.72h2.38v2.38h-2.38zM122.38 63.72h2.38v2.38h-2.38zM124.76 63.72h2.38v2.38h-2.38zM127.14 63.72h2.38v2.38h-2.38zM110.48 66.10h2.38v2.38h-2.38zM112.86 66.10h2.38v2.38h-2.38zM115.24 66.10h2.38v2.38h-2.38zM117.62 66.10h2.38v2.38h-2.38zM120.00 66.10h2.38v2.38h-2.38zM122.38 66.10h2.38v2.38h-2.38zM124.76 66.10h2.38v2.38h-2.38zM127.14 66.10h2.38v2.38h-2.38zM110.48 68.48h2.38v2.38h-2.38zM115.24 68.48h2.38v2.38h-2.38zM122.38 68.48h2.38v2.38h-2.38zM127.14 68.48h2.38v2.38h-2.38zM110.48 70.86h2.38v2.38h-2.38zM115.24 70.86h2.38v2.38h-2.38zM122.38 70.86h2.38v2.38h-2.38zM127.14 70.86h2.38v2.38h-2.38z" fill="#d97757"/>
-<path d="M112.86 56.58h2.38v2.38h-2.38zM124.76 56.58h2.38v2.38h-2.38z" fill="#141413"/>
-<rect x="92.3" y="87.2" width="55.4" height="5.2" rx="2.6" fill="#2a2a28"/>
-<rect x="92.3" y="87.2" width="18.8" height="5.2" rx="2.6" fill="#788c5d"/>
-<rect x="92.3" y="102.2" width="55.4" height="5.2" rx="2.6" fill="#2a2a28"/>
-<rect x="92.3" y="102.2" width="34.4" height="5.2" rx="2.6" fill="#d97757"/>
-</g>
+<svg xmlns="http://www.w3.org/2000/svg" width="110" height="133" viewBox="-47.45 -66.37 109.51 133.08">
+<title>Waveshare ESP32-S3-Touch-AMOLED-1.8</title>
+<ellipse cx="7.31" cy="58.71" rx="45.99" ry="4.5" fill="#000" opacity="0.14"/>
+<g transform="matrix(2.07 0.12 0 2.28 -44.45 -59.71)"><path d="M9 9 L16.07 7.02 L41.07 7.02 L41.07 39.02 L34 41 L9 41Z" fill="#454545" stroke="#454545" stroke-width="18.9" stroke-linejoin="round"/><path d="M9 9 L16.07 7.02 L41.07 7.02 L41.07 39.02 L34 41 L9 41Z" fill="#202020" stroke="#202020" stroke-width="18" stroke-linejoin="round"/></g>
+<g transform="matrix(2.07 0.12 1.01 -0.25 -44.45 -59.71)"><rect x="9" y="0" width="25" height="14.5" rx="0" fill="#2c2c2c"/></g>
+<g transform="matrix(1.01 -0.25 0 2.28 44.45 -54.43)"><rect x="0" y="9" width="14.5" height="32" rx="0" fill="#191919"/></g>
+<g transform="matrix(1.01 -0.25 0 2.28 44.45 -54.43)"><rect x="5.25" y="12" width="4" height="6" rx="1.6" fill="#0a0a0a"/></g>
+<g transform="matrix(1.01 -0.25 0 2.28 45.89 -54.34)"><rect x="5.55" y="12.3" width="3.4" height="5.4" rx="1.4" fill="#2e2e2e"/></g>
+<g transform="matrix(1.01 -0.25 0 2.28 44.45 -54.43)"><rect x="5.25" y="32" width="4" height="6" rx="1.6" fill="#0a0a0a"/></g>
+<g transform="matrix(1.01 -0.25 0 2.28 45.89 -54.34)"><rect x="5.55" y="32.3" width="3.4" height="5.4" rx="1.4" fill="#2e2e2e"/></g>
+<g transform="matrix(1.01 -0.25 0 2.28 44.45 -54.43)"><rect x="5.35" y="20.5" width="3.8" height="9" rx="1.9" fill="#050505"/></g>
+<g transform="matrix(1.01 -0.25 0 2.28 44.45 -54.43)"><rect x="6.65" y="21.8" width="1.2" height="6.4" rx="0.6" fill="#3a3a3a"/></g>
+<g transform="matrix(2.07 0.12 0 2.28 -44.45 -59.71)"><rect x="-0.45" y="-0.45" width="43.9" height="50.9" rx="9.45" fill="#454545"/><rect x="0" y="0" width="43" height="50" rx="9" fill="#232323"/><rect x="1.6" y="1.6" width="39.8" height="46.8" rx="7.6" fill="#0a0a0a"/><rect x="3.2" y="3.4" width="36.6" height="43.2" rx="6" fill="#000000"/><path d="M17.36 12.04h8.29v1.04h-8.29zM17.36 13.08h1.04v1.04h-1.04zM19.43 13.08h4.14v1.04h-4.14zM24.61 13.08h1.04v1.04h-1.04zM15.29 14.11h12.43v1.04h-12.43zM15.29 15.15h12.43v1.04h-12.43zM17.36 16.18h8.29v1.04h-8.29zM17.36 17.22h8.29v1.04h-8.29zM17.36 18.25h1.04v1.04h-1.04zM19.43 18.25h1.04v1.04h-1.04zM22.54 18.25h1.04v1.04h-1.04zM24.61 18.25h1.04v1.04h-1.04zM17.36 19.29h1.04v1.04h-1.04zM19.43 19.29h1.04v1.04h-1.04zM22.54 19.29h1.04v1.04h-1.04zM24.61 19.29h1.04v1.04h-1.04z" fill="#d97757"/><path d="M18.39 13.08h1.04v1.04h-1.04zM23.57 13.08h1.04v1.04h-1.04z" fill="#141413"/><rect x="9.42" y="26.73" width="24.16" height="1.72" rx="0.86" fill="#2a2a28"/><rect x="9.42" y="26.73" width="8.21" height="1.72" rx="0.86" fill="#788c5d"/><rect x="9.42" y="32.34" width="24.16" height="1.72" rx="0.86" fill="#2a2a28"/><rect x="9.42" y="32.34" width="14.98" height="1.72" rx="0.86" fill="#d97757"/><rect x="1.6" y="1.6" width="39.8" height="46.8" rx="7.6" fill="none" stroke="#3a3a3a" stroke-width="0.4"/></g>
 </svg>
