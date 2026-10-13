@@ -119,6 +119,12 @@ pub struct StatusSnapshot {
     /// No tray icon: the window is the app, and closing it quits.
     #[serde(default)]
     pub windowed: bool,
+    /// Unix seconds the session window resets (`None`: not started).
+    #[serde(default)]
+    pub session_resets_at: Option<i64>,
+    /// Unix seconds the weekly window resets (`None`: unknown).
+    #[serde(default)]
+    pub week_resets_at: Option<i64>,
 }
 
 impl StatusSnapshot {
@@ -168,6 +174,11 @@ impl StatusSnapshot {
             refresh_at: e.refresh_at,
             polling: e.polling,
             windowed: false,
+            session_resets_at: reading
+                .and_then(|r| r.session.as_ref())
+                .and_then(|w| w.resets_at)
+                .map(|t| t.timestamp()),
+            week_resets_at: reading.and_then(|r| r.week.as_ref()).and_then(|w| w.resets_at).map(|t| t.timestamp()),
         }
     }
 

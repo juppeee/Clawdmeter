@@ -8,7 +8,7 @@
 //!   cargo run -p clawdmeter-app --example demo -- [--page PAGE] [--status connected|off]
 //!   [--board none|fresh|current|old] [--setup welcome|board|flash|pair|hooks|done] [--hooks-preview]
 //!   [--flash-to identify|firmware|flash|done] [--shop] [--accounts retrying] [--refresh wait|checking]
-//!   [--advanced]
+//!   [--advanced] [--session idle]
 //! ```
 //!
 //! `--accounts retrying` adds a second account that is being rate-limited;
@@ -108,7 +108,7 @@ fn release(paths: &Paths) -> std::path::PathBuf {
     dir.join("manifest.json")
 }
 
-fn fake_status(paths: &Paths, retrying: bool, refresh: Option<String>) {
+fn fake_status(paths: &Paths, retrying: bool, refresh: Option<String>, idle: bool) {
     let paths = paths.clone();
     let work = paths.home.join(".claude-work");
     if retrying {
@@ -133,9 +133,11 @@ fn fake_status(paths: &Paths, retrying: bool, refresh: Option<String>) {
             device_key: Some("AA:BB:CC:DD:EE:FF".into()),
             device_name: Some("Clawdmeter".into()),
             account: Some(paths.home.join(".claude").display().to_string()),
-            session_pct: Some(34),
+            session_pct: Some(if idle { 0 } else { 34 }),
             week_pct: Some(62),
-            window_started: true,
+            window_started: !idle,
+            session_resets_at: (!idle).then_some(started + 177 * 60),
+            week_resets_at: Some(started + (5 * 24 + 11) * 3600 + 30),
             read_at: Some(now - 15),
             hooks: true,
             last_write_at: Some(now - 5),
@@ -158,7 +160,12 @@ fn main() {
     std::fs::create_dir_all(paths.home.join(".claude")).unwrap();
     std::fs::create_dir_all(&paths.state_dir).unwrap();
     if arg(&args, "--status").as_deref() != Some("off") {
-        fake_status(&paths, arg(&args, "--accounts").as_deref() == Some("retrying"), arg(&args, "--refresh"));
+        fake_status(
+            &paths,
+            arg(&args, "--accounts").as_deref() == Some("retrying"),
+            arg(&args, "--refresh"),
+            arg(&args, "--session").as_deref() == Some("idle"),
+        );
         let _ = ipc::save_firmware_record(&paths, &FirmwareRecord { env: ENV.into(), ver: "1.8.2".into() });
     } else {
         let _ = std::fs::remove_file(ipc::status_file(&paths));

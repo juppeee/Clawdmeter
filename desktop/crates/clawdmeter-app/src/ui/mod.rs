@@ -195,7 +195,7 @@ fn resize_cursor(edge: ResizeEdge) -> CursorStyle {
 }
 
 /// Height of our own header bar (Adwaita's).
-const HEADER_H: f32 = 46.;
+pub(crate) const HEADER_H: f32 = 46.;
 
 /// The window frame: nothing of ours when the platform draws a title bar,
 /// otherwise (GNOME on Wayland, see [`decorations`]) a header bar in the

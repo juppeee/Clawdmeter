@@ -215,16 +215,6 @@ impl AppView {
         for page in [Page::Accounts, Page::Hooks] {
             claude = claude.child(self.nav_item(t, page, badge(page), locked, cx));
         }
-        let setup = div()
-            .id("run-setup")
-            .debug_selector(|| "run-setup".into())
-            .text_color(if locked { t.mute } else { t.dim })
-            .when(!locked, |d| {
-                d.cursor_pointer()
-                    .hover(|s| s.text_color(t.text))
-                    .on_click(cx.listener(|v, _, _, cx| v.go(Page::Setup, cx)))
-            })
-            .child("Run setup again");
         let footer = div()
             .flex()
             .flex_col()
@@ -233,7 +223,6 @@ impl AppView {
             .pt(px(12.))
             .text_size(px(12.))
             .text_color(t.mute)
-            .child(div().flex().child(setup))
             .child(
                 div().flex().gap(px(4.)).whitespace_nowrap().child("Created by").child(
                     div()
@@ -293,6 +282,11 @@ impl Render for AppView {
                 Page::Flash => self.flasher.clone().into_any_element(),
                 _ => self.settings.clone().into_any_element(),
             };
+            let header = match window.window_decorations() {
+                gpui::Decorations::Client { .. } => px(super::HEADER_H),
+                gpui::Decorations::Server => px(0.),
+            };
+            let page_h = window.viewport_size().height - header;
             div().size_full().flex().child(self.sidebar(&t, cx)).child(
                 div()
                     .id("page")
@@ -300,7 +294,19 @@ impl Render for AppView {
                     .min_w_0()
                     .h_full()
                     .overflow_y_scroll()
-                    .child(div().max_w(px(720.)).px(px(32.)).pt(px(28.)).pb(px(32.)).child(content)),
+                    // At least the visible height, so a page can pin
+                    // something to its foot; taller pages scroll.
+                    .child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .min_h(page_h)
+                            .max_w(px(720.))
+                            .px(px(32.))
+                            .pt(px(28.))
+                            .pb(px(24.))
+                            .child(content),
+                    ),
             )
         };
         chrome(&t, window, body)
@@ -344,6 +350,7 @@ mod tests {
         cx.run_until_parked();
         view.read_with(cx, |v, _| assert_eq!(v.page(), Page::Settings));
 
+        click(cx, "nav-overview");
         click(cx, "run-setup");
         view.read_with(cx, |v, _| assert_eq!(v.page(), Page::Setup));
         click(cx, "skip-setup");

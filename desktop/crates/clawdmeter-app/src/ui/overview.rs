@@ -2,10 +2,10 @@
 //! meters, a refresh button, and a nudge when new firmware is out.
 
 use clawdmeter_core::Paths;
-use gpui::{div, prelude::*, px, Context, EventEmitter, SharedString, Window};
+use gpui::{div, prelude::*, px, relative, rgb, Context, EventEmitter, Rgba, SharedString, Window};
 
-use super::theme::{Theme, FONT_DISPLAY, FONT_MONO};
-use super::widgets::{bar, button, card, clawd, dot, icon_button, notice, tone_color, usage_tone, ButtonKind, Tone};
+use super::theme::{Theme, FONT_BODY, FONT_DISPLAY, R_M, R_PILL};
+use super::widgets::{button, clawd, dot, icon_button, notice, tone_color, usage_tone, ButtonKind, Tone};
 use super::{command, live_status, not_running_text, Navigate, REFRESH};
 use crate::art::TrayState;
 use crate::ipc::{AppCommand, StatusSnapshot};
@@ -130,29 +130,68 @@ pub fn state_title(s: &StatusSnapshot) -> &'static str {
     }
 }
 
-fn meter(t: &Theme, label: &'static str, pct: Option<u32>, note: Option<&'static str>) -> impl IntoElement {
-    let value = match (pct, note) {
-        (_, Some(n)) => n.to_owned(),
-        (Some(p), None) => format!("{p}%"),
-        (None, None) => "–".into(),
-    };
-    let color = match (pct, note) {
-        (Some(p), None) => tone_color(t, usage_tone(p)),
-        _ => t.track,
-    };
+/// The device's reset line (`format_reset_time` in firmware/src/ui.cpp).
+pub fn reset_text(resets_at: Option<i64>, now: i64, none: &str) -> String {
+    let Some(t) = resets_at else { return none.to_owned() };
+    match (t - now).max(0) / 60 {
+        m if m < 60 => format!("Resets in {m}m"),
+        m if m < 1440 => format!("Resets in {}h {}m", m / 60, m % 60),
+        m => format!("Resets in {}d {}h", m / 1440, (m % 1440) / 60),
+    }
+}
+
+/// The device's bar fill for a percentage (`pct_color` in ui.cpp): green
+/// below 50, amber below 80, red from 80; the light theme's own tones.
+fn fill(t: &Theme, pct: u32) -> Rgba {
+    match (t.dark, usage_tone(pct)) {
+        (true, Tone::Ok) => rgb(0x788c5d),
+        (true, Tone::Accent) => rgb(0xd97757),
+        (true, _) => rgb(0xc0392b),
+        (false, tone) => tone_color(t, tone),
+    }
+}
+
+/// One usage panel as the device draws it: the big percentage at the top
+/// left, the label as a pill at the top right, the track and fill, and the
+/// reset line.
+fn meter(t: &Theme, label: &'static str, pct: Option<u32>, reset: String) -> impl IntoElement {
+    let value = pct.map_or_else(|| "--%".to_owned(), |p| format!("{p}%"));
+    let frac = pct.unwrap_or(0).min(100) as f32 / 100.;
     div()
         .flex()
         .flex_col()
-        .gap(px(10.))
+        .p(px(16.))
+        .rounded(px(R_M))
+        .bg(t.panel)
+        .font_family(FONT_BODY)
         .child(
             div()
                 .flex()
-                .items_baseline()
+                .items_start()
                 .justify_between()
-                .child(div().text_size(px(14.)).text_color(t.dim).child(label))
-                .child(div().font_family(FONT_MONO).text_size(px(20.)).text_color(t.text).child(value)),
+                .child(div().text_size(px(36.)).line_height(px(40.)).text_color(t.text).child(value))
+                .child(
+                    div()
+                        .mt(px(2.))
+                        .px(px(12.))
+                        .py(px(3.))
+                        .rounded(px(R_PILL))
+                        .bg(t.track)
+                        .text_size(px(14.))
+                        .text_color(t.text)
+                        .child(label),
+                ),
         )
-        .child(bar(t, pct.unwrap_or(0).min(100) as f32 / 100., color))
+        .child(
+            div()
+                .mt(px(10.))
+                .h(px(14.))
+                .w_full()
+                .rounded(px(4.))
+                .bg(t.track)
+                .child(div().h_full().w(relative(frac)).rounded(px(4.)).bg(fill(t, pct.unwrap_or(0)))),
+        )
+        .child(div().mt(px(8.)).text_size(px(15.)).text_color(t.dim).child(reset))
 }
 
 impl Render for OverviewView {
@@ -196,18 +235,31 @@ impl Render for OverviewView {
                     .child(div().text_size(px(13.)).text_color(t.mute).truncate().child(sub)),
             )
             .children(refresh);
-        let mut page = div().flex().flex_col().gap(px(20.)).child(header);
+        // The setup guide link sits at the foot of the page, bottom right.
+        let text = t.text;
+        let setup = div().flex_1().flex().items_end().justify_end().pt(px(16.)).child(
+            div()
+                .id("run-setup")
+                .debug_selector(|| "run-setup".into())
+                .text_size(px(13.))
+                .text_color(t.dim)
+                .cursor_pointer()
+                .hover(move |s| s.text_color(text))
+                .on_click(cx.listener(|_, _, _, cx| cx.emit(Navigate(Page::Setup))))
+                .child("Run setup guide again"),
+        );
+        let mut page = div().flex_1().flex().flex_col().gap(px(20.)).child(header);
         let Some(s) = self.snap.clone() else {
-            return page;
+            return page.child(setup);
         };
 
-        let session_note = (s.session_pct.is_some() && !s.window_started).then_some("Not started");
         page = page.child(
-            card(&t)
-                .p(px(20.))
-                .gap(px(20.))
-                .child(meter(&t, "Session", s.session_pct, session_note))
-                .child(meter(&t, "Weekly", s.week_pct, None)),
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(12.))
+                .child(meter(&t, "Session", s.session_pct, reset_text(s.session_resets_at, now, "Not started")))
+                .child(meter(&t, "Weekly", s.week_pct, reset_text(s.week_resets_at, now, "---"))),
         );
         if let Some(v) = s.update_available() {
             let v = v.trim_start_matches('v').to_owned();
@@ -224,7 +276,7 @@ impl Render for OverviewView {
                 ),
             );
         }
-        page
+        page.child(setup)
     }
 }
 
@@ -270,6 +322,14 @@ mod tests {
         let polling = StatusSnapshot { polling: true, ..Default::default() };
         assert_eq!(refresh_state(&polling, false, 1_000), RefreshState::Checking);
         assert_eq!(refresh_state(&StatusSnapshot::default(), false, 0), RefreshState::Ready);
+    }
+
+    #[test]
+    fn reset_lines_match_the_device() {
+        assert_eq!(reset_text(None, 0, "Not started"), "Not started");
+        assert_eq!(reset_text(Some(59 * 60 + 30), 0, "---"), "Resets in 59m");
+        assert_eq!(reset_text(Some(177 * 60), 0, "---"), "Resets in 2h 57m");
+        assert_eq!(reset_text(Some(5 * 1440 * 60 + 11 * 3600), 0, "---"), "Resets in 5d 11h");
     }
 
     #[test]
