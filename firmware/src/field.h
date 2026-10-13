@@ -4,9 +4,7 @@
 #include <lvgl.h>
 
 // A flat-colour shape on an overlay layer that redraws only what changes: a
-// body rectangle whose top edge can be a pixel-art staircase (a lean, drawn
-// as a shear instead of a rotation), plus a couple of small extra rectangles
-// (the face's arms).
+// body rectangle plus a couple of small extra rectangles (the face's arms).
 //
 // The face and the orange streak are big solid rectangles that slide across
 // the screen. As plain LVGL objects, every move invalidates their whole old
@@ -24,16 +22,9 @@
 // require an empty rectangle and no visible children).
 
 #define FIELD_EXTRAS 2
-#define FIELD_NO_TOP INT32_MAX
 
-// The body spans columns [body.x1, body.x2] and rows [top(x), body.y2]. With
-// lean == 0, top(x) = body.y1. Otherwise the top edge is a staircase of
-// |lean| / step + 1 equal-width bands, one step apart, centred on body.y1:
-// lean > 0 puts the right end lean px lower than the left.
 struct FieldShape {
-    lv_area_t body;      // screen coords; empty when x2 < x1 or y2 < y1
-    int32_t   lean;      // a multiple of step
-    int32_t   step;
+    lv_area_t body;                  // screen coords; empty when x2 < x1 or y2 < y1
     lv_area_t extra[FIELD_EXTRAS];   // empty when x2 < x1
 };
 
@@ -45,13 +36,15 @@ struct Field {
 
 void field_init(Field* f, lv_obj_t* parent, int32_t w, int32_t h, lv_color_t color);
 void field_set(Field* f, int32_t x1, int32_t y1, int32_t x2, int32_t y2);   // a flat rectangle
-// Any shape. Invalidates only what changed: per band of the old and new
-// staircase the rows its top edge moved, merged into a handful of areas
-// (LVGL keeps 32 per frame and redraws the whole screen past that), plus the
-// extras' old and new boxes.
+// Any shape. Invalidates only what changed: old vs new of the body and of
+// each extra (field_invalidate_change).
 void field_set_shape(Field* f, const FieldShape* s);
+// Invalidate, on `obj`, every pixel that differs between a solid rectangle
+// at `o` and at `n` (either may be empty): old XOR new, in at most four
+// areas. For solid children moved with invalidation paused (field_quietly),
+// like the face's open eyes.
+void field_invalidate_change(lv_obj_t* obj, const lv_area_t* o, const lv_area_t* n);
 void field_shape_init(FieldShape* s);      // empty body, no extras
-int32_t field_top_at(const FieldShape* s, int32_t x);   // FIELD_NO_TOP outside the body
 void field_clear(Field* f);                 // draw nothing (invalidates what it drew)
 bool field_empty(const Field* f);          // nothing drawn
 

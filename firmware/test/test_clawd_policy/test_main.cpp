@@ -194,78 +194,71 @@ static void test_corner_seat_leaves_headroom_for_the_jump(void) {
 }
 
 // ─── A tap on the meters ─────────────────────────────────────────────────────
-static TapInput tap_at(uint32_t now) {
-    TapInput in = { now, true, false, CORNER_FREE, true };
+static TapInput tap_in(CornerState c) {
+    TapInput in = { true, false, c };
     return in;
 }
 
-static void test_first_tap_earns_the_peek_then_small_reactions(void) {
-    PeekGate g; peek_gate_clear(&g);
-    TapInput in = tap_at(5 * SEC);
-    TEST_ASSERT_EQUAL_INT(TAP_PEEK, clawd_tap_react(&g, &in, &T));
-    peek_gate_mark(&g, 5 * SEC);
-    in.now = 15 * SEC;
-    TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
-    in.now = 5 * SEC + T.peek_cooldown_ms - 1;
-    TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
-    in.now = 5 * SEC + T.peek_cooldown_ms;
-    TEST_ASSERT_EQUAL_INT(TAP_PEEK, clawd_tap_react(&g, &in, &T));
-    // About a minute: rationed so the face keeps meaning.
-    TEST_ASSERT_TRUE(T.peek_cooldown_ms >= 45 * SEC && T.peek_cooldown_ms <= 120 * SEC);
+static void test_every_tap_on_the_meters_brings_the_face(void) {
+    // No cooldown and no small-reaction substitute: tap after tap, the face.
+    TapInput in = tap_in(CORNER_FREE);
+    for (int i = 0; i < 10; i++) TEST_ASSERT_EQUAL_INT(TAP_PEEK_HOP, clawd_tap_react(&in));
+    // Already up and about (a commanded act, walking home, a lurk trip): he
+    // heads straight out instead of hopping, but the face still comes.
+    in = tap_in(CORNER_BUSY);
+    TEST_ASSERT_EQUAL_INT(TAP_PEEK, clawd_tap_react(&in));
+    in = tap_in(CORNER_OUT);
+    TEST_ASSERT_EQUAL_INT(TAP_PEEK, clawd_tap_react(&in));
 }
 
-static void test_cooldown_starts_only_when_a_peek_starts(void) {
-    // Small reactions never push the next peek back.
-    PeekGate g; peek_gate_clear(&g);
-    peek_gate_mark(&g, 0);
-    TapInput in = tap_at(30 * SEC);
-    for (int i = 0; i < 20; i++) {
-        in.now = 30 * SEC + i * 500;
-        TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
-    }
-    in.now = T.peek_cooldown_ms;
-    TEST_ASSERT_EQUAL_INT(TAP_PEEK, clawd_tap_react(&g, &in, &T));
-    // Wraps safely.
-    peek_gate_mark(&g, 0xFFFFF000u);
-    in.now = 0x00000100u;
-    TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
-}
-
-static void test_rapid_taps_are_absorbed_not_queued(void) {
-    PeekGate g; peek_gate_clear(&g);
-    TapInput in = tap_at(0);
-    in.corner = CORNER_BUSY;                       // mid-reaction or walking home
-    TEST_ASSERT_EQUAL_INT(TAP_NONE, clawd_tap_react(&g, &in, &T));
-    in.corner = CORNER_OUT;                        // out on a lurk trip: he comes back
-    TEST_ASSERT_EQUAL_INT(TAP_HURRY, clawd_tap_react(&g, &in, &T));
-}
-
-static void test_tap_keeps_its_meaning_outside_home_and_minimal(void) {
-    PeekGate g; peek_gate_clear(&g);
-    TapInput in = tap_at(0);
-    in.home = false;                               // show / screensaver / attention: director's to_meters
-    TEST_ASSERT_EQUAL_INT(TAP_NONE, clawd_tap_react(&g, &in, &T));
-    in = tap_at(0);
+static void test_tap_keeps_its_meaning_off_the_meters_and_in_minimal(void) {
+    TapInput in = tap_in(CORNER_FREE);
+    in.on_meters = false;                          // show / screensaver / attention: director's to_meters
+    TEST_ASSERT_EQUAL_INT(TAP_NONE, clawd_tap_react(&in));
+    in = tap_in(CORNER_FREE);
     in.minimal = true;                             // minimal: he stays still
-    TEST_ASSERT_EQUAL_INT(TAP_NONE, clawd_tap_react(&g, &in, &T));
-    in = tap_at(0);
-    in.meters_live = false;                        // the face would hide the pairing / stale hint
-    TEST_ASSERT_EQUAL_INT(TAP_SMALL, clawd_tap_react(&g, &in, &T));
+    TEST_ASSERT_EQUAL_INT(TAP_NONE, clawd_tap_react(&in));
 }
 
-static void test_small_tap_reactions_vary(void) {
-    ClawdRng r; clawd_rng_seed(&r, 7);
-    bool seen[8] = { false };
-    const char* last = "jumping";                  // the peek's hop
-    for (int i = 0; i < 100; i++) {
-        const char* a = clawd_tap_act(last, &r);
-        TEST_ASSERT_TRUE(strcmp(a, last) != 0);
-        for (int k = 0; k < CLAWD_TAP_ACT_COUNT; k++)
-            if (strcmp(a, CLAWD_TAP_ACTS[k]) == 0) seen[k] = true;
-        last = a;
+static void test_peek_face_is_curious_for_five_minutes(void) {
+    TEST_ASSERT_EQUAL_UINT32(5 * MIN, T.peek_curious_ms);
+    const uint32_t up = 7 * SEC;
+    const uint32_t keep[] = { up, up + 3 * SEC, up + 2 * MIN, up + T.peek_curious_ms - 1 };
+    for (uint32_t now : keep) TEST_ASSERT_EQUAL_INT(PEEK_HOLD_KEEP, peek_hold(up, now, &T));
+    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_DONE, peek_hold(up, up + T.peek_curious_ms, &T));
+    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_DONE, peek_hold(up, up + T.quiet_ms, &T));
+    // Wraps safely.
+    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_KEEP, peek_hold(0xFFFFF000u, 0x00001000u, &T));
+    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_DONE, peek_hold(0xFFFFF000u, T.peek_curious_ms, &T));
+}
+
+static void test_curiosity_runs_out_before_the_screensaver_could_start(void) {
+    // The tap that raised the face is engagement, so the screensaver gate
+    // can't open while the peek is up; the face goes back first. Also with
+    // the sim's compressed timings.
+    TEST_ASSERT_TRUE(T.peek_curious_ms < T.quiet_ms);
+    ClawdTuning f; clawd_tuning_fast(&f);
+    TEST_ASSERT_TRUE(f.peek_curious_ms < f.quiet_ms);
+    QuietInput q = { T.peek_curious_ms, 0, true, false, true };
+    TEST_ASSERT_FALSE(screensaver_ready(&q, &T));
+}
+
+static void test_curious_glances_keep_going_back_to_the_tap(void) {
+    ClawdRng r; clawd_rng_seed(&r, 11);
+    int toward = 0, plain = 0;
+    for (int i = 0; i < 400; i++) {
+        const FaceAct a = (i & 1) ? FACE_GLANCE_LEFT : FACE_GLANCE_RIGHT;
+        const int g = face_glance_px(a, 20, 27, &r, &T);
+        if (g == 27) toward++;
+        else { TEST_ASSERT_EQUAL_INT(a == FACE_GLANCE_LEFT ? -20 : 20, g); plain++; }
     }
-    for (int k = 0; k < CLAWD_TAP_ACT_COUNT; k++) TEST_ASSERT_TRUE(seen[k]);
-    TEST_ASSERT_TRUE(CLAWD_TAP_ACT_COUNT >= 2);
+    TEST_ASSERT_TRUE(toward > 160 && toward < 320);    // ~60 %
+    TEST_ASSERT_TRUE(plain > 0);
+    // Not curious (the screensaver): plain glances only.
+    for (int i = 0; i < 50; i++) {
+        TEST_ASSERT_EQUAL_INT(-20, face_glance_px(FACE_GLANCE_LEFT, 20, 0, &r, &T));
+        TEST_ASSERT_EQUAL_INT(20, face_glance_px(FACE_GLANCE_RIGHT, 20, 0, &r, &T));
+    }
 }
 
 static void test_peek_looks_toward_the_tap(void) {
@@ -280,39 +273,6 @@ static void test_peek_looks_toward_the_tap(void) {
     face_eye_offsets(peek_glance_px(0, 480, 20), &l, &rr);
     TEST_ASSERT_EQUAL_INT(-30, l);
     TEST_ASSERT_EQUAL_INT(-20, rr);
-}
-
-static void test_peek_face_stays_up_until_tapped(void) {
-    // The tap that started the peek is the last engagement. Well past the
-    // old ~3 s hold, and minutes on, the face stays.
-    QuietInput q = { 0, 0, true, false, true };
-    const uint32_t at[] = { 3 * SEC, 30 * SEC, 5 * MIN, T.quiet_ms - 1 };
-    for (uint32_t now : at) {
-        q.now = now;
-        TEST_ASSERT_EQUAL_INT(PEEK_HOLD_KEEP, peek_hold(&q, &T));
-    }
-    // A prompt or tool activity while it's up doesn't drop it; it only
-    // restarts the quiet clock.
-    q.last_engagement = 9 * MIN;
-    q.now = 9 * MIN + T.quiet_ms - 1;
-    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_KEEP, peek_hold(&q, &T));
-    // Without the hooks the device can't tell you're away: it just stays.
-    QuietInput slow = { 2 * T.quiet_ms, 0, false, false, true };
-    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_KEEP, peek_hold(&slow, &T));
-}
-
-static void test_held_peek_becomes_the_screensaver_when_nobody_is_around(void) {
-    QuietInput q = { T.quiet_ms, 0, true, false, true };
-    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_SCREENSAVER, peek_hold(&q, &T));
-    // Wrap-safe like the screensaver gate.
-    QuietInput w = { T.quiet_ms - 1000, 0xFFFFFC18u, true, false, true };
-    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_SCREENSAVER, peek_hold(&w, &T));
-}
-
-static void test_held_peek_drops_when_the_meters_go_stale(void) {
-    // The face would hide the pairing / stale hint.
-    QuietInput q = { 5 * SEC, 0, true, false, false };
-    TEST_ASSERT_EQUAL_INT(PEEK_HOLD_DROP, peek_hold(&q, &T));
 }
 
 static void test_attention_over_a_peek_ends_on_the_meters(void) {
@@ -342,15 +302,12 @@ int main(int, char**) {
     RUN_TEST(test_attention_ends_home_when_you_showed_up);
     RUN_TEST(test_reaction_waits_for_him_to_hurry_home);
     RUN_TEST(test_corner_seat_leaves_headroom_for_the_jump);
-    RUN_TEST(test_first_tap_earns_the_peek_then_small_reactions);
-    RUN_TEST(test_cooldown_starts_only_when_a_peek_starts);
-    RUN_TEST(test_rapid_taps_are_absorbed_not_queued);
-    RUN_TEST(test_tap_keeps_its_meaning_outside_home_and_minimal);
-    RUN_TEST(test_small_tap_reactions_vary);
+    RUN_TEST(test_every_tap_on_the_meters_brings_the_face);
+    RUN_TEST(test_tap_keeps_its_meaning_off_the_meters_and_in_minimal);
     RUN_TEST(test_peek_looks_toward_the_tap);
-    RUN_TEST(test_peek_face_stays_up_until_tapped);
-    RUN_TEST(test_held_peek_becomes_the_screensaver_when_nobody_is_around);
-    RUN_TEST(test_held_peek_drops_when_the_meters_go_stale);
+    RUN_TEST(test_peek_face_is_curious_for_five_minutes);
+    RUN_TEST(test_curiosity_runs_out_before_the_screensaver_could_start);
+    RUN_TEST(test_curious_glances_keep_going_back_to_the_tap);
     RUN_TEST(test_attention_over_a_peek_ends_on_the_meters);
     return UNITY_END();
 }

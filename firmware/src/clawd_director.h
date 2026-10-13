@@ -33,8 +33,8 @@ void director_alert(const char* message);   // attention hook fired
 void director_alert_clear(void);            // the session moved on
 
 // Any touch press at screen x (wired internally to LVGL). On the meters it's
-// tapping the aquarium (a corner reaction, rationed face peek); anywhere else
-// it means "show me the meters".
+// tapping the aquarium: the face comes up, curious, for a while (a tap on it
+// sends it back); anywhere else it means "show me the meters".
 void director_tap(int x);
 void director_button(void);        // a physical button press: you're here
 void director_stage_next(void);    // PWR while the stage is up: next scene, same room
@@ -50,6 +50,6 @@ const char*  director_beat_name(void);
 // be captured with `screenshot` on hardware. beat = show | screensaver |
 // attention | joy | lurk | peek [x] | home. Returns false for an unknown
 // name, or for show / screensaver / lurk / peek while another beat is still
-// running (lurk also needs the full-size sprite, i.e. PSRAM). `peek` ignores
-// the cooldown and looks toward x (default: three quarters across).
+// running (lurk also needs the full-size sprite, i.e. PSRAM). `peek` is a tap
+// on the meters at x (default: three quarters across).
 bool director_debug(const char* beat);

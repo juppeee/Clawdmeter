@@ -22,7 +22,7 @@ Launch from the `firmware/` directory — the default scenario path
 
 | Key | Action |
 |---|---|
-| mouse / left-drag | touch: on the meters, he reacts (a rationed face peek that stays up until you tap the face, else a small act); from any other room, "show me the meters" |
+| mouse / left-drag | touch: on the meters (live, stale or pairing), the face comes up curious and stays until you tap it or its curiosity runs out (5 min; 12 s with `SIM_FAST`); from any other room, "show me the meters" |
 | `space` | play/pause scenario playback |
 | `←` / `→` | step one scenario state (pauses playback) |
 | `1`–`9` | jump to scenario state N (pauses playback) |
@@ -108,8 +108,8 @@ With `SIM_FAST` the show starts at ~14 s, the screensaver at ~53 s, the wake
 at ~90 s, attention at ~97 s and the reset jump at ~115 s. With `SIM_TRACE=1`
 the sim prints a timestamped trace of every beat and step, and
 `SIM_CMDS="ms:cmd;…"` types serial commands at set times (`pwr`, `prompt`,
-`stop`, `alert`, `clawd <beat>`, including `clawd peek <x>` for the
-tap-on-the-meters peek without waiting out its cooldown):
+`stop`, `alert`, `link` (the `d` key: BLE link off / on), `clawd <beat>`,
+including `clawd peek <x>` for the tap-on-the-meters peek at x):
 
 ```
 [14014] director: home -> show
@@ -130,8 +130,10 @@ SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
   exits after the last.
 - `SIM_TAPS="ms@x,y;..."` holds a 120 ms press at each time. A tap at 25 s
   lands on the show's scene and runs the streak back to the meters. On the
-  meters each tap logs what it earned (`tap at x 420 -> peek`, `-> small
-  waving`, `-> hurry home`, `-> absorbed`).
+  meters each tap logs how the peek starts (`tap at x 420 -> peek (hop)`
+  from his seat, `-> peek (heads out)` when he's already moving or out); on
+  the peek's face it logs `-> peek over`, and a face whose curiosity ran out
+  logs `peek over (curiosity)`.
 - `SIM_MINIMAL=1` boots with the minimal-mode override on.
 - `SIM_CMDS="…;9000:perf"` prints the redraw cost of the last face rise,
   face drop and streak (frames, fps, longest gap, pixels per frame), the same

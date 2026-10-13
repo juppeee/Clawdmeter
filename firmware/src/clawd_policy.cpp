@@ -20,10 +20,11 @@ void clawd_tuning_defaults(ClawdTuning* t) {
     t->react_pending_ms = 15 * SEC;   // the walk back from a lurk is ~6 s at 2.5x
     t->blink_min_ms     = 2 * SEC;
     t->blink_max_ms     = 6 * SEC;
-    t->peek_cooldown_ms = 60 * SEC;
-    t->peek_look_min_ms = 1600;       // then it rests until tapped
+    t->peek_look_min_ms = 1600;       // then it rests, curious
     t->peek_look_max_ms = 2400;
+    t->peek_curious_ms  = 5 * MIN;
     t->peek_double_pct  = 30;
+    t->peek_toward_pct  = 60;
 }
 
 void clawd_tuning_fast(ClawdTuning* t) {
@@ -38,7 +39,7 @@ void clawd_tuning_fast(ClawdTuning* t) {
     t->alert_timeout_ms = 20 * SEC;
     t->long_turn_ms     = 10 * SEC;
     t->joy_pending_ms   = 30 * SEC;
-    t->peek_cooldown_ms = 20 * SEC;
+    t->peek_curious_ms  = 12 * SEC;   // under quiet_ms, as the defaults are
 }
 
 ClawdTuning& clawd_tuning(void) {
@@ -155,32 +156,13 @@ bool reaction_still_due(uint32_t queued_at, uint32_t now, const ClawdTuning* t) 
 }
 
 // ─── A tap on the meters ─────────────────────────────────────────────────────
-void peek_gate_clear(PeekGate* g) { memset(g, 0, sizeof(*g)); }
-
-void peek_gate_mark(PeekGate* g, uint32_t now) {
-    g->peeked = true;
-    g->last_peek = now;
+TapReact clawd_tap_react(const TapInput* in) {
+    if (in->minimal || !in->on_meters) return TAP_NONE;
+    return in->corner == CORNER_FREE ? TAP_PEEK_HOP : TAP_PEEK;
 }
 
-TapReact clawd_tap_react(const PeekGate* g, const TapInput* in, const ClawdTuning* t) {
-    if (in->minimal || !in->home) return TAP_NONE;
-    if (in->corner == CORNER_BUSY) return TAP_NONE;     // mid-reaction: absorb, never queue
-    if (in->corner == CORNER_OUT)  return TAP_HURRY;
-    const bool cooled = !g->peeked || (uint32_t)(in->now - g->last_peek) >= t->peek_cooldown_ms;
-    return (cooled && in->meters_live) ? TAP_PEEK : TAP_SMALL;
-}
-
-const char* const CLAWD_TAP_ACTS[] = { "jumping", "waving", "dancing" };
-const int         CLAWD_TAP_ACT_COUNT = sizeof(CLAWD_TAP_ACTS) / sizeof(CLAWD_TAP_ACTS[0]);
-
-const char* clawd_tap_act(const char* last, ClawdRng* r) {
-    const int i = clawd_pick_no_repeat(CLAWD_TAP_ACTS, CLAWD_TAP_ACT_COUNT, last, r);
-    return i < 0 ? CLAWD_TAP_ACTS[0] : CLAWD_TAP_ACTS[i];
-}
-
-PeekHold peek_hold(const QuietInput* q, const ClawdTuning* t) {
-    if (!q->meters_live) return PEEK_HOLD_DROP;
-    return screensaver_ready(q, t) ? PEEK_HOLD_SCREENSAVER : PEEK_HOLD_KEEP;
+PeekHold peek_hold(uint32_t up_since, uint32_t now, const ClawdTuning* t) {
+    return (uint32_t)(now - up_since) >= t->peek_curious_ms ? PEEK_HOLD_DONE : PEEK_HOLD_KEEP;
 }
 
 int peek_glance_px(int tap_x, int width, int max_px) {
@@ -209,4 +191,9 @@ FacePlan face_plan_next(ClawdRng* r, const ClawdTuning* t) {
     else if (roll < 79)  p.act = FACE_GLANCE_LEFT;
     else                 p.act = FACE_GLANCE_RIGHT;
     return p;
+}
+
+int face_glance_px(FaceAct act, int glance_px, int tap_g, ClawdRng* r, const ClawdTuning* t) {
+    if (tap_g != 0 && clawd_rng_chance(r, t->peek_toward_pct)) return tap_g;
+    return act == FACE_GLANCE_LEFT ? -glance_px : glance_px;
 }

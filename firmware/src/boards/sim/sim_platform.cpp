@@ -103,7 +103,7 @@ void sim_pump(void) {
 
     // SIM_CMDS="ms:cmd;ms:cmd" — scripted input at those times. `pwr` is a
     // PWR short press, `prompt` / `stop` a hook event (keys e / t), `alert`
-    // toggles an attention alert / clear (key m); anything
+    // toggles an attention alert / clear (key m), `link` the BLE link (key d); anything
     // else is typed as a serial command line (e.g. `clawd lurk`).
     {
         static char* cmds = NULL;
@@ -125,6 +125,7 @@ void sim_pump(void) {
             else if (strcmp(c, "prompt") == 0)   sim_inject_event('p');
             else if (strcmp(c, "stop") == 0)     sim_inject_event('s');
             else if (strcmp(c, "alert") == 0)    sim_inject_alert_toggle();
+            else if (strcmp(c, "link") == 0)     sim_playback_toggle_link();
             else                                 Serial.feed(c);
             cmds = semi ? semi + 1 : NULL;
         }

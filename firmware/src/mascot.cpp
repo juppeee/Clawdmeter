@@ -302,8 +302,16 @@ bool mascot_act(const char* name, uint8_t times, bool snappy, uint16_t speed_pct
 void mascot_leave(uint16_t spd) {
     if (!img || minimal) return;
     if (mode == M_AWAY) return;
-    if (mode == M_LURK) { stay_away = true; return; }   // finish the peek, then stay out
-    if (mode == M_WALK && after != AFTER_SEAT) { speed = spd; return; }
+    if (mode == M_LURK) {            // finish the peek (no slower than asked), then stay out
+        stay_away = true;
+        if (spd > speed) speed = spd;
+        return;
+    }
+    if (mode == M_WALK && after != AFTER_SEAT) {
+        speed = spd;
+        if (after == AFTER_LURK) after = AFTER_AWAY;   // heading out for a lurk: just out
+        return;
+    }
     // Out through the nearest edge (he may be on his way back from the right).
     const int target = x > screen_w / 2 ? off_right_x() : off_left_x();
     walk_to(target, spd, AFTER_AWAY);

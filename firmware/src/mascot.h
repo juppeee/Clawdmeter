@@ -36,7 +36,7 @@ void mascot_autonomy(bool on);       // idle acts + lurk trips while seated
 // ~330 ms) so a reaction to a tap shows on the next frame. speed_pct scales
 // the authored timing (a startle plays a little quick).
 bool mascot_act(const char* anim, uint8_t times, bool snappy = false, uint16_t speed_pct = 100);
-void mascot_leave(uint16_t speed_pct);                 // walk off the nearest edge
+void mascot_leave(uint16_t speed_pct);                 // walk off the nearest edge (a lurk finishes, no slower, and he stays out)
 void mascot_return(int from_side, uint16_t speed_pct); // -1 left / +1 right edge → seat
 // Something to react to while he's out of his seat: cut a lurk trip short
 // (the rest of the peek plays fast), turn around if he's heading out, or

@@ -24,11 +24,12 @@ struct ClawdTuning {
     uint32_t react_pending_ms;   // a notice / wave may wait this long for him to hurry home
     uint32_t blink_min_ms;       // resting face: gap between blinks/glances
     uint32_t blink_max_ms;
-    uint32_t peek_cooldown_ms;   // a tap on the meters earns the face peek at most once per this long
     uint32_t peek_look_min_ms;   // the peeking face holds its look toward the tap (min..max),
-                                 // then rests until tapped (peek_hold)
+                                 // then rests, curious (peek_hold)
     uint32_t peek_look_max_ms;
+    uint32_t peek_curious_ms;    // the peek's face stays up this long, then goes back on its own
     uint8_t  peek_double_pct;    // chance the peek's blink is a double
+    uint8_t  peek_toward_pct;    // chance a curious resting glance goes back toward the tap
 };
 
 ClawdTuning& clawd_tuning(void);           // mutable singleton, defaults below
@@ -126,17 +127,15 @@ bool reaction_still_due(uint32_t queued_at, uint32_t now, const ClawdTuning* t);
 int corner_seat_feet(int feet_y, int tallest_px, int max_feet, int top_margin);
 
 // ─── A tap on the meters (the aquarium) ──────────────────────────────────────
-// Tapping the glass while he's home gets a reaction. The full peek (startled
-// hop, he ducks out, the face comes up and looks where you tapped) is the
-// face's eye contact, so it's rationed to one per `peek_cooldown_ms`; taps in
-// between get a small corner reaction. Nothing ever queues: a tap that lands
-// while he's mid-reaction (or walking home) is simply absorbed, and the
-// cooldown only starts when a peek actually starts.
+// Tapping the glass while he's on the meters always draws his attention: the
+// face comes up to see what you want (the peek). Seated, he reacts on the
+// next frame with a startled hop, then ducks out; already up and about (an
+// act, a walk, a lurk trip) he just heads out. Either way the face follows.
+// The meters being stale or pairing doesn't stop it: you asked.
 enum TapReact {
-    TAP_NONE,    // absorbed: minimal mode, not home, or he's already reacting
-    TAP_HURRY,   // he's out (lurk trip / walking): he hurries back to his seat
-    TAP_SMALL,   // a small corner reaction (clawd_tap_act)
-    TAP_PEEK,    // the full face peek
+    TAP_NONE,       // minimal mode, or not on the meters (the tap means something else)
+    TAP_PEEK_HOP,   // seated or idling: startled hop, duck out, the face
+    TAP_PEEK,       // already moving or out: straight out through an edge, the face
 };
 enum CornerState {
     CORNER_FREE,   // seated, or in an idle act of his own (interruptible)
@@ -144,42 +143,27 @@ enum CornerState {
     CORNER_OUT,    // away from his seat on his own (lurk trip)
 };
 struct TapInput {
-    uint32_t    now;
-    bool        home;          // the director is in its home beat (meters, nothing staged)
+    bool        on_meters;     // the director is home or in a corner beat (nothing staged, no face)
     bool        minimal;       // minimal mode: Clawd stays still
     CornerState corner;
-    bool        meters_live;   // fresh data; else the face would hide the pairing / stale hint
 };
-struct PeekGate { bool peeked; uint32_t last_peek; };
-void     peek_gate_clear(PeekGate* g);
-void     peek_gate_mark(PeekGate* g, uint32_t now);   // a peek started
-TapReact clawd_tap_react(const PeekGate* g, const TapInput* in, const ClawdTuning* t);
+TapReact clawd_tap_react(const TapInput* in);
 
-// The small corner reactions (official acts that open on a crouch, so the
-// reaction shows on the next frame). Never the same twice running; the
-// peek's opening hop counts as "jumping".
-extern const char* const CLAWD_TAP_ACTS[];
-extern const int         CLAWD_TAP_ACT_COUNT;
-const char* clawd_tap_act(const char* last, ClawdRng* r);
-
-// The peek's face stays up until you tap it: after the look and the blink it
-// rests on the glass like the screensaver face (irregular blinks, some
-// double, glances), which also keeps the flat orange field from burning in.
-// While it's held, prompts, stops, usage moving, buttons, a fresh window and
-// an earned show neither drop it nor get their usual corner reaction (he's
-// out of his seat, up at the glass); they still count as engagement. The
-// fresh-window joy keeps its usual 5 min wait for him to sit down. A tap
-// drops it (the acknowledging blink first). Attention interrupts it like
-// anything else and ends on the meters, never back on the face (the alert
-// started from the meters: ATTN_FROM_HOME). Each tick of the hold asks:
+// The peek's face is curious for a while: after the look and the blink it
+// rests on the glass (irregular blinks, some double, glances that keep going
+// back toward where you tapped) for peek_curious_ms, then goes back on its
+// own (drop, he walks home). A tap drops it right away (the acknowledging
+// blink first). Prompts, stops, usage moving, buttons, a fresh window, an
+// earned show and the meters going stale neither drop it nor get their usual
+// corner reaction (he's up at the glass); they still count as engagement.
+// Attention interrupts it like anything else and ends on the meters
+// (ATTN_FROM_HOME). The screensaver can't start under it: the tap that
+// raised it is engagement, and peek_curious_ms < quiet_ms.
 enum PeekHold {
-    PEEK_HOLD_KEEP,          // stay up, resting
-    PEEK_HOLD_DROP,          // the meters stopped being live: drop to show the pairing / stale hint
-    PEEK_HOLD_SCREENSAVER,   // nobody's been around for quiet_ms: it becomes the
-                             // screensaver in place (same face, already up, he's
-                             // already out), so calm dips take over the burn-in care
+    PEEK_HOLD_KEEP,   // stay up, resting, curious
+    PEEK_HOLD_DONE,   // curiosity's over: drop and walk home
 };
-PeekHold peek_hold(const QuietInput* q, const ClawdTuning* t);
+PeekHold peek_hold(uint32_t up_since, uint32_t now, const ClawdTuning* t);
 
 // Where the peeking face looks: a glance proportional to how far from the
 // centre the tap landed, ±max_px at the edges (the far eye then travels 1.5x
@@ -192,6 +176,12 @@ int peek_glance_px(int tap_x, int width, int max_px);
 enum FaceAct { FACE_BLINK, FACE_DOUBLE_BLINK, FACE_GLANCE_LEFT, FACE_GLANCE_RIGHT };
 struct FacePlan { FaceAct act; uint32_t gap_ms; };
 FacePlan face_plan_next(ClawdRng* r, const ClawdTuning* t);
+
+// A resting glance (FACE_GLANCE_LEFT / RIGHT) as eye offset px. While the
+// face is curious about a tap (`tap_g` != 0, the peek_glance_px of it), a
+// glance goes back toward the tap peek_toward_pct of the time; otherwise it's
+// the plain ±glance_px.
+int face_glance_px(FaceAct act, int glance_px, int tap_g, ClawdRng* r, const ClawdTuning* t);
 
 // Glance geometry: eye x offsets for a glance of `g` px (negative = left).
 // The eye on the far side of the glance travels 1.5x (#198).

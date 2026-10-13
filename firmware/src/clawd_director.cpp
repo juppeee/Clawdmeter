@@ -28,7 +28,7 @@ enum Beat {
     B_FACE_HOME,     // face drops into the meters, he hurries to his seat
     B_STREAK_HOME,   // stage releases, he runs off, streak reveals the meters
     B_ATTENTION,     // the big Clawd fetches you
-    B_PEEK,          // a tap on the meters: hop, duck out, the face looks and stays until tapped
+    B_PEEK,          // a tap on the meters: hop, duck out, the face comes up curious for a while
 };
 static const char* const BEAT_NAMES[] = {
     "home", "corner", "show", "screensaver", "face-home", "streak-home", "attention", "peek",
@@ -67,9 +67,8 @@ static bool        minimal = false;
 static ClawdRng    rng;
 
 // A tap on the meters (the aquarium)
-static PeekGate    peek_gate;
 static int         peek_x = 0;                // where the peek's tap landed
-static const char* last_tap_act = NULL;       // small reactions never repeat
+static uint32_t    peek_up_at = 0;            // the peek's face started rising
 static lv_indev_t* touch_indev = NULL;
 
 static uint32_t now_ms(void) { return millis(); }
@@ -206,44 +205,29 @@ void director_alert(const char* message) {
 void director_alert_clear(void) { end_attention(ATTN_END_CLEAR); }
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
-static void start_peek(int x) {
-    // The startled hop opens on its crouch, so he reacts on the next frame.
-    if (!mascot_act("jumping", 1, true, 150)) return;
-    last_tap_act = "jumping";
-    peek_gate_mark(&peek_gate, now_ms());
-    peek_x = x;
-    go(B_PEEK);
-}
+// Peek speeds: the hop and the duck-out are the acknowledgement, not the
+// point, so they're quick and the face isn't kept waiting.
+#define PEEK_HOP_PCT    250
+#define PEEK_LEAVE_PCT  500
 
-// A tap while he's home on the meters: tapping the aquarium. The full peek is
-// rationed (clawd_tap_react); otherwise a small corner reaction, or nothing
-// if he's already reacting (taps never queue).
+// A tap while he's on the meters: tapping the aquarium always brings the face
+// up (clawd_tap_react). Seated, he hops first (the act opens on its crouch, so
+// he reacts on the next frame); otherwise he heads straight out.
 static void tap_home(int x) {
     TapInput in;
-    in.now = now_ms();
-    in.home = beat == B_HOME;
+    in.on_meters = beat == B_HOME || beat == B_CORNER;
     in.minimal = minimal;
     in.corner = mascot_free() ? CORNER_FREE : mascot_out() ? CORNER_OUT : CORNER_BUSY;
-    in.meters_live = ui_meters_live();
-    const TapReact r = clawd_tap_react(&peek_gate, &in, &clawd_tuning());
-    const char* act = NULL;
-    switch (r) {
-    case TAP_PEEK:
-        start_peek(x);
-        break;
-    case TAP_SMALL:
-        act = clawd_tap_act(last_tap_act, &rng);
-        if (mascot_act(act, 1, true)) { last_tap_act = act; go(B_CORNER); }
-        break;
-    case TAP_HURRY:
-        mascot_hurry_home();            // "oh, you're there": he cuts the trip short
-        break;
-    case TAP_NONE:
-        break;
+    TapReact r = clawd_tap_react(&in);
+    if (r == TAP_PEEK_HOP && !mascot_act("jumping", 1, true, PEEK_HOP_PCT)) r = TAP_PEEK;
+    if (r == TAP_PEEK) mascot_leave(PEEK_LEAVE_PCT);
+    if (r != TAP_NONE) {
+        react_anim = NULL;               // he's off to the glass; a queued corner reaction is moot
+        peek_x = x;
+        go(B_PEEK);
     }
-    Serial.printf("[%lu] director: tap at x %d -> %s%s\n", (unsigned long)in.now, x,
-                  r == TAP_PEEK ? "peek" : r == TAP_SMALL ? "small " : r == TAP_HURRY ? "hurry home" : "absorbed",
-                  act ? act : "");
+    Serial.printf("[%lu] director: tap at x %d -> %s\n", (unsigned long)now_ms(), x,
+                  r == TAP_PEEK_HOP ? "peek (hop)" : r == TAP_PEEK ? "peek (heads out)" : "absorbed");
 }
 
 void director_tap(int x) {
@@ -251,7 +235,7 @@ void director_tap(int x) {
     if (attention_on) { end_attention(ATTN_END_TAP); return; }   // a dismissing tap does nothing else
     resume_screensaver = false;                   // "show me the meters" wins
     if (minimal) return;
-    if (beat == B_HOME) { tap_home(x); return; }
+    if (beat == B_HOME || beat == B_CORNER) { tap_home(x); return; }
     if (beat == B_PEEK) {
         // The face is up (or coming up) looking at you: he blinks and drops
         // right away. Before it shows (hop, ducking out) the tap is
@@ -353,7 +337,6 @@ void director_init(void) {
     face_init();
     streak_init();
     show_gate_clear(&show_gate);
-    peek_gate_clear(&peek_gate);
     turn_clear(&turn);
     clawd_rng_seed(&rng, now_ms() ^ 0xD1EC7u);
     last_engagement = now_ms();
@@ -578,22 +561,24 @@ static void run_attention(uint32_t now) {
     go(B_HOME);
 }
 
-// A tap on the meters, once the cooldown allows it (start_peek already
-// started the startled hop). One Clawd: he ducks out through the nearest edge
-// (his seat is by the left edge, so it's a few steps) before the face comes
-// up. The face then stays, resting, until you tap it (director_tap → the
-// acknowledging blink, the drop, and he walks back to his seat).
+// A tap on the meters (tap_home already started the startled hop, or sent
+// him out). One Clawd: he ducks out through the nearest edge (his seat is by
+// the left edge, so it's a few steps) before the face comes up. The face then
+// stays, resting and curious, for peek_curious_ms, or until you tap it
+// (director_tap → the acknowledging blink, the drop, and he walks back to his
+// seat).
 static void run_peek(uint32_t now) {
     if (!settled(now)) return;
     const ClawdTuning& t = clawd_tuning();
     switch (step) {
     case 0:  // the hop has landed: he ducks out, quick
-        mascot_leave(300);
+        mascot_leave(PEEK_LEAVE_PCT);
         next_step();
         break;
-    case 1:  // gone: the face rises, head cocked toward the tap
+    case 1:  // gone: the face rises, curious about the tap
         if (!mascot_away()) return;
         face_rise_toward(peek_x);
+        peek_up_at = now;
         next_step();
         break;
     case 2:  // up: he looks where you tapped
@@ -609,26 +594,12 @@ static void run_peek(uint32_t now) {
         face_set_resting(true);
         next_step();
         break;
-    default: {  // held until a tap (see peek_hold for everything else)
-        const QuietInput q = { now, last_engagement, signals_hooks_seen(), window_not_started,
-                               ui_meters_live() };
-        switch (peek_hold(&q, &t)) {
-        case PEEK_HOLD_KEEP:
-            break;
-        case PEEK_HOLD_DROP:            // link dropped / stale: show the hint
+    default:  // curious for a while, then back to his seat on his own
+        if (peek_hold(peek_up_at, now, &t) == PEEK_HOLD_DONE) {
+            Serial.printf("[%lu] director: peek over (curiosity)\n", (unsigned long)now);
             to_meters(false);
-            break;
-        case PEEK_HOLD_SCREENSAVER:
-            // Nobody's been around: the face simply becomes the screensaver.
-            // Same face, already up and resting, he's already out, so it
-            // joins run_screensaver where its face has just come up (the
-            // calm-dip clock starts there). Nothing on screen changes.
-            go(B_SCREENSAVER);
-            step = 2;
-            break;
         }
         break;
-    }
     }
 }
 
@@ -698,11 +669,12 @@ bool director_debug(const char* name) {
         joy_at = now_ms();
         return true;
     }
-    if (strncmp(name, "peek", 4) == 0) {  // the full peek now, cooldown or not; `clawd peek <x>`
-        if (beat != B_HOME || !mascot_free()) return false;
+    if (strncmp(name, "peek", 4) == 0) {  // the peek now, as a tap at x would; `clawd peek <x>`
+        if (beat != B_HOME && beat != B_CORNER) return false;
         const int x = name[4] == ' ' ? atoi(name + 5) : lv_display_get_horizontal_resolution(NULL) * 3 / 4;
         engage();
-        start_peek(x);
+        resume_screensaver = false;
+        tap_home(x);
         return beat == B_PEEK;
     }
     if (strcmp(name, "lurk") == 0) {      // a lurk trip now (to QA cutting it short)

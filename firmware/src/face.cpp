@@ -14,9 +14,9 @@
 //   arms (only while moving): 48 x 56 px nubs, top at y 240
 //   squint: u = 12 px cells, a 5-row chevron per eye (> <)
 //   glance: 20 px, far eye 1.5x
-// The rise and the drop are face_motion.cpp: lean as a stepped shear, arms,
-// squash and stretch on the eyes, follow-through (docs/clawd-director.md,
-// "The face's motion").
+// The rise and the drop are face_motion.cpp: straight up and down with a flat
+// top edge, arms on the rise, squash and stretch on the eyes, follow-through
+// (docs/clawd-director.md, "The face's motion").
 #define BLINK_MS   180
 #define BLINK_GAP  140
 #define GLANCE_MS  280
@@ -60,26 +60,24 @@ static int      glance_target = 0;
 static int      glance_cur = 0;
 static uint32_t glance_hold = 0;      // 0: a resting glance's random hold
 static uint32_t next_act_at = 0;
+static int      interest_g = 0;       // curious about a tap: resting glances go back there (px)
 static ClawdRng rng;
 
 // Last geometry handed to LVGL per eye, so an unchanged eye costs nothing.
-struct EyeBox { int x, y, w, h, ew, eh; };
+struct EyeBox { int x, y, w, h, ew, eh; bool solid; };   // solid: the box is exactly the open eye
 static EyeBox eye_last[2];
 static bool   squinting = false;
 
 static int S(int v) { return v * mind / 480; }
 
-static void apply_eyes(const FieldShape* s);
-static void shape_of(const FacePose* p, FieldShape* s);
+static void apply_eyes(void);
 
 static void set_squint(bool on) {
     if (on != squinting) {
         // Squinting: the box widens to hold the chevron, sized before the
         // chevron shows so it never draws clipped.
         squinting = on;
-        FieldShape s;
-        shape_of(&pose, &s);
-        apply_eyes(&s);
+        apply_eyes();
     }
     for (int e = 0; e < 2; e++) {
         if (on) lv_obj_add_flag(eye_open[e], LV_OBJ_FLAG_HIDDEN);
@@ -103,31 +101,51 @@ static lv_obj_t* rect(lv_obj_t* parent, int x, int y, int w, int h, lv_color_t c
     return o;
 }
 
-// The body's shape for a pose: a staircase top edge (the lean), narrower
-// than the panel by `margin` each side with an arm nub filling each gap.
+// The body's shape for a pose: a flat-topped rectangle, narrower than the
+// panel by `margin` each side with an arm nub filling each gap.
 static void shape_of(const FacePose* p, FieldShape* s) {
     field_shape_init(s);
     if (p->y >= H + geom.cell * 64) return;           // far below: nothing
-    s->body.x1 = p->margin + p->x;
-    s->body.x2 = W - 1 - p->margin + p->x;
+    s->body.x1 = p->margin;
+    s->body.x2 = W - 1 - p->margin;
     s->body.y1 = p->y;
     s->body.y2 = H - 1;
-    s->lean = p->lean;
-    s->step = geom.cell;
     if (p->margin <= 0) return;
     const int aw = face_arm_w(&geom), ah = face_arm_h(&geom);
     const int32_t xl = s->body.x1, xr = s->body.x2;
-    const int32_t yl = field_top_at(s, xl) + arm_top + p->arm_dy;
-    const int32_t yr = field_top_at(s, xr) + arm_top + p->arm_dy;
-    s->extra[0].x1 = xl - aw; s->extra[0].x2 = xl - 1; s->extra[0].y1 = yl; s->extra[0].y2 = yl + ah - 1;
-    s->extra[1].x1 = xr + 1;  s->extra[1].x2 = xr + aw; s->extra[1].y1 = yr; s->extra[1].y2 = yr + ah - 1;
+    const int32_t ya = p->y + arm_top + p->arm_dy;
+    s->extra[0].x1 = xl - aw; s->extra[0].x2 = xl - 1; s->extra[0].y1 = ya; s->extra[0].y2 = ya + ah - 1;
+    s->extra[1].x1 = xr + 1;  s->extra[1].x2 = xr + aw; s->extra[1].y1 = ya; s->extra[1].y2 = ya + ah - 1;
 }
 
-// The eyes ride the body (and its lean, at their own column), lag it by
-// eye_dy, stretch or squash about their centre, and glance. An open eye's box
-// is exactly the eye, so moving it redraws no more than the eye; only a
-// squint widens it to hold the chevron.
-static void apply_eyes(const FieldShape* s) {
+static EyeBox eye_next[2];
+
+static void set_eye_objs(void* ctx) {
+    (void)ctx;
+    for (int e = 0; e < 2; e++) {
+        const EyeBox& b = eye_next[e];
+        const EyeBox& l = eye_last[e];
+        if (b.w != l.w || b.h != l.h) lv_obj_set_size(eye_box[e], b.w, b.h);
+        if (b.ew != l.ew || b.eh != l.eh) {
+            lv_obj_set_size(eye_open[e], b.ew, b.eh);
+            lv_obj_set_pos(eye_open[e], squinting ? S(30) - b.ew / 2 : 0, 0);
+        }
+        if (b.x != l.x || b.y != l.y) lv_obj_set_pos(eye_box[e], b.x, b.y);
+    }
+}
+
+static lv_area_t eye_area(const EyeBox& b) {
+    lv_area_t a = { b.x, b.y, b.x + b.w - 1, b.y + b.h - 1 };
+    return a;
+}
+
+// The eyes ride the body, lag it by eye_dy (vertically), stretch or squash
+// about their centre, and glance. An open eye's box is exactly the eye, a
+// solid rectangle, so it moves with LVGL's invalidation paused and only what
+// changed (old XOR new) is redrawn, a few rows or columns instead of the
+// whole eye twice. A squint widens the box to hold the chevron and moves the
+// ordinary way.
+static void apply_eyes(void) {
     int dl, dr;
     face_eye_offsets(glance_cur, &dl, &dr);
     const int dx[2] = { dl, dr };
@@ -136,36 +154,44 @@ static void apply_eyes(const FieldShape* s) {
     int w = eye_w0 * 1000 / (1000 + st);
     h += h & 1; w += w & 1;
     for (int e = 0; e < 2; e++) {
-        const int cx = eye_cx[e] + pose.x + dx[e];
-        int32_t top = field_top_at(s, cx);
-        if (top == FIELD_NO_TOP) top = pose.y;
-        const int cy = top + eye_top + eye_h0 / 2 + pose.eye_dy;
-        EyeBox b;
-        if (squinting) { b.x = cx - S(30); b.y = cy - eye_h0 / 2; b.w = box_w0; b.h = box_h0; b.ew = eye_w0; b.eh = eye_h0; }
-        else           { b.x = cx - w / 2; b.y = cy - h / 2;      b.w = w;      b.h = h;      b.ew = w;      b.eh = h; }
-        EyeBox& l = eye_last[e];
-        if (b.w != l.w || b.h != l.h) lv_obj_set_size(eye_box[e], b.w, b.h);
-        if (b.ew != l.ew || b.eh != l.eh) {
-            lv_obj_set_size(eye_open[e], b.ew, b.eh);
-            lv_obj_set_pos(eye_open[e], squinting ? S(30) - b.ew / 2 : 0, 0);
-        }
-        if (b.x != l.x || b.y != l.y) lv_obj_set_pos(eye_box[e], b.x, b.y);
-        l = b;
+        const int cx = eye_cx[e] + dx[e];
+        const int cy = pose.y + eye_top + eye_h0 / 2 + pose.eye_dy;
+        EyeBox& b = eye_next[e];
+        if (squinting) { b.x = cx - S(30); b.y = cy - eye_h0 / 2; b.w = box_w0; b.h = box_h0; b.ew = eye_w0; b.eh = eye_h0; b.solid = false; }
+        else           { b.x = cx - w / 2; b.y = cy - h / 2;      b.w = w;      b.h = h;      b.ew = w;      b.eh = h;      b.solid = true; }
     }
+    bool changed = false, quiet = true;
+    for (int e = 0; e < 2; e++) {
+        const EyeBox& b = eye_next[e];
+        const EyeBox& l = eye_last[e];
+        if (b.x != l.x || b.y != l.y || b.w != l.w || b.h != l.h || b.ew != l.ew || b.eh != l.eh)
+            changed = true;
+        if (!b.solid || !l.solid) quiet = false;
+    }
+    if (!changed) return;
+    if (quiet) {
+        field_quietly(root, set_eye_objs, NULL);
+        for (int e = 0; e < 2; e++) {
+            const lv_area_t o = eye_area(eye_last[e]), n = eye_area(eye_next[e]);
+            field_invalidate_change(root, &o, &n);
+        }
+    } else {
+        set_eye_objs(NULL);
+    }
+    eye_last[0] = eye_next[0];
+    eye_last[1] = eye_next[1];
 }
 
 static void apply_pose(void) {
     FieldShape s;
     shape_of(&pose, &s);
     field_set_shape(&field, &s);
-    apply_eyes(&s);
+    apply_eyes();
 }
 
 static void place_eyes(int g) {
     glance_cur = g;
-    FieldShape s;
-    shape_of(&pose, &s);
-    apply_eyes(&s);
+    apply_eyes();
 }
 
 static FacePose gone_pose(void) {
@@ -188,7 +214,6 @@ void face_init(void) {
     geom.w = W; geom.h = H; geom.mind = mind;
     geom.cell = mind / 60 > 0 ? mind / 60 : 1;
     geom.start_y = H;
-    geom.dir = 1;
 
     field_init(&field, lv_layer_top(), W, H, COL_FACE);
     root = field.obj;
@@ -213,7 +238,7 @@ void face_init(void) {
             if (i < 4)
                 squint[e][5 + i] = rect(eye_box[e], dx, S(20) + (8 - i) * u, 2 * u, u, COL_EYE);
         }
-        eye_last[e] = { INT32_MIN, 0, box_w0, box_h0, -1, -1 };   // forces the first placement
+        eye_last[e] = { INT32_MIN, 0, box_w0, box_h0, -1, -1, false };   // forces the first placement
     }
     pose = gone_pose();
     place_eyes(0);
@@ -253,7 +278,7 @@ static void motion_done(lv_anim_t* a) {
     if (move_kind == FACE_MOVE_DROP) rest_hidden();
 }
 
-static void start_motion(FaceMove m, int dir) {
+static void start_motion(FaceMove m) {
     if (!root) return;
     lv_anim_delete(&anim_var, NULL);
     if (moving) perf_end(perf_window());
@@ -268,7 +293,6 @@ static void start_motion(FaceMove m, int dir) {
     } else {
         geom.start_y = pose.y < H ? pose.y : H;
     }
-    geom.dir = dir;
     move_kind = m;
     settling = false;
     visible = true;
@@ -286,21 +310,26 @@ static void start_motion(FaceMove m, int dir) {
     lv_anim_start(&a);
 }
 
-static void rise(int dir) {
+static void rise(int interest) {
     if (!root) return;
     rising = true;
+    interest_g = interest;
     blink_phase = 0; glance_phase = 0;
     set_squint(false);
     lv_anim_delete(&glance_cur, NULL);
     glance_cur = 0;
-    start_motion(FACE_MOVE_RISE, dir);
+    start_motion(FACE_MOVE_RISE);
     next_act_at = millis() + face_motion_duration(FACE_MOVE_RISE) + 1200;
 }
 
-void face_rise(void) { rise(clawd_rng_chance(&rng, 50) ? 1 : -1); }
+void face_rise(void) { rise(0); }
 
-// A peek: his head cocks toward where you tapped.
-void face_rise_toward(int x) { rise(x < W / 2 ? -1 : 1); }
+// A peek: curious about where you tapped, so its resting glances keep going
+// back there.
+void face_rise_toward(int x) {
+    const int g = peek_glance_px(x, W, glance_px * 3 / 2);
+    rise(g != 0 ? g : 1);
+}
 
 void face_drop(void) {
     if (!root || !visible) return;
@@ -311,7 +340,8 @@ void face_drop(void) {
     set_squint(false);
     lv_anim_delete(&glance_cur, NULL);
     glance_phase = 0; glance_cur = 0;
-    start_motion(FACE_MOVE_DROP, clawd_rng_chance(&rng, 50) ? 1 : -1);
+    interest_g = 0;
+    start_motion(FACE_MOVE_DROP);
 }
 
 void face_hide_now(void) {
@@ -320,7 +350,7 @@ void face_hide_now(void) {
     lv_anim_delete(&glance_cur, NULL);
     if (moving) perf_end(perf_window());
     moving = false; rising = false; resting = false;
-    blink_phase = 0; glance_phase = 0; glance_cur = 0;
+    blink_phase = 0; glance_phase = 0; glance_cur = 0; interest_g = 0;
     set_squint(false);
     rest_hidden();
 }
@@ -405,8 +435,13 @@ void face_tick(void) {
     switch (p.act) {
     case FACE_BLINK:         face_blink(false); break;
     case FACE_DOUBLE_BLINK:  face_blink(true); break;
-    case FACE_GLANCE_LEFT:   glance_hold = 0; glance_phase = 1; glance_target = -glance_px; glance_to(glance_target); break;
-    case FACE_GLANCE_RIGHT:  glance_hold = 0; glance_phase = 1; glance_target = glance_px;  glance_to(glance_target); break;
+    case FACE_GLANCE_LEFT:
+    case FACE_GLANCE_RIGHT:
+        glance_hold = 0;
+        glance_phase = 1;
+        glance_target = face_glance_px(p.act, glance_px, interest_g, &rng, &clawd_tuning());
+        glance_to(glance_target);
+        break;
     }
     next_act_at = now + p.gap_ms;
 }

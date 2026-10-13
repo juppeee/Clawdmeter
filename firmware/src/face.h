@@ -10,15 +10,16 @@
 // gains or loses plus the eyes, not the whole face, every frame.
 //
 // It is both a room (the screensaver) and the curtain the other rooms change
-// behind: it rises from behind the bottom bezel and drops back below it, with
-// lean, arms, squash and stretch and follow-through (face_motion.h). Owned and
-// sequenced by the director.
+// behind: it rises from behind the bottom bezel and drops back below it,
+// straight up and down with a flat top edge, arms on the rise, squash and
+// stretch and follow-through (face_motion.h). Owned and sequenced by the
+// director.
 
 void face_init(void);
 void face_tick(void);
 
-void face_rise(void);          // up from the bottom bezel, overshoot, settle; leans a random way
-void face_rise_toward(int x);  // the same, his head cocked toward screen x (a peek)
+void face_rise(void);          // up from the bottom bezel, overshoot, settle
+void face_rise_toward(int x);  // the same, curious about screen x (a peek): resting glances go back there
 void face_drop(void);          // anticipation hop, then down behind the bezel; hidden when gone
 void face_hide_now(void);      // no animation (mode switch / reset only)
 
