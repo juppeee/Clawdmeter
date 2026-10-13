@@ -9,7 +9,7 @@ this document does not imply that the implementation or refreshed screenshots
 already include them.
 
 The owner has already assigned the Settings rename, refresh icon, removal of
-Overview mute, sidebar redesign, creator link, and config-directory migration.
+Overview mute, sidebar redesign, creator link, and new config-directory location.
 Those changes are assumed here. Apply the accompanying [copy deck](copy-deck.md)
 without redoing the other player's implementation work.
 

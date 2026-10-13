@@ -5,7 +5,7 @@ and Windows Python tray to the Rust desktop app. Legacy sources and
 installers remain in git history. Rust paths below are relative to
 `desktop/crates/`.
 
-Use the README for installation. This document records migration details,
+Use the README for installation. This document records upgrade details,
 protocol behavior, and differences that matter when diagnosing an upgrade.
 
 Legend: **L** bash (Linux), **M** Python (macOS), **W** Python (Windows).
@@ -42,8 +42,7 @@ Clawdmeter does not read OAuth tokens or issue a model request itself.
 Config lives at `~/.config/clawdmeter/config` on Linux and
 macOS, `%LOCALAPPDATA%\Clawdmeter\config` on Windows; `key = value`, `#`
 comments, last key wins, case-insensitive keys (`clawdmeter-core/src/config.rs`).
-At startup, a one-time migration moves files from
-`~/.config/claude-usage-monitor/` into the current state folder; destination files take precedence and runtime locks are not moved.
+The app uses only the current state folder and ignores the legacy directory.
 The app re-reads config every 5 s and the settings window edits it in place,
 keeping comments and unknown keys.
 
@@ -82,7 +81,7 @@ keeping comments and unknown keys.
 | Behaviour | Old daemons | Rust | Notes |
 |---|---|---|---|
 | Hook command | `daemon/attention-hook.sh alert\|clear\|event` (needs `jq`) | `clawdmeter hook alert\|clear\|event [event]` (`clawdmeter-app/src/hooks/mod.rs`) | Same files byte for byte; no bash or jq, so it runs on Windows. One deliberate difference: an empty stdin or a session id containing `/`, `\` or `..` writes nothing (the script wrote an empty `attention`, or touched a file outside the state dir). |
-| Hook installation | Hand-edited `settings.json` (README) | Hooks: per-account preview, `.bak`, migrates `attention-hook.sh` entries (`clawdmeter-app/src/hooks/install.rs`) | |
+| Hook installation | Hand-edited `settings.json` (README) | Hooks: per-account preview, `.bak`, updates `attention-hook.sh` entries (`clawdmeter-app/src/hooks/install.rs`) | |
 | Alert file (`attention`, `{"m","s"}`) | L, M; W: — | `clawdmeter-core/src/attention.rs` | Older than 60 s when first seen: dropped. Bare `touch`: alert without a message. |
 | Repeat alert from the waiting session | L, M: ignored | Ignored | AskUserQuestion notifies twice. |
 | `clear-<sid>` | Ends the alert only for the alerting session and only when newer (ns mtimes) | Same | |

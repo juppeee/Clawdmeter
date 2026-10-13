@@ -194,14 +194,11 @@ clawdmeter hook MODE [event]    Handle a Claude Code hook: alert, clear, or even
 window instead of a tray icon. `CLAWDMETER_BLE_ADDRESS` selects the paired
 device address to try first.
 
-## Migrating from a legacy daemon
+## Replacing a legacy daemon
 
-The desktop app replaces the bash and Python daemons. At startup, it
-performs a one-time migration of config, logs, hook state, and the saved
-device address from `~/.config/claude-usage-monitor/` into the current state
-folder. Files
-already at the destination win; conflicting files and runtime locks stay
-in the legacy folder.
+The desktop app replaces the bash and Python daemons. It uses only the
+current state folder and ignores the legacy directory. Set up accounts
+and preferences in the app.
 
 1. Install the desktop app. If **Settings** reports a legacy service,
    disable it there so only one process talks to the device. On Windows,
