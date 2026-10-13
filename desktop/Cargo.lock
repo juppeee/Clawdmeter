@@ -980,6 +980,7 @@ dependencies = [
  "clawdmeter-flash",
  "dbus",
  "dispatch2",
+ "embed-resource",
  "futures",
  "gpui",
  "log",

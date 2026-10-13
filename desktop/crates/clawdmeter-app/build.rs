@@ -5,10 +5,12 @@
 //! Output: `$OUT_DIR/clawd_idle.rs` with `IDLE_W`, `IDLE_H`, `IDLE_CELLS`
 //! (palette indices, row-major) and `IDLE_PALETTE` (0xRRGGBB, index 0 =
 //! background).
+//!
+//! On Windows it also embeds the app icon in `clawdmeter.exe`.
 
 use std::env;
 use std::fs;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 /// The idle body on the shared 55x37 art stage (spec §01: 24x16 cells).
 const BODY_L: usize = 15;
@@ -46,8 +48,30 @@ fn array_after(src: &str, marker: &str) -> Vec<u32> {
         .collect()
 }
 
+/// The exe's icon in Explorer, the taskbar and Alt-Tab, from the `.ico`
+/// that `tools/packaging/make_icons.py` renders. Windows hosts only: the
+/// resource compiler ships with the Windows build tools, and release.yml
+/// builds Windows on Windows.
+#[cfg(windows)]
+fn windows_icon(manifest: &Path) {
+    if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
+        return;
+    }
+    let root = manifest.ancestors().nth(3).expect("repo root");
+    let ico = root.join("tools").join("packaging").join("icons").join("clawdmeter.ico");
+    println!("cargo:rerun-if-changed={}", ico.display());
+    let rc = PathBuf::from(env::var("OUT_DIR").unwrap()).join("clawdmeter.rc");
+    let quoted = ico.display().to_string().replace('\\', "\\\\");
+    fs::write(&rc, format!("1 ICON \"{quoted}\"\n")).expect("write clawdmeter.rc");
+    embed_resource::compile(&rc, embed_resource::NONE).manifest_required().expect("embed the app icon");
+}
+
+#[cfg(not(windows))]
+fn windows_icon(_: &Path) {}
+
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
+    windows_icon(&manifest);
     let header = manifest.join("../../../firmware/src/splash_animations.h");
     println!("cargo:rerun-if-changed={}", header.display());
     let src = fs::read_to_string(&header)

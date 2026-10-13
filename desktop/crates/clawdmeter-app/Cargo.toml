@@ -1,6 +1,6 @@
 [package]
 name = "clawdmeter-app"
-description = "Clawdmeter desktop companion: daemon runtime, GPUI windows and tray."
+description = "Desktop companion for the Clawdmeter Claude Code usage display"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
@@ -43,6 +43,11 @@ tray-icon = { version = "0.26", default-features = false }
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"] }
 dispatch2 = "0.3"
+
+# Embeds the app icon in clawdmeter.exe (build.rs). Host-gated: only a
+# Windows build machine compiles it.
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"
 
 [dev-dependencies]
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "wayland", "x11", "test-support"] }
