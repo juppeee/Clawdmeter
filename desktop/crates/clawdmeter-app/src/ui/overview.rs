@@ -1,11 +1,13 @@
 //! Overview: what the tray menu shows, as a page. The link, the live
 //! meters, a refresh button, and a nudge when new firmware is out.
 
-use clawdmeter_core::Paths;
+use clawdmeter_core::{Paths, Settings};
 use gpui::{div, prelude::*, px, relative, rgb, Context, EventEmitter, Rgba, SharedString, Window};
 
 use super::theme::{Theme, FONT_BODY, FONT_DISPLAY, R_M, R_PILL};
-use super::widgets::{button, clawd, dot, icon_button, notice, tone_color, usage_tone, ButtonKind, Tone};
+use super::widgets::{
+    button, clawd, dot, field, icon_button, notice, toggle, tone_color, usage_tone, ButtonKind, Tone,
+};
 use super::{command, live_status, not_running_text, Navigate, REFRESH};
 use crate::art::TrayState;
 use crate::ipc::{AppCommand, StatusSnapshot};
@@ -17,6 +19,8 @@ pub struct OverviewView {
     snap: Option<StatusSnapshot>,
     /// When the refresh button was pressed, until that check has run.
     refreshing: Option<i64>,
+    /// `desktop_chime` in the config.
+    desktop_chime: bool,
 }
 
 impl EventEmitter<Navigate> for OverviewView {}
@@ -31,13 +35,16 @@ impl OverviewView {
             }
         })
         .detach();
-        let mut v = OverviewView { paths, snap: None, refreshing: None };
+        let mut v = OverviewView { paths, snap: None, refreshing: None, desktop_chime: false };
         v.reload(clawdmeter_core::unix_now());
         v
     }
 
     fn reload(&mut self, now: i64) {
         self.snap = live_status(&self.paths);
+        if let Ok(s) = Settings::load(&self.paths) {
+            self.desktop_chime = s.desktop_chime;
+        }
         if let Some(at) = self.refreshing {
             let done = match &self.snap {
                 None => true,
@@ -257,9 +264,28 @@ impl Render for OverviewView {
                 .on_click(cx.listener(|_, _, _, cx| cx.emit(Navigate(Page::Setup))))
                 .child("Run setup guide again"),
         );
+        let on = self.desktop_chime;
+        let chime = field(
+            &t,
+            "Play a chime on this computer when Claude needs you",
+            "Follows the alert types on the Hooks page. Mute from the tray until restart.",
+            toggle(
+                &t,
+                "desktop-chime",
+                on,
+                true,
+                cx.listener(move |v, _, _, cx| {
+                    match super::settings::write_settings(&v.paths, |s, _| s.desktop_chime = !on) {
+                        Ok(()) => v.desktop_chime = !on,
+                        Err(e) => log::warn!("couldn't save desktop_chime: {e}"),
+                    }
+                    cx.notify();
+                }),
+            ),
+        );
         let mut page = div().flex_1().flex().flex_col().gap(px(20.)).child(header);
         let Some(s) = self.snap.clone() else {
-            return page.child(setup);
+            return page.child(chime).child(setup);
         };
 
         page = page.child(
@@ -285,7 +311,7 @@ impl Render for OverviewView {
                 ),
             );
         }
-        page.child(setup)
+        page.child(chime).child(setup)
     }
 }
 

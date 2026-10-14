@@ -257,17 +257,7 @@ impl SettingsView {
     /// keys whose value differs.
     fn save(&mut self, change: impl FnOnce(&mut Settings, &mut ConfigFile)) {
         let path = self.paths.config_file.clone();
-        let result = (|| -> std::io::Result<()> {
-            let mut cfg = ConfigFile::load(&path)?;
-            let mut s = Settings::from_config(&cfg, &self.paths, None);
-            change(&mut s, &mut cfg);
-            s.apply_to(&mut cfg, &self.paths);
-            if let Some(dir) = path.parent() {
-                std::fs::create_dir_all(dir)?;
-            }
-            cfg.save(&path)
-        })();
-        match result {
+        match write_settings(&self.paths, change) {
             Ok(()) => self.notice = None,
             Err(e) => self.notice = Some((Tone::Bad, errors::save_failed("settings", &path, &self.paths.home, &e))),
         }
@@ -547,15 +537,15 @@ impl SettingsView {
             ),
         ));
         let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
-        let (beep, chime) = (self.settings.beep, self.settings.chime);
+        let (alert, reset) = (self.settings.alert_chime, self.settings.reset_chime);
         pane = pane
             .child(field(
                 t,
-                "Attention beep",
-                "Sound for attention alerts on supported boards. Mute from the tray until restart.",
-                toggle(t, "beep", beep, true, move |_, _, cx| {
+                "Alert chime",
+                "Chimes when Claude needs you, on boards with a speaker. Mute from the tray until restart.",
+                toggle(t, "alert-chime", alert, true, move |_, _, cx| {
                     let _ = me1.update(cx, |v, cx| {
-                        v.save(|s, _| s.beep = !beep);
+                        v.save(|s, _| s.alert_chime = !alert);
                         cx.notify();
                     });
                 }),
@@ -563,10 +553,10 @@ impl SettingsView {
             .child(field(
                 t,
                 "Session reset chime",
-                "Sound when a session reset is detected, on supported boards.",
-                toggle(t, "chime", chime, true, move |_, _, cx| {
+                "Chimes when your session usage resets, on boards with a speaker.",
+                toggle(t, "reset-chime", reset, true, move |_, _, cx| {
                     let _ = me2.update(cx, |v, cx| {
-                        v.save(|s, _| s.chime = !chime);
+                        v.save(|s, _| s.reset_chime = !reset);
                         cx.notify();
                     });
                 }),
@@ -889,7 +879,7 @@ impl SettingsView {
             let pending: Vec<PathBuf> =
                 self.hooks.iter().filter(|h| h.status.needs_install()).map(|h| h.dir.clone()).collect();
             let any_old = self.hooks.iter().any(|h| h.status.needs_install() && h.status != HookStatus::Missing);
-            let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
+            let me1 = cx.entity().downgrade();
             let n = pending.len();
             let label = match (any_old, n) {
                 (true, 1) => "Review update".to_string(),
@@ -897,33 +887,15 @@ impl SettingsView {
                 (false, 1) => "Review installation".to_string(),
                 (false, n) => format!("Review installation in {n} accounts"),
             };
-            pane = pane.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(8.))
-                    .when(n > 0, |d| {
-                        d.child(button(t, "install-all", label, ButtonKind::Primary, true, move |_, _, cx| {
-                            let pending = pending.clone();
-                            let _ = me1.update(cx, |v, cx| {
-                                v.plan_hooks(HookAction::Install, pending);
-                                cx.notify();
-                            });
-                        }))
-                    })
-                    .when(!self.embedded, |d| {
-                        let label = if self.test_alert == Some(Ok(())) { "Sent" } else { "Send test alert" };
-                        d.child(button(t, "test-alert", label, ButtonKind::Normal, true, move |_, _, cx| {
-                            let _ = me2.update(cx, |v, cx| {
-                                v.send_test_alert(cx);
-                                cx.notify();
-                            });
-                        }))
-                        .when_some(self.test_alert.clone().and_then(Result::err), |d, why| {
-                            d.child(div().text_size(px(12.5)).text_color(t.bad).child(why))
-                        })
-                    }),
-            );
+            pane = pane.child(div().flex().items_center().gap(px(8.)).when(n > 0, |d| {
+                d.child(button(t, "install-all", label, ButtonKind::Primary, true, move |_, _, cx| {
+                    let pending = pending.clone();
+                    let _ = me1.update(cx, |v, cx| {
+                        v.plan_hooks(HookAction::Install, pending);
+                        cx.notify();
+                    });
+                }))
+            }));
         }
         if let Some((tone, m)) = &self.hook_msg {
             pane = pane.child(notice(t, *tone, m.clone()));
@@ -965,7 +937,25 @@ impl SettingsView {
                 });
             }));
         }
-        list
+        // Try the alert types (and the chimes) from here.
+        let me = cx.entity().downgrade();
+        let label = if self.test_alert == Some(Ok(())) { "Sent" } else { "Send test alert" };
+        list.child(
+            div()
+                .flex()
+                .items_center()
+                .gap(px(8.))
+                .pt(px(12.))
+                .child(button(t, "test-alert", label, ButtonKind::Normal, true, move |_, _, cx| {
+                    let _ = me.update(cx, |v, cx| {
+                        v.send_test_alert(cx);
+                        cx.notify();
+                    });
+                }))
+                .when_some(self.test_alert.clone().and_then(Result::err), |d, why| {
+                    d.child(div().text_size(px(12.5)).text_color(t.bad).child(why))
+                }),
+        )
     }
 
     fn settings_pane(&mut self, t: &Theme, cx: &mut Context<Self>) -> gpui::Div {
@@ -1240,6 +1230,23 @@ impl Render for SettingsView {
     }
 }
 
+/// Re-read the config file, apply `change`, and write only the keys whose
+/// value differs.
+pub(crate) fn write_settings(
+    paths: &Paths,
+    change: impl FnOnce(&mut Settings, &mut ConfigFile),
+) -> std::io::Result<()> {
+    let path = &paths.config_file;
+    let mut cfg = ConfigFile::load(path)?;
+    let mut s = Settings::from_config(&cfg, paths, None);
+    change(&mut s, &mut cfg);
+    s.apply_to(&mut cfg, paths);
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    cfg.save(path)
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::{Modifiers, TestAppContext, VisualTestContext};
@@ -1268,10 +1275,10 @@ mod tests {
         let paths = home("cfg");
         let p = paths.clone();
         let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Page::Device, false, cx));
-        click(cx, "chime");
+        click(cx, "reset-chime");
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(text.starts_with("# mine\n"), "comments kept: {text}");
-        assert!(text.contains("chime = on"), "{text}");
+        assert!(text.contains("reset_chime = on"), "{text}");
 
         view.update(cx, |v, cx| v.show(Page::Settings, false, cx));
         click(cx, "poll-2"); // While working: 5 min

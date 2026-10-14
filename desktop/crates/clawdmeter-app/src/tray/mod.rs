@@ -83,7 +83,7 @@ impl Items {
             session: MenuItem::new("Session  –", false, None),
             weekly: MenuItem::new("Weekly  –", false, None),
             refresh: MenuItem::new("Refresh usage", true, None),
-            mute: CheckMenuItem::new("Mute attention beep", true, false, None),
+            mute: CheckMenuItem::new("Mute chimes", true, false, None),
             open: MenuItem::new("Open Clawdmeter", true, None),
             update: MenuItem::new("Flash firmware…", true, None),
             settings: MenuItem::new("Settings…", true, None),
@@ -108,7 +108,7 @@ impl Items {
         it
     }
 
-    fn update(&self, snap: &StatusSnapshot, paths: &Paths, beep_enabled: bool, now: i64) {
+    fn update(&self, snap: &StatusSnapshot, paths: &Paths, chimes_on: bool, now: i64) {
         let state = snap.tray_state();
         let mut label = state.label().to_owned();
         if snap.link == "no_adapter" {
@@ -131,8 +131,8 @@ impl Items {
             Some(p) => format!("Weekly  {p}%"),
             None => "Weekly  –".into(),
         });
-        self.mute.set_checked(snap.beep_muted);
-        self.mute.set_enabled(beep_enabled);
+        self.mute.set_checked(snap.chimes_muted);
+        self.mute.set_enabled(chimes_on);
         self.update.set_text(match snap.update_available() {
             Some(v) => format!("Update firmware to {}…", display_version(v)),
             None => "Flash firmware…".into(),
@@ -171,7 +171,7 @@ struct TrayApp {
     last_written: Option<StatusSnapshot>,
     last_written_at: i64,
     menu_at: i64,
-    beep_muted: bool,
+    chimes_muted: bool,
     /// The window process, while it runs.
     window: Option<Child>,
     latest: Arc<Mutex<Option<String>>>,
@@ -209,8 +209,8 @@ impl TrayApp {
             AppCommand::Reconnect => self.send(Command::Reconnect),
             AppCommand::Forget => self.send(Command::Forget),
             AppCommand::Mute(m) => {
-                self.beep_muted = m;
-                self.send(Command::SetBeepMuted(m));
+                self.chimes_muted = m;
+                self.send(Command::SetChimesMuted(m));
             }
             AppCommand::Open(w) => {
                 if let Some(p) = Page::parse(&w) {
@@ -226,7 +226,7 @@ impl TrayApp {
     fn snapshot(&self, now: i64) -> StatusSnapshot {
         let status = self.daemon.as_ref().map(|d| d.status.borrow().clone()).unwrap_or_default();
         let mut snap = StatusSnapshot::from_status(&status, now);
-        snap.beep_muted = self.beep_muted;
+        snap.chimes_muted = self.chimes_muted;
         snap.windowed = !self.use_tray;
         snap.latest_firmware = self.latest.lock().ok().and_then(|l| l.clone());
         snap.device_firmware = ipc::load_firmware_record(&self.paths).map(|r| r.ver);
@@ -299,7 +299,7 @@ impl TrayApp {
         {
             self.menu_at = now;
             if let Some(items) = &self.items {
-                items.update(&snap, &self.paths, self.settings.beep, now);
+                items.update(&snap, &self.paths, self.settings.alert_chime || self.settings.desktop_chime, now);
             }
             if let Some(t) = &self.tray {
                 let _ = t.set_tooltip(Some(tooltip(&snap)));
@@ -471,7 +471,7 @@ fn run_locked(paths: Paths, _lock: Option<std::fs::File>) -> i32 {
         last_written: None,
         last_written_at: 0,
         menu_at: 0,
-        beep_muted: false,
+        chimes_muted: false,
         window: None,
         latest,
         check_now,

@@ -26,6 +26,9 @@ serde_json.workspace = true
 serde.workspace = true
 futures.workspace = true
 gpui = { version = "=0.2.2", default-features = false, features = ["font-kit", "wayland", "x11"] }
+# The desktop chime: a synthesized ding through the default output (ALSA on
+# Linux). Playback only, no decoders.
+rodio = { version = "0.23", default-features = false, features = ["playback"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 tray-icon = { version = "0.26", default-features = false, features = ["ksni"] }
@@ -65,7 +68,8 @@ Desktop companion for the Clawdmeter, a desk-side Claude Code usage monitor. \
 Reads usage from the Claude Code CLI, follows its hook events, and sends both \
 to the device over Bluetooth Low Energy. Bluetooth needs BlueZ and a D-Bus \
 session; the tray needs a StatusNotifierItem host."""
-# $auto covers the linked libraries (libxcb, libxkbcommon(-x11), libdbus-1).
+# $auto covers the linked libraries (libxcb, libxkbcommon(-x11), libdbus-1,
+# libasound2 for the desktop chime).
 # GPUI loads Vulkan and the Wayland client at runtime, so name those too.
 depends = "$auto, libvulkan1, libwayland-client0"
 recommends = "bluez"

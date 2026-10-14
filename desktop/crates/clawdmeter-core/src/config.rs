@@ -185,10 +185,14 @@ pub struct Settings {
     pub poll_interval_explicit: bool,
     /// Heartbeat replay interval (s, >= 10).
     pub heartbeat_interval: u64,
-    /// Session-reset chime (`c`).
-    pub chime: bool,
-    /// Attention beep (`b`).
-    pub beep: bool,
+    /// The device chimes when the session window resets (`c`;
+    /// `reset_chime`, formerly `chime`).
+    pub reset_chime: bool,
+    /// The device chimes for an attention alert (`b`; `alert_chime`,
+    /// formerly `beep`).
+    pub alert_chime: bool,
+    /// This computer chimes for an attention alert (`desktop_chime`).
+    pub desktop_chime: bool,
     /// Wall clock on the device (`t`/`tf`).
     pub clock: ClockMode,
     /// `owner/repo` for firmware releases.
@@ -301,9 +305,11 @@ impl Settings {
             poll_interval,
             poll_interval_explicit: file_poll.is_some() || env_default.is_some(),
             heartbeat_interval,
-            // chime/beep: only an explicit "on" enables (bash read_onoff_setting).
-            chime: on_off(cfg.get("chime"), false),
-            beep: on_off(cfg.get("beep"), false),
+            // Only an explicit "on" enables (bash read_onoff_setting). The
+            // old `chime` / `beep` keys still count when the new ones are absent.
+            reset_chime: on_off(cfg.get("reset_chime").or_else(|| cfg.get("chime")), false),
+            alert_chime: on_off(cfg.get("alert_chime").or_else(|| cfg.get("beep")), false),
+            desktop_chime: on_off(cfg.get("desktop_chime"), false),
             clock: cfg.get("clock").map(ClockMode::parse).unwrap_or_default(),
             release_repo: cfg
                 .get("release_repo")
@@ -341,7 +347,7 @@ impl Settings {
     }
 
     /// Write these settings into `cfg`, touching only keys whose value differs
-    /// from what the file already says (so a hand-written `chime = off` stays
+    /// from what the file already says (so a hand-written `reset_chime = off` stays
     /// as written and absent keys at their defaults stay absent).
     pub fn apply_to(&self, cfg: &mut ConfigFile, paths: &Paths) {
         let current = Settings::from_config(cfg, paths, None);
@@ -365,11 +371,18 @@ impl Settings {
             cfg.set("heartbeat_interval", &self.heartbeat_interval.to_string());
         }
         let oo = |b: bool| if b { "on" } else { "off" };
-        if current.chime != self.chime {
-            cfg.set("chime", oo(self.chime));
-        }
-        if current.beep != self.beep {
-            cfg.set("beep", oo(self.beep));
+        // A changed chime is written under its new name; the old one goes.
+        for (key, old, now, was) in [
+            ("reset_chime", "chime", self.reset_chime, current.reset_chime),
+            ("alert_chime", "beep", self.alert_chime, current.alert_chime),
+            ("desktop_chime", "", self.desktop_chime, current.desktop_chime),
+        ] {
+            if now != was {
+                cfg.set(key, oo(now));
+                if !old.is_empty() {
+                    cfg.remove(old);
+                }
+            }
         }
         if current.clock != self.clock {
             cfg.set("clock", self.clock.as_str());
@@ -504,9 +517,13 @@ mod tests {
     #[test]
     fn on_off_and_clock() {
         let s = settings("chime = ON\nbeep = yes\nclock = 12\n");
-        assert!(s.chime);
-        assert!(!s.beep);
+        assert!(s.reset_chime, "the old key still counts");
+        assert!(!s.alert_chime);
+        assert!(!s.desktop_chime, "off by default");
         assert_eq!(s.clock, ClockMode::H12);
+        let s = settings("chime = on\nreset_chime = off\nbeep = on\ndesktop_chime = on\n");
+        assert!(!s.reset_chime, "the new key wins");
+        assert!(s.alert_chime && s.desktop_chime);
         assert_eq!(settings("clock = weird").clock, ClockMode::Off);
         assert!(settings("").update_check);
         assert_eq!(settings("").release_repo, DEFAULT_RELEASE_REPO);
@@ -556,12 +573,12 @@ mod tests {
         let p = paths();
         let mut c = ConfigFile::parse("# mine\nchime = off\nunknown = 7\n");
         let mut s = Settings::from_config(&c, &p, None);
-        s.beep = true;
+        s.alert_chime = true;
         s.config_dirs = vec![PathBuf::from("/home/u/.claude"), PathBuf::from("/home/u/.claude-work")];
         s.apply_to(&mut c, &p);
         let out = c.render();
         assert!(out.starts_with("# mine\nchime = off\nunknown = 7\n"), "{out}");
-        assert!(out.contains("beep = on\n"));
+        assert!(out.contains("alert_chime = on\n") && !out.contains("beep"), "{out}");
         assert!(out.contains("config_dirs = ~/.claude, ~/.claude-work\n"));
         assert!(!out.contains("poll_interval"));
         let back = Settings::from_config(&c, &p, None);

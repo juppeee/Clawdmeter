@@ -11,6 +11,7 @@
 
 pub mod art;
 pub mod boards;
+pub mod chime;
 pub mod daemon;
 pub mod diff;
 pub mod errors;

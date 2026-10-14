@@ -144,6 +144,8 @@ pub struct Engine {
     unattributed_activity: Option<i64>,
     /// A `claude` binary was found, so the probe can run.
     claude_found: bool,
+    /// A new alert should chime on this computer (`desktop_chime`).
+    desktop_chime_due: bool,
 }
 
 fn utc(now: i64) -> DateTime<Utc> {
@@ -175,6 +177,7 @@ impl Engine {
             last_event_ts: None,
             unattributed_activity: None,
             claude_found: true,
+            desktop_chime_due: false,
         }
     }
 
@@ -232,7 +235,15 @@ impl Engine {
     /// so neither the device nor the tray sees them.
     pub fn on_attention(&mut self, alert: Option<Alert>, clears: &HashMap<String, SystemTime>) {
         let alert = alert.filter(|a| self.settings.alert_on.allows(a.kind));
-        self.attention.ingest(alert, clears);
+        if self.attention.ingest(alert, clears) && self.settings.desktop_chime {
+            self.desktop_chime_due = true;
+        }
+    }
+
+    /// A new alert went up since the last call and `desktop_chime` is on:
+    /// play the chime on this computer.
+    pub fn take_desktop_chime(&mut self) -> bool {
+        std::mem::take(&mut self.desktop_chime_due)
     }
 
     /// End an alert past its time to live (see [`AttentionState::expire`]).
@@ -461,7 +472,7 @@ impl Engine {
                 return None;
             };
             let mut p = Payload::from_reading(&reading, utc(now));
-            if self.settings.chime {
+            if self.settings.reset_chime {
                 p.c = Some(1);
             }
             if let Some(cf) = clock_fields(self.settings.clock, utc(now), host.utc_offset_secs, host.prefers_12h) {
@@ -474,7 +485,7 @@ impl Engine {
             (p, kind)
         };
 
-        let att = self.attention.fields(self.settings.beep);
+        let att = self.attention.fields(self.settings.alert_chime);
         if att.beep {
             payload.b = Some(1);
         }
@@ -612,7 +623,7 @@ mod tests {
     // Heartbeat replays (bash parity + rp marker), and none once stale.
     #[test]
     fn heartbeat_replays_with_aged_countdowns() {
-        let mut e = Engine::new(settings("chime = on\n"));
+        let mut e = Engine::new(settings("reset_chime = on\n"));
         let dir = PathBuf::from("/h/.claude");
         e.on_poll_results(T0, vec![(dir.clone(), Ok(reading(15)))]);
         write(&mut e, T0).unwrap();
@@ -735,7 +746,7 @@ mod tests {
 
     #[test]
     fn attention_rides_a_replay() {
-        let mut e = Engine::new(settings("beep = on\n"));
+        let mut e = Engine::new(settings("alert_chime = on\n"));
         e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
         write(&mut e, T0).unwrap();
         let alert = Alert {
@@ -780,8 +791,34 @@ mod tests {
     }
 
     #[test]
+    fn the_desktop_chime_follows_new_alerts() {
+        let at = SystemTime::now();
+        let alert = |s: &str, kind| Alert { message: "m".into(), session: s.into(), kind, at };
+        let mut e = Engine::new(settings(""));
+        e.on_attention(Some(alert("a", AlertKind::Permission)), &HashMap::new());
+        assert!(!e.take_desktop_chime(), "off by default");
+        let mut e = Engine::new(settings("desktop_chime = on\n"));
+        e.on_attention(Some(alert("a", AlertKind::Permission)), &HashMap::new());
+        assert!(e.take_desktop_chime());
+        assert!(!e.take_desktop_chime(), "once per alert");
+        // The same session again (AskUserQuestion notifies twice): no repeat.
+        e.on_attention(Some(alert("a", AlertKind::Question)), &HashMap::new());
+        assert!(!e.take_desktop_chime());
+        // A kind that's turned off never chimes.
+        e.on_attention(Some(alert("b", AlertKind::Idle)), &HashMap::new());
+        assert!(!e.take_desktop_chime());
+        // Cleared in the same tick it arrived: nothing to announce.
+        let clears: HashMap<_, _> = [("c".to_owned(), at + Duration::from_secs(1))].into();
+        e.on_attention(Some(alert("c", AlertKind::Permission)), &clears);
+        assert!(!e.take_desktop_chime());
+        // The test alert chimes, so the setting can be tried.
+        e.on_attention(Some(alert(crate::attention::TEST_SESSION, AlertKind::Permission)), &HashMap::new());
+        assert!(e.take_desktop_chime());
+    }
+
+    #[test]
     fn disabled_alert_kinds_never_alert() {
-        let mut e = Engine::new(settings("beep = on\n"));
+        let mut e = Engine::new(settings("alert_chime = on\n"));
         e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
         write(&mut e, T0).unwrap();
         let idle =
@@ -789,7 +826,7 @@ mod tests {
         e.on_attention(Some(idle.clone()), &HashMap::new());
         assert!(!e.status(T0).attention, "idle is off by default");
         assert!(write(&mut e, T0 + 2).is_none());
-        e.update_settings(settings("beep = on\nalert_on = idle\n"));
+        e.update_settings(settings("alert_chime = on\nalert_on = idle\n"));
         e.on_attention(Some(idle), &HashMap::new());
         assert!(e.status(T0).attention);
     }

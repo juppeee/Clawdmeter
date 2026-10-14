@@ -38,8 +38,9 @@ pub enum Command {
     Reconnect,
     /// Forget the cached device address, then look again (after swapping boards).
     Forget,
-    /// Mute the attention beep for this run, whatever the config says.
-    SetBeepMuted(bool),
+    /// Mute the alert chimes (device and this computer) for this run,
+    /// whatever the config says.
+    SetChimesMuted(bool),
     /// Stop the daemon thread.
     Shutdown,
 }
@@ -173,7 +174,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     let mut last_settings = unix_now();
     let mut last_link_check = unix_now();
     let mut last_write_at = None;
-    let mut beep_muted = false;
+    let mut chimes_muted = false;
     let mut ticker = tokio::time::interval(TICK);
     ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
 
@@ -198,11 +199,12 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     link_state = LinkState::Searching;
                     reconnect.retry_in(now, 0);
                 }
-                Ok(Command::SetBeepMuted(m)) => {
-                    beep_muted = m;
+                Ok(Command::SetChimesMuted(m)) => {
+                    chimes_muted = m;
                     let mut s = engine.settings().clone();
                     if m {
-                        s.beep = false;
+                        s.alert_chime = false;
+                        s.desktop_chime = false;
                     } else if let Ok(fresh) = Settings::load(&paths) {
                         s = fresh;
                     }
@@ -223,8 +225,9 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         if now - last_settings >= SETTINGS_EVERY {
             last_settings = now;
             if let Ok(mut s) = Settings::load(&paths) {
-                if beep_muted {
-                    s.beep = false;
+                if chimes_muted {
+                    s.alert_chime = false;
+                    s.desktop_chime = false;
                 }
                 if s.claude_path != engine.settings().claude_path || claude.is_none() {
                     claude = usage::find_claude(s.claude_path.as_deref(), &paths.home);
@@ -244,6 +247,9 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         let clears = inbox.take_clears();
         if alert.is_some() || !clears.is_empty() {
             engine.on_attention(alert, &clears);
+        }
+        if engine.take_desktop_chime() {
+            crate::chime::play();
         }
         if engine.expire_attention(SystemTime::now()) {
             log::info!("attention alert expired");

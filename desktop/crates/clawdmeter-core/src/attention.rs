@@ -203,13 +203,16 @@ pub struct AttentionFields {
 
 impl AttentionState {
     /// Fold one tick's files into the state.
-    pub fn ingest(&mut self, new_alert: Option<Alert>, clears: &HashMap<String, SystemTime>) {
+    /// Returns whether a new alert went up (and is still up after the clears).
+    pub fn ingest(&mut self, new_alert: Option<Alert>, clears: &HashMap<String, SystemTime>) -> bool {
+        let mut raised = false;
         if let Some(a) = new_alert {
             let repeat = self.alert.as_ref().is_some_and(|cur| !cur.session.is_empty() && cur.session == a.session);
             if !repeat {
                 self.alert = Some(a);
                 self.alert_unsent = true;
                 self.clear_unsent = false;
+                raised = true;
             }
         }
         if let Some(cur) = &self.alert {
@@ -219,9 +222,11 @@ impl AttentionState {
                     self.clear_unsent = !self.alert_unsent;
                     self.alert = None;
                     self.alert_unsent = false;
+                    raised = false;
                 }
             }
         }
+        raised
     }
 
     /// End an alert that has been up for its time to live ([`ALERT_TTL`],

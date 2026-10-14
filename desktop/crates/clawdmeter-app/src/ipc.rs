@@ -101,8 +101,9 @@ pub struct StatusSnapshot {
     pub claude: Option<String>,
     /// Last successful device write.
     pub last_write_at: Option<i64>,
-    /// Attention beep muted for this run (tray menu).
-    pub beep_muted: bool,
+    /// Alert chimes muted for this run (tray menu).
+    #[serde(alias = "beep_muted")]
+    pub chimes_muted: bool,
     /// Latest firmware release, when the daily check found one.
     pub latest_firmware: Option<String>,
     /// Firmware the device last reported (flash or `info`).
@@ -170,7 +171,7 @@ impl StatusSnapshot {
             hooks: e.hooks,
             claude: s.claude.as_ref().map(|p| p.display().to_string()),
             last_write_at: s.last_write_at,
-            beep_muted: false,
+            chimes_muted: false,
             latest_firmware: None,
             device_firmware: None,
             tray: format!("{:?}", tray_state(s, now)),
@@ -268,7 +269,7 @@ pub enum AppCommand {
     Reconnect,
     /// Forget the cached device address, then look again.
     Forget,
-    /// Mute / unmute the attention beep for this run.
+    /// Mute / unmute the alert chimes for this run.
     Mute(bool),
     /// Open the app window on a page (see [`crate::Page::parse`]).
     Open(String),
