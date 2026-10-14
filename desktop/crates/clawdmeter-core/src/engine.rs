@@ -215,6 +215,16 @@ impl Engine {
         self.attention.ingest(alert, clears);
     }
 
+    /// End an alert past its time to live (see [`AttentionState::expire`]).
+    pub fn expire_attention(&mut self, now: SystemTime) -> bool {
+        self.attention.expire(now)
+    }
+
+    /// The device says the user dismissed the alert there (or it timed out).
+    pub fn on_device_dismissed(&mut self) {
+        self.attention.dismissed();
+    }
+
     /// The device (REQ notify) or the user asked for fresh numbers. Accounts
     /// that are backing off, or were polled in the last 2 minutes, still
     /// wait for that to pass.
@@ -652,6 +662,30 @@ mod tests {
         e.on_attention(None, &clears);
         let w = write(&mut e, T0 + 4).unwrap();
         assert_eq!((w.payload.x, w.payload.m.clone()), (Some(1), None));
+    }
+
+    #[test]
+    fn stuck_alerts_end_by_expiry_or_device_dismissal() {
+        let mut e = Engine::new(settings(""));
+        e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
+        write(&mut e, T0).unwrap();
+        let at = SystemTime::now();
+        let alert = |s: &str| Alert { message: "m".into(), session: s.into(), kind: AlertKind::Permission, at };
+
+        // A session killed before its clear: expires with an x=1.
+        e.on_attention(Some(alert("gone")), &HashMap::new());
+        write(&mut e, T0 + 2).unwrap();
+        assert!(!e.expire_attention(at + Duration::from_secs(60)));
+        assert!(e.expire_attention(at + crate::attention::ALERT_TTL));
+        assert!(!e.status(T0).attention);
+        assert_eq!(write(&mut e, T0 + 3).unwrap().payload.x, Some(1));
+
+        // Tapped away on the device: gone here too, nothing sent back.
+        e.on_attention(Some(alert(crate::attention::TEST_SESSION)), &HashMap::new());
+        write(&mut e, T0 + 4).unwrap();
+        e.on_device_dismissed();
+        assert!(!e.status(T0).attention);
+        assert!(write(&mut e, T0 + 5).is_none());
     }
 
     #[test]

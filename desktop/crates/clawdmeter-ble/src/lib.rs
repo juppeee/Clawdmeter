@@ -383,8 +383,31 @@ pub fn pinned_address() -> Option<String> {
     std::env::var("CLAWDMETER_BLE_ADDRESS").ok().map(|s| s.trim().to_owned()).filter(|s| !s.is_empty())
 }
 
-/// Refresh requests from the device (one item per REQ notification).
-pub type RefreshRequests = mpsc::UnboundedReceiver<()>;
+/// What the device asks or tells the app through its notifications.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DeviceEvent {
+    /// REQ: it has no data yet and wants a payload.
+    Refresh,
+    /// TX `{"dismiss":true}`: the alert ended on the device (a tap, or its
+    /// own timeout).
+    Dismissed,
+}
+
+/// The device's events, in order.
+pub type DeviceEvents = mpsc::UnboundedReceiver<DeviceEvent>;
+
+/// Read one notification. TX also carries the write acks
+/// (`{"ack":true}` / `{"err":true}`), which mean nothing here.
+pub fn device_event(uuid: Uuid, value: &[u8]) -> Option<DeviceEvent> {
+    if uuid == REQ_UUID {
+        return Some(DeviceEvent::Refresh);
+    }
+    if uuid != TX_UUID {
+        return None;
+    }
+    let text: String = std::str::from_utf8(value).ok()?.chars().filter(|c| !c.is_whitespace()).collect();
+    text.contains("\"dismiss\":true").then_some(DeviceEvent::Dismissed)
+}
 
 /// An open GATT link.
 pub struct DeviceLink {
@@ -408,7 +431,7 @@ impl DeviceLink {
         adapter: &Adapter,
         cache: &AddressCache,
         opts: &LinkOptions,
-    ) -> Result<(DeviceLink, RefreshRequests), LinkError> {
+    ) -> Result<(DeviceLink, DeviceEvents), LinkError> {
         // CLAWDMETER_BLE_ADDRESS pins the device to try first (the bash
         // daemon's DEVICE_MAC, the Windows daemon's override); else the cache.
         let cached = pinned_address().or_else(|| cache.load());
@@ -443,7 +466,7 @@ impl DeviceLink {
     }
 
     /// Connect to a specific candidate.
-    pub async fn connect(cand: Candidate, opts: &LinkOptions) -> Result<(DeviceLink, RefreshRequests), LinkError> {
+    pub async fn connect(cand: Candidate, opts: &LinkOptions) -> Result<(DeviceLink, DeviceEvents), LinkError> {
         let p = cand.peripheral;
         if !p.is_connected().await.unwrap_or(false) {
             let r = match tokio::time::timeout(opts.connect_timeout, p.connect()).await {
@@ -466,18 +489,26 @@ impl DeviceLink {
             .find(|c| c.uuid == RX_UUID && c.service_uuid == SERVICE_UUID)
             .cloned()
             .ok_or(LinkError::MissingCharacteristic)?;
-        let (tx, refresh) = mpsc::unbounded_channel();
-        if let Some(req) = chars.iter().find(|c| c.uuid == REQ_UUID).cloned() {
-            // Listen before subscribing: the device fires its notify inside
-            // the subscribe (it asks only when it has no data yet).
+        let (tx, events) = mpsc::unbounded_channel();
+        let notifying: Vec<_> = chars
+            .iter()
+            .filter(|c| (c.uuid == REQ_UUID || c.uuid == TX_UUID) && c.service_uuid == SERVICE_UUID)
+            .cloned()
+            .collect();
+        if !notifying.is_empty() {
+            // Listen before subscribing: the device fires its REQ notify
+            // inside the subscribe (it asks only when it has no data yet).
             match p.notifications().await {
-                Ok(stream) => spawn_refresh_forwarder(stream, tx),
+                Ok(stream) => spawn_event_forwarder(stream, tx),
                 Err(e) => log::warn!("no notification stream: {e}"),
             }
-            match tokio::time::timeout(opts.subscribe_timeout, p.subscribe(&req)).await {
+        }
+        for c in &notifying {
+            let what = if c.uuid == REQ_UUID { "refresh" } else { "dismiss" };
+            match tokio::time::timeout(opts.subscribe_timeout, p.subscribe(c)).await {
                 Ok(Ok(())) => {}
-                Ok(Err(e)) => log::warn!("refresh subscription unavailable: {e}"),
-                Err(_) => log::warn!("refresh subscription timed out; polling without it"),
+                Ok(Err(e)) => log::warn!("{what} subscription unavailable: {e}"),
+                Err(_) => log::warn!("{what} subscription timed out; carrying on without it"),
             }
         }
         #[cfg(target_os = "linux")]
@@ -489,7 +520,7 @@ impl DeviceLink {
                 log::debug!("could not mark the device trusted: {e}");
             }
         }
-        Ok((DeviceLink { key: cand.key, name: cand.name, peripheral: p, rx, health: WriteHealth::default() }, refresh))
+        Ok((DeviceLink { key: cand.key, name: cand.name, peripheral: p, rx, health: WriteHealth::default() }, events))
     }
 
     /// Write one payload (already encoded to at most [`MAX_WRITE`] bytes).
@@ -646,14 +677,16 @@ fn macos_unpair_stale_bond() {
     }
 }
 
-fn spawn_refresh_forwarder(
+fn spawn_event_forwarder(
     mut stream: Pin<Box<dyn Stream<Item = btleplug::api::ValueNotification> + Send>>,
-    tx: mpsc::UnboundedSender<()>,
+    tx: mpsc::UnboundedSender<DeviceEvent>,
 ) {
     tokio::spawn(async move {
         while let Some(n) = stream.next().await {
-            if n.uuid == REQ_UUID && tx.send(()).is_err() {
-                break;
+            if let Some(ev) = device_event(n.uuid, &n.value) {
+                if tx.send(ev).is_err() {
+                    break;
+                }
             }
         }
     });
@@ -725,6 +758,23 @@ mod bluez {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn device_events() {
+        assert_eq!(device_event(REQ_UUID, &[1]), Some(DeviceEvent::Refresh));
+        assert_eq!(device_event(TX_UUID, br#"{"dismiss":true}"#), Some(DeviceEvent::Dismissed));
+        assert_eq!(device_event(TX_UUID, br#"{ "dismiss": true }"#), Some(DeviceEvent::Dismissed));
+        assert_eq!(device_event(TX_UUID, br#"{"ack":true}"#), None);
+        assert_eq!(device_event(TX_UUID, br#"{"err":true}"#), None);
+        assert_eq!(device_event(TX_UUID, &[0xff, 0xfe]), None);
+        assert_eq!(device_event(RX_UUID, br#"{"dismiss":true}"#), None);
+        // The firmware's reply, as written.
+        let src = std::fs::read_to_string(
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../firmware/src/ble.cpp"),
+        )
+        .unwrap();
+        assert!(src.contains(r#"tx_char->setValue("{\"dismiss\":true}");"#));
+    }
 
     #[test]
     fn uuids_match_firmware() {

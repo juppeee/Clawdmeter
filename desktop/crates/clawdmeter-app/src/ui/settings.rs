@@ -407,7 +407,7 @@ impl SettingsView {
 
     fn send_test_alert(&mut self, cx: &mut Context<Self>) {
         let path = self.paths.attention_file();
-        let body = serde_json::json!({"m": "Clawdmeter test alert", "s": "clawdmeter-test"});
+        let body = serde_json::json!({"m": "Clawdmeter test alert", "s": clawdmeter_core::attention::TEST_SESSION});
         let written =
             std::fs::create_dir_all(&self.paths.state_dir).and_then(|_| std::fs::write(&path, body.to_string()));
         self.test_alert = Some(match written {

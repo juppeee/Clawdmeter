@@ -12,6 +12,11 @@
 //!   (AskUserQuestion notifies twice);
 //! * a clear only ends the alert when it names the alerting session and is
 //!   newer than the alert (nanosecond mtimes: both can land in one second).
+//!
+//! An alert also ends without a clear: when the device reports that it was
+//! dismissed there (a tap, or its own timeout), and after [`ALERT_TTL`]
+//! ([`TEST_ALERT_TTL`] for the Hooks page's test alert), because a session
+//! that is closed or killed never sends its clear.
 
 use std::collections::HashMap;
 use std::fs;
@@ -22,6 +27,12 @@ use unicode_normalization::UnicodeNormalization;
 
 /// Alerts older than this when first seen are ignored.
 pub const ATTENTION_MAX_AGE: Duration = Duration::from_secs(60);
+/// An alert nothing has cleared ends this long after it was raised.
+pub const ALERT_TTL: Duration = Duration::from_secs(10 * 60);
+/// The test alert ends sooner: nothing ever clears its session.
+pub const TEST_ALERT_TTL: Duration = Duration::from_secs(30);
+/// The session id of the Hooks page's test alert.
+pub const TEST_SESSION: &str = "clawdmeter-test";
 /// Device fonts are ASCII and the status line holds this many characters.
 pub const MESSAGE_LIMIT: usize = 120;
 
@@ -213,6 +224,29 @@ impl AttentionState {
         }
     }
 
+    /// End an alert that has been up for its time to live ([`ALERT_TTL`],
+    /// [`TEST_ALERT_TTL`]). A shown one gets a clear so the device drops it
+    /// too. Returns whether it ended.
+    pub fn expire(&mut self, now: SystemTime) -> bool {
+        let Some(cur) = &self.alert else { return false };
+        let ttl = if cur.session == TEST_SESSION { TEST_ALERT_TTL } else { ALERT_TTL };
+        if now.duration_since(cur.at).unwrap_or_default() < ttl {
+            return false;
+        }
+        self.clear_unsent = !self.alert_unsent;
+        self.alert = None;
+        self.alert_unsent = false;
+        true
+    }
+
+    /// The device ended the alert itself: forget it without sending a clear.
+    pub fn dismissed(&mut self) {
+        if !self.alert_unsent {
+            self.alert = None;
+            self.clear_unsent = false;
+        }
+    }
+
     /// Something attention-related is waiting to be sent.
     pub fn pending(&self) -> bool {
         self.alert_unsent || self.clear_unsent
@@ -287,6 +321,62 @@ mod tests {
         fs::write(d.join("attention"), "not json").unwrap();
         assert_eq!(inbox.take_alert(SystemTime::now()).unwrap().session, "");
         let _ = fs::remove_dir_all(&d);
+    }
+
+    fn raised(session: &str, at: SystemTime) -> Alert {
+        Alert { message: "Approve?".into(), session: session.into(), kind: AlertKind::Permission, at }
+    }
+
+    #[test]
+    fn shown_alert_expires_with_a_clear() {
+        let t0 = SystemTime::now();
+        let mut s = AttentionState::default();
+        s.ingest(Some(raised("abc", t0)), &HashMap::new());
+        s.mark_sent();
+        assert!(!s.expire(t0 + ALERT_TTL - Duration::from_secs(1)));
+        assert!(s.active());
+        assert!(s.expire(t0 + ALERT_TTL));
+        assert!(!s.active());
+        assert!(s.fields(false).clear, "the device drops it too");
+        s.mark_sent();
+        assert!(!s.pending());
+    }
+
+    #[test]
+    fn unsent_alert_expires_quietly() {
+        let t0 = SystemTime::now();
+        let mut s = AttentionState::default();
+        s.ingest(Some(raised("abc", t0)), &HashMap::new());
+        assert!(s.expire(t0 + ALERT_TTL));
+        assert!(!s.pending(), "never shown: nothing to send");
+    }
+
+    #[test]
+    fn test_alert_expires_after_thirty_seconds() {
+        let t0 = SystemTime::now();
+        let mut s = AttentionState::default();
+        s.ingest(Some(raised(TEST_SESSION, t0)), &HashMap::new());
+        s.mark_sent();
+        assert!(!s.expire(t0 + Duration::from_secs(29)));
+        assert!(s.expire(t0 + TEST_ALERT_TTL));
+        assert!(s.fields(false).clear);
+    }
+
+    #[test]
+    fn device_dismissal_ends_a_shown_alert_without_a_clear() {
+        let t0 = SystemTime::now();
+        let mut s = AttentionState::default();
+        s.ingest(Some(raised("abc", t0)), &HashMap::new());
+        // Not on the device yet: a dismissal is about an older alert.
+        s.dismissed();
+        assert!(s.active() && s.alert_unsent);
+        s.mark_sent();
+        s.dismissed();
+        assert!(!s.active());
+        assert!(!s.pending(), "the device already dropped it");
+        // The same session alerting again is a new alert.
+        s.ingest(Some(raised("abc", t0 + Duration::from_secs(5))), &HashMap::new());
+        assert!(s.active() && s.alert_unsent);
     }
 
     // Ported from test_attention.py::test_clears.

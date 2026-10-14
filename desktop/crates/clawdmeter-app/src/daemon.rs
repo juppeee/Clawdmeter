@@ -9,7 +9,8 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use clawdmeter_ble::{
-    should_wake, AddressCache, DeviceLink, LinkError, LinkOptions, Reconnect, RefreshRequests, Sighting, MAX_WRITE,
+    should_wake, AddressCache, DeviceEvent, DeviceEvents, DeviceLink, LinkError, LinkOptions, Reconnect, Sighting,
+    MAX_WRITE,
 };
 use clawdmeter_core::attention::AttentionInbox;
 use clawdmeter_core::events::EventTail;
@@ -109,7 +110,7 @@ pub fn spawn(paths: Paths) -> DaemonHandle {
 }
 
 type PollResults = Vec<(PathBuf, Result<UsageReading, UsageError>)>;
-type ConnectResult = Result<(DeviceLink, RefreshRequests), LinkError>;
+type ConnectResult = Result<(DeviceLink, DeviceEvents), LinkError>;
 
 fn poll_all(claude: Option<PathBuf>, dirs: Vec<PathBuf>, home: PathBuf) -> PollResults {
     let now = chrono::Utc::now();
@@ -151,7 +152,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     }
 
     let mut link: Option<DeviceLink> = None;
-    let mut refresh: Option<RefreshRequests> = None;
+    let mut device_events: Option<DeviceEvents> = None;
     let mut connecting: Option<JoinHandle<ConnectResult>> = None;
     let mut polling: Option<JoinHandle<PollResults>> = None;
     let mut link_state = LinkState::Starting;
@@ -181,7 +182,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                             cache.invalidate(&key);
                         }
                     }
-                    refresh = None;
+                    device_events = None;
                     link_state = LinkState::Searching;
                     reconnect.retry_in(now, 0);
                 }
@@ -231,12 +232,23 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         if alert.is_some() || !clears.is_empty() {
             engine.on_attention(alert, &clears);
         }
+        if engine.expire_attention(SystemTime::now()) {
+            log::info!("attention alert expired");
+        }
 
         // ---- slow clock ----
-        if let Some(rx) = refresh.as_mut() {
-            while rx.try_recv().is_ok() {
-                log::info!("refresh requested by device");
-                engine.request_refresh(now);
+        if let Some(rx) = device_events.as_mut() {
+            while let Ok(ev) = rx.try_recv() {
+                match ev {
+                    DeviceEvent::Refresh => {
+                        log::info!("refresh requested by device");
+                        engine.request_refresh(now);
+                    }
+                    DeviceEvent::Dismissed => {
+                        log::info!("attention alert dismissed on the device");
+                        engine.on_device_dismissed();
+                    }
+                }
             }
         }
         if polling.as_ref().is_some_and(JoinHandle::is_finished) {
@@ -264,7 +276,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     log::info!("connected to {} ({})", l.name().unwrap_or("device"), l.key());
                     link_state = LinkState::Connected { key: l.key().to_owned(), name: l.name().map(str::to_owned) };
                     link = Some(l);
-                    refresh = Some(rx);
+                    device_events = Some(rx);
                     reconnect.connected();
                     inbox.reset();
                     engine.on_connected();
@@ -313,7 +325,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                 if !l.is_connected().await {
                     log::info!("device disconnected, reconnecting...");
                     link = None;
-                    refresh = None;
+                    device_events = None;
                     link_state = LinkState::Searching;
                     reconnect.retry_in(now, 2);
                 }
@@ -343,7 +355,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                         log::warn!("write failed: {e}");
                         if !l.is_connected().await {
                             link = None;
-                            refresh = None;
+                            device_events = None;
                             link_state = LinkState::Searching;
                             reconnect.retry_in(now, 2);
                         }
