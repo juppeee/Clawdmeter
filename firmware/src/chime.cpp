@@ -2,11 +2,17 @@
 #include <Arduino.h>
 #include "ESP_I2S.h"
 #include "es8311.h"
-#include "bell_pcm.h"   // const uint8_t bell_pcm[] / bell_pcm_len — 44.1 kHz 16-bit stereo
+#include <string.h>
+#include "ding.h"
 
-// Shared ES8311 chime engine. See chime.h. Adapted from the original 2.16
-// sound.cpp so the 2.16, 1.8 (and any future ES8311 board) share one copy of
-// the codec setup, the embedded PCM, and the non-blocking playback task.
+// Shared ES8311 chime engine. See chime.h. The 2.16, 1.8, LCD-1.54 (and any
+// future ES8311 board) share one copy of the codec setup and the
+// non-blocking playback task, which synthesizes the ding as it streams.
+
+// Share of full scale the ding peaks at: loud, short of clipping. The
+// codec volume (ChimeConfig.volume) sets the level on top of this.
+#define DING_GAIN 0.9f
+#define CHUNK_FRAMES 256
 
 static I2SClass      i2s;
 static ChimeConfig   cfg;
@@ -27,10 +33,23 @@ static bool es8311_setup(void) {
     return true;
 }
 
+static int16_t chunk[CHUNK_FRAMES * 2];      // stereo frames, off the task stack
+
 static void chime_task(void* arg) {
     if (cfg.amp_enable) cfg.amp_enable(true);
     delay(8);                                  // let the amp settle (avoids turn-on pop)
-    i2s.write((uint8_t*)bell_pcm, bell_pcm_len);
+    const uint32_t rate = (uint32_t)cfg.sample_rate, frames = ding_frames(rate);
+    for (uint32_t n = 0; n < frames;) {
+        uint32_t k = 0;
+        for (; k < CHUNK_FRAMES && n < frames; k++, n++) {
+            const int16_t s = ding_sample(n, rate, DING_GAIN);
+            chunk[2 * k] = s;
+            chunk[2 * k + 1] = s;
+        }
+        i2s.write((uint8_t*)chunk, k * 2 * sizeof(int16_t));
+    }
+    memset(chunk, 0, sizeof(chunk));           // a little silence so the DMA drains
+    i2s.write((uint8_t*)chunk, sizeof(chunk));
     delay(20);
     if (cfg.amp_enable) cfg.amp_enable(false);
     playing = false;

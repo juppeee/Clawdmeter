@@ -187,7 +187,7 @@ static void check_serial_cmd() {
         if (c == '\n' || c == '\r') {
             cmd_buf[cmd_pos] = '\0';
             if (strcmp(cmd_buf, "screenshot") == 0) send_screenshot();
-            else if (strcmp(cmd_buf, "buzz") == 0)  sound_hal_play_reset();
+            else if (strcmp(cmd_buf, "chime") == 0 || strcmp(cmd_buf, "buzz") == 0) sound_hal_chime();
             else if (strcmp(cmd_buf, "info") == 0)  send_info();
             else if (strcmp(cmd_buf, "perf") == 0)  perf_print();
             else if (strcmp(cmd_buf, "unpair") == 0) {
@@ -442,18 +442,18 @@ void loop() {
             if (sig.event_fired)
                 Serial.printf("[%lu] hook event '%c' (#%lu)\n", (unsigned long)millis(),
                               sig.event ? sig.event : '?', (unsigned long)sig.event_seq);
-            // 5-hour session limit refilled → chime so the user knows they can
-            // use Claude again (no-op on boards without a buzzer). Gated on the
-            // daemon's opt-in `chime` config; the `buzz` serial cmd ignores it.
+            // 5-hour session limit refilled → ding so the user knows they can
+            // use Claude again (no-op on boards without sound). Gated on the
+            // app's opt-in `c` (reset_chime); the `chime` serial cmd ignores it.
             if (session_reset && usage.chime) {
                 Serial.println("session reset detected — chime");
-                sound_hal_play_reset();
+                sound_hal_chime();
             }
-            // Claude Code hook fired on the host. Not gated on `chime`: the daemon
-            // only sets `b` when that hook ran.
+            // Claude Code hook fired on the host: the same ding. Not gated on
+            // `c`: the app only sets `b` when its alert chime is on.
             if (usage.beep) {
                 Serial.println("attention — chime");
-                sound_hal_play_reset();
+                sound_hal_chime();
             }
             ui_update(&usage);
             // A prompt (or you're back after a gap): you're at the computer,

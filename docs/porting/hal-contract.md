@@ -67,7 +67,7 @@ uses the long-press and release edges; a held level is not a substitute.
 ## `sound_hal.h`
 
 Implement `sound_hal_init()`, `sound_hal_tick()`, and
-`sound_hal_play_reset()`. Playback must return promptly and advance during
+`sound_hal_chime()`. Playback must return promptly and advance during
 ticks. Boards without an implemented audio output use no-ops. A fitted
 codec alone does not mean the firmware supports sound.
 
