@@ -599,13 +599,14 @@ pub fn wait_for_firmware(path: &str, serial_number: Option<&str>, timeout: Durat
     // Give the reset and the USB re-enumeration a head start.
     std::thread::sleep(Duration::from_millis(500));
     while Instant::now() < deadline {
-        if let Some(p) = locate_port(&list_ports(), path, serial_number) {
-            match probe_info(&p, Duration::from_millis(1500)) {
+        match locate_port(&list_ports(), path, serial_number) {
+            Some(p) => match probe_info(&p, Duration::from_millis(1500)) {
                 Ok(Some(info)) => return Some(info),
-                Ok(None) => {}
+                Ok(None) => log::debug!("waiting for {p}: no `info` answer yet"),
                 // Still enumerating, or briefly held by ModemManager & co.
                 Err(e) => log::debug!("waiting for {p}: {e}"),
-            }
+            },
+            None => log::debug!("waiting for {path}: not enumerated yet"),
         }
         std::thread::sleep(Duration::from_millis(400));
     }
