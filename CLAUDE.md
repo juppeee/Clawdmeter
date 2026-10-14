@@ -252,6 +252,8 @@ Run modes: no args = tray app (logs to `<state>/daemon.log`);
 `CLAWDMETER_LOG`, `CLAWDMETER_NO_TRAY`, `POLL_INTERVAL`, `CLAUDE_CONFIG_DIR`
 (default account), `CLAWDMETER_BLE_ADDRESS`.
 
+**Launch paths** (`clawdmeter-core::launch`): hooks and Start at login write a stable path (`$APPIMAGE`, the Nix profile link, else `current_exe`). Hooks under an AppImage run a copy extracted to `<state>/appimage/` (renewed when the AppImage changes) so every hook event doesn't FUSE-mount it; Start at login keeps `$APPIMAGE`. Installs refuse to write paths that won't survive (macOS disk image or AppTranslocation, Windows temp/zip folders) and existing entries pointing there show as stale.
+
 State lives in one dir, `~/.config/clawdmeter/` (Windows:
 `%LOCALAPPDATA%\Clawdmeter\`): `config`, `events.log`, `attention`,
 `clear-<sid>`, `ble-address`, `daemon.log`, app state/locks. Config keys:
@@ -269,11 +271,15 @@ Usage sources (per account, `probe.rs`, `oauth.rs`): while the account's
 --strict-mcp-config --tools ""`, hooks and auto memory off, cwd = state dir)
 reads the `rate_limit_event` headers. Otherwise (and on a probe miss, unless
 backing off) the idle source: `GET https://api.anthropic.com/api/oauth/usage`
-with the account's OAuth token, read-only from `<config dir>/.credentials.json`
-or the macOS Keychain (`Claude Code-credentials`, plus `-<sha256(config
-dir)[..8]>` for a non-default dir, as Claude Code names it). **The token is
-never refreshed**: an expired one is skipped until Claude Code / Claude
-Desktop renews it. `claude -p /usage` only runs when no token is readable.
+with the account's OAuth token, read-only (macOS: the Keychain first,
+`Claude Code-credentials` plus `-<sha256(config dir)[..8]>` for a non-default
+dir, as Claude Code names it; then `<config dir>/.credentials.json`; the first
+unexpired token wins). User-Agent `clawdmeter/<version>`. **Clawdmeter never
+refreshes the token**: on an expired or rejected token it falls back to
+`claude -p /usage` (Claude Code refreshes its own token; that doesn't start a
+window), under the same backoff, and `/usage` also runs when no token is
+readable. Only 429-type misses persist as blocks ("Usage paused by
+Anthropic"); probe misses don't.
 **The probe must never start a window** (owner's rule): `choose_source` allows
 it only when the last known five-hour reset is > 5 min away, or a
 prompt/tool event from that account (events.log carries the config dir, from
