@@ -48,18 +48,3 @@ well as its firmware environment and desktop board assets. Firmware CI
 builds the boards, runs native tests, and captures the simulator. Desktop
 CI runs formatting, linting, and workspace tests on Linux, plus core tests
 on macOS and Windows.
-
-## Credits
-
-- Pixel-art Clawd animations are Anthropic's official mascot art (claude.ai/code, Claude Code desktop), archived and converted by the tooling in `tools/` and `research/clawd-official/`.
-- The original macOS daemon and flash helper were ported by [Chris Davidson (@lorddavidson)](https://github.com/lorddavidson).
-- Lucide icon set ([lucide.dev](https://lucide.dev), MIT) for the Bluetooth, battery and USB glyphs.
-- Anthropic brand fonts (Tiempos Text, Styrene B); see the asset notice below.
-
-## Asset licensing
-
-This repository includes Anthropic's proprietary fonts and copyrighted
-Clawd artwork. The project does not have permission to redistribute those
-assets. The owner has not assigned a copyleft license to this repository;
-do not assume that its code and bundled assets share a license. Review the
-asset rights before copying or redistributing them.

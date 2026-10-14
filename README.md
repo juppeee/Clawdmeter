@@ -49,8 +49,19 @@ portable archives, and Nix setup.
 ## Docs
 
 - [User guide](docs/user-guide.md): setup, device controls, settings, and connection help.
-- [Development](docs/development.md): builds, simulator, releases, and asset credits and licensing.
+- [Development](docs/development.md): builds, simulator, and releases.
 - [Add a board](docs/porting/adding-a-board.md): hardware ports and app integration.
 - [BLE protocol](docs/protocol.md): payload fields and notifications.
 - [Clawd's director](docs/clawd-director.md): behavior and character rules.
 - [Legacy daemon parity](docs/daemon-parity.md): upgrade steps and implementation differences.
+
+## Credits
+
+- Pixel-art Clawd animations are Anthropic's official mascot art (claude.ai/code, Claude Code desktop), archived and converted by the tooling in `tools/` and `research/clawd-official/`.
+- The original macOS daemon and flash helper were ported by [Chris Davidson (@lorddavidson)](https://github.com/lorddavidson).
+- Lucide icon set ([lucide.dev](https://lucide.dev), MIT) for the Bluetooth, battery and USB glyphs.
+- Anthropic brand fonts (Tiempos Text, Styrene B); see the warning below.
+
+## Licensing gray area warning
+
+The software in this repository uses and adheres to the Anthropic brand guidelines and uses the same proprietary fonts that Anthropic has a license for but this software uses without permission as well as using assets from Anthropic such as the copyrighted Clawd mascot so even though the code in this repo is non-proprietary I will not license it myself under a copyleft license since this repo includes proprietary fonts and copyrighted assets. Please be aware of this if you fork or copy the code from this repo. **You have been warned!**
