@@ -143,7 +143,31 @@ pub fn compare_versions(a: &str, b: &str) -> Ordering {
         (None, None) => Ordering::Equal,
         (None, Some(_)) => Ordering::Greater,
         (Some(_), None) => Ordering::Less,
-        (Some(x), Some(y)) => x.cmp(y),
+        (Some(x), Some(y)) => compare_pre(x, y),
+    }
+}
+
+/// Semver pre-release order: dot-separated identifiers, numeric ones by
+/// value (`rc.10` after `rc.9`), numeric before alphanumeric, fewer before
+/// more when one is a prefix of the other.
+fn compare_pre(a: &str, b: &str) -> Ordering {
+    let mut xs = a.split('.');
+    let mut ys = b.split('.');
+    loop {
+        let o = match (xs.next(), ys.next()) {
+            (None, None) => return Ordering::Equal,
+            (None, Some(_)) => return Ordering::Less,
+            (Some(_), None) => return Ordering::Greater,
+            (Some(x), Some(y)) => match (x.parse::<u64>(), y.parse::<u64>()) {
+                (Ok(m), Ok(n)) => m.cmp(&n),
+                (Ok(_), Err(_)) => Ordering::Less,
+                (Err(_), Ok(_)) => Ordering::Greater,
+                (Err(_), Err(_)) => x.cmp(y),
+            },
+        };
+        if o != Ordering::Equal {
+            return o;
+        }
     }
 }
 
@@ -235,5 +259,10 @@ mod tests {
         assert!(is_newer("1.9.0", "1.9.0-rc1"));
         assert!(!is_newer("1.9.0-rc1", "1.9.0"));
         assert!(is_newer("2", "1.99.99"));
+        assert!(is_newer("2.0.0-rc.10", "2.0.0-rc.9"));
+        assert!(is_newer("2.0.0-rc.2", "v2.0.0-rc.1"));
+        assert!(!is_newer("2.0.0-rc.2", "2.0.0-rc.2"));
+        assert!(is_newer("2.0.0-rc.1", "2.0.0-beta.3"));
+        assert!(is_newer("2.0.0-rc.1.1", "2.0.0-rc.1"));
     }
 }

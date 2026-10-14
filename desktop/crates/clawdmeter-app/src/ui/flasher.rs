@@ -367,7 +367,7 @@ impl FlasherView {
         run_blocking(
             cx,
             move || {
-                release::latest_release(&repo).map_err(|e| {
+                release::release_for_app(&repo, crate::version()).map_err(|e| {
                     log::warn!("release check for {repo}: {e} ({})", e.detail().unwrap_or_default());
                     let custom = repo != clawdmeter_flash::DEFAULT_RELEASE_REPO;
                     let none_yet = matches!(e, release::ReleaseError::NoRelease);

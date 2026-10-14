@@ -372,7 +372,7 @@ fn spawn_update_checker(paths: Paths, latest: Arc<Mutex<Option<String>>>, now_fl
             if forced || (enabled && check.due(unix_now())) {
                 let repo =
                     settings.map(|s| s.release_repo).unwrap_or_else(|| clawdmeter_flash::DEFAULT_RELEASE_REPO.into());
-                match clawdmeter_flash::release::latest_release(&repo) {
+                match clawdmeter_flash::release::release_for_app(&repo, crate::version()) {
                     Ok(r) => {
                         log::info!("latest firmware release: {}", r.manifest.version);
                         let _ = std::fs::create_dir_all(&paths.cache_dir);

@@ -6,7 +6,7 @@
 //!
 //! ```no_run
 //! use clawdmeter_flash::{device, release};
-//! let rel = release::latest_release("HermannBjorgvin/Clawdmeter")?;
+//! let rel = release::release_for_app("HermannBjorgvin/Clawdmeter", "2.0.0")?;
 //! let port = &device::list_ports()[0].path;
 //! let env = match device::identify(port, &rel.manifest)? {
 //!     device::Identification::Firmware(info) => info.env,

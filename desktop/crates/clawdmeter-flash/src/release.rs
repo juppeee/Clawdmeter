@@ -1,5 +1,12 @@
-//! GitHub Releases: find the latest release's `manifest.json`, download and
-//! verify images, and remember when we last checked (once a day).
+//! GitHub Releases: find the release this app should flash and its
+//! `manifest.json`, download and verify images, and remember when we last
+//! checked (once a day).
+//!
+//! `releases/latest` never returns a prerelease, so a stable app is only
+//! offered stable firmware. An app that is itself a prerelease (its version
+//! has a `-`, like `2.0.0-rc.2`) asks for its own tag first, so it flashes
+//! the firmware built with it, and falls back to the latest release
+//! ([`release_for_app`]).
 
 use std::collections::HashMap;
 use std::fs;
@@ -20,7 +27,8 @@ pub const CHECK_INTERVAL_SECS: i64 = 24 * 3600;
 /// technical detail, where there is one, is in [`ReleaseError::detail`].
 #[derive(Debug)]
 pub enum ReleaseError {
-    /// `releases/latest` is 404: nothing published yet (or no such repo).
+    /// `releases/latest` (or the app's own tag) is 404: nothing published
+    /// yet (or no such repo).
     NoRelease,
     /// No network, DNS failure, refused or timed-out connection.
     Offline(String),
@@ -58,7 +66,9 @@ impl ReleaseError {
 
     fn from_ureq(url: &str, e: ureq::Error) -> Self {
         match e {
-            ureq::Error::StatusCode(404) if url.ends_with("/releases/latest") => ReleaseError::NoRelease,
+            ureq::Error::StatusCode(404) if url.ends_with("/releases/latest") || url.contains("/releases/tags/") => {
+                ReleaseError::NoRelease
+            }
             ureq::Error::StatusCode(403 | 429) => ReleaseError::RateLimited,
             ureq::Error::StatusCode(c) => ReleaseError::Http(format!("HTTP {c} from {url}")),
             ureq::Error::HostNotFound
@@ -160,10 +170,44 @@ fn release_from_api(
     Ok(Release { tag: gh.tag_name, manifest, assets })
 }
 
+/// The `releases/tags/<tag>` API URL for `repo`.
+pub fn tag_url(repo: &str, tag: &str) -> String {
+    format!("https://api.github.com/repos/{repo}/releases/tags/{tag}")
+}
+
 /// Fetch the latest release of `repo` (`owner/name`).
 pub fn latest_release(repo: &str) -> Result<Release, ReleaseError> {
     let api = get_string(&latest_url(repo))?;
     release_from_api(&api, get_string)
+}
+
+/// A version with a pre-release part (`2.0.0-rc.2`).
+pub fn is_prerelease(version: &str) -> bool {
+    version.contains('-')
+}
+
+/// The release an app at `app_version` should flash and offer as an update:
+/// for a prerelease app, its own tag `v<version>` when it is published, else
+/// (and always for a stable app) the latest release.
+pub fn release_for_app(repo: &str, app_version: &str) -> Result<Release, ReleaseError> {
+    release_for_app_with(repo, app_version, get_string)
+}
+
+/// [`release_for_app`] with the HTTP fetch injected (tests).
+fn release_for_app_with(
+    repo: &str,
+    app_version: &str,
+    fetch: impl Fn(&str) -> Result<String, ReleaseError>,
+) -> Result<Release, ReleaseError> {
+    let v = app_version.trim().trim_start_matches(['v', 'V']);
+    if is_prerelease(v) {
+        match fetch(&tag_url(repo, &format!("v{v}"))) {
+            Ok(api) => return release_from_api(&api, &fetch),
+            Err(ReleaseError::NoRelease) => log::info!("no release tagged v{v} in {repo}; using the latest release"),
+            Err(e) => return Err(e),
+        }
+    }
+    release_from_api(&fetch(&latest_url(repo))?, &fetch)
 }
 
 /// Hex SHA-256 of a byte slice.
@@ -279,6 +323,63 @@ mod tests {
         assert_eq!(r.assets["a-v1.9.0.bin"], "https://x/a.bin");
         let no_manifest = r#"{"tag_name":"v1","assets":[]}"#;
         assert!(matches!(release_from_api(no_manifest, |_| unreachable!()), Err(ReleaseError::MissingAsset(_))));
+    }
+
+    fn api(tag: &str) -> String {
+        format!(
+            r#"{{"tag_name":"{tag}","assets":[{{"name":"manifest.json","browser_download_url":"https://x/{tag}/manifest.json"}}]}}"#
+        )
+    }
+
+    fn manifest(version: &str) -> String {
+        MANIFEST.replace("1.9.0", version)
+    }
+
+    #[test]
+    fn a_prerelease_app_flashes_its_own_tag() {
+        let fetch = |u: &str| -> Result<String, ReleaseError> {
+            match u {
+                "https://api.github.com/repos/o/r/releases/tags/v2.0.0-rc.2" => Ok(api("v2.0.0-rc.2")),
+                "https://api.github.com/repos/o/r/releases/latest" => Ok(api("v1.9.0")),
+                "https://x/v2.0.0-rc.2/manifest.json" => Ok(manifest("2.0.0-rc.2")),
+                "https://x/v1.9.0/manifest.json" => Ok(manifest("1.9.0")),
+                _ => Err(ReleaseError::NoRelease),
+            }
+        };
+        assert_eq!(release_for_app_with("o/r", "2.0.0-rc.2", fetch).unwrap().tag, "v2.0.0-rc.2");
+        assert_eq!(release_for_app_with("o/r", "v2.0.0-rc.2", fetch).unwrap().tag, "v2.0.0-rc.2");
+        // Its tag isn't published: the latest release.
+        assert_eq!(release_for_app_with("o/r", "2.0.0-rc.3", fetch).unwrap().tag, "v1.9.0");
+        // A stable app never asks for a tag.
+        let stable = |u: &str| -> Result<String, ReleaseError> {
+            assert!(!u.contains("/tags/"), "{u}");
+            fetch(u)
+        };
+        assert_eq!(release_for_app_with("o/r", "1.9.0", stable).unwrap().tag, "v1.9.0");
+    }
+
+    #[test]
+    fn prerelease_lookup_errors() {
+        // Only prereleases published: latest is 404, the app's tag answers.
+        let only_rc = |u: &str| -> Result<String, ReleaseError> {
+            match u {
+                "https://api.github.com/repos/o/r/releases/tags/v2.0.0-rc.2" => Ok(api("v2.0.0-rc.2")),
+                "https://x/v2.0.0-rc.2/manifest.json" => Ok(manifest("2.0.0-rc.2")),
+                _ => Err(ReleaseError::NoRelease),
+            }
+        };
+        assert_eq!(release_for_app_with("o/r", "2.0.0-rc.2", only_rc).unwrap().manifest.version, "2.0.0-rc.2");
+        assert!(matches!(release_for_app_with("o/r", "2.0.0", only_rc), Err(ReleaseError::NoRelease)));
+        // Rate limited on the tag: reported, not retried against latest.
+        let limited = |u: &str| -> Result<String, ReleaseError> {
+            assert!(u.contains("/tags/"), "{u}");
+            Err(ReleaseError::RateLimited)
+        };
+        assert!(matches!(release_for_app_with("o/r", "2.0.0-rc.2", limited), Err(ReleaseError::RateLimited)));
+        assert!(matches!(
+            ReleaseError::from_ureq(&tag_url("o/r", "v2.0.0-rc.9"), ureq::Error::StatusCode(404)),
+            ReleaseError::NoRelease
+        ));
     }
 
     #[test]
