@@ -9,9 +9,9 @@
 // future ES8311 board) share one copy of the codec setup and the
 // non-blocking playback task, which synthesizes the ding as it streams.
 
-// Share of full scale the ding peaks at: loud, short of clipping. The
-// codec volume (ChimeConfig.volume) sets the level on top of this.
-#define DING_GAIN 0.9f
+// The ding at its own level (it peaks just under full scale). The codec
+// volume (ChimeConfig.volume) sets the loudness on top of this.
+#define DING_GAIN 1.0f
 #define CHUNK_FRAMES 256
 
 static I2SClass      i2s;

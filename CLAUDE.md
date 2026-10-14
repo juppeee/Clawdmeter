@@ -96,7 +96,7 @@ firmware/src/
   minimal_mode.{h,cpp}      — one-room mode from BoardCaps.minimal_ui only; no user or NVS override
   idle.{h,cpp}, brightness.{h,cpp} — 30-min idle fade / sleep; PWR brightness levels in NVS
   ble.{h,cpp}               — NimBLE peripheral: data service + HID keyboard
-  ding.{h,cpp}, chime.{h,cpp} — the one sound: a synthesized ding (C#5, tau 0.24 s; native-tested) for alerts and resets, streamed by the ES8311 engine
+  ding.{h,cpp}, chime.{h,cpp} — the one sound: a synthesized ding at C#5 (0.7 ms attack, 9 ms strike into a 0.24 s ring, a short noise click; native-tested, mirrored by the desktop's chime.rs) for alerts and resets, streamed by the ES8311 engine
   data.h, icons.h, logo.h, clawd_still.h, font_*.c
 firmware/test/              — native unit tests: test_payload, test_signals, test_usage_rate, test_clawd_policy, test_splash_geometry
 firmware/sim/               — scenario.jsonl (default), director.jsonl (every beat), director-resume.jsonl (interruptions)
