@@ -50,10 +50,7 @@ struct DeviceState {
     probing: bool,
     port: Option<String>,
     info: Option<FirmwareInfo>,
-    /// (effective, override) from the firmware's `minimal` command.
-    minimal: Option<(bool, String)>,
     busy: bool,
-    error: Option<String>,
     /// Result of clearing the board's pairing over USB.
     unpair: Option<(Tone, String)>,
 }
@@ -271,14 +268,11 @@ impl SettingsView {
             cx,
             || {
                 let port = device::list_ports().into_iter().next().map(|p| p.path);
-                let Some(port) = port else { return (None, None, None) };
+                let Some(port) = port else { return (None, None) };
                 let info = device::probe_info(&port, Duration::from_millis(1500)).ok().flatten();
-                let minimal = info.as_ref().and_then(|_| {
-                    device::query_json(&port, "minimal", "minimal", Duration::from_millis(1200)).ok().flatten()
-                });
-                (Some(port), info, minimal)
+                (Some(port), info)
             },
-            |v, (port, info, minimal), _| {
+            |v, (port, info), _| {
                 v.device.probing = false;
                 v.device.port = port;
                 if let Some(i) = &info {
@@ -286,34 +280,6 @@ impl SettingsView {
                         ipc::save_firmware_record(&v.paths, &FirmwareRecord { env: i.env.clone(), ver: i.ver.clone() });
                 }
                 v.device.info = info;
-                v.device.minimal = minimal.map(|m| {
-                    (m["minimal"].as_bool().unwrap_or(false), m["override"].as_str().unwrap_or("auto").to_owned())
-                });
-            },
-        );
-    }
-
-    fn set_minimal(&mut self, mode: &'static str, cx: &mut Context<Self>) {
-        let Some(port) = self.device.port.clone() else { return };
-        self.device.busy = true;
-        self.device.error = None;
-        run_blocking(
-            cx,
-            move || device::query_json(&port, &format!("minimal {mode}"), "minimal", Duration::from_millis(1500)),
-            |v, r, _| {
-                v.device.busy = false;
-                match r {
-                    Ok(Some(m)) => {
-                        v.device.minimal = Some((
-                            m["minimal"].as_bool().unwrap_or(false),
-                            m["override"].as_str().unwrap_or("auto").to_owned(),
-                        ))
-                    }
-                    Ok(None) => {
-                        v.device.error = Some("No response from the device. Reconnect USB and try again.".into())
-                    }
-                    Err(e) => v.device.error = Some(e.to_string()),
-                }
             },
         );
     }
@@ -532,42 +498,6 @@ impl SettingsView {
             .gap(px(6.))
             .child(heading(t, "Device"))
             .child(div().pt(px(8.)).pb(px(10.)).child(card));
-
-        // Minimal display (sent over USB).
-        let minimal_sel = self.device.minimal.as_ref().map(|(_, o)| o.clone()).unwrap_or_else(|| "auto".into());
-        let can_minimal = self.device.port.is_some() && self.device.minimal.is_some() && !self.device.busy;
-        let me = cx.entity().downgrade();
-        let minimal_help = match (&self.device.minimal, &self.device.port) {
-            (Some((eff, _)), _) => {
-                format!("Meters and a still Clawd. Minimal display is {}.", if *eff { "on" } else { "off" })
-            }
-            (None, Some(_)) if self.device.probing => "Reading display mode…".into(),
-            (None, Some(_)) => "Couldn't read display mode. Reconnect USB or update the firmware.".into(),
-            (None, None) => "Meters and a still Clawd. Connect USB to change this setting.".into(),
-        };
-        pane = pane.child(field(
-            t,
-            "Minimal display",
-            minimal_help,
-            segmented(
-                t,
-                "minimal",
-                &[("auto".to_string(), "Board default"), ("on".to_string(), "On"), ("off".to_string(), "Off")],
-                &minimal_sel,
-                can_minimal,
-                move |m, _, cx| {
-                    let mode: &'static str = match m.as_str() {
-                        "on" => "on",
-                        "off" => "off",
-                        _ => "auto",
-                    };
-                    let _ = me.update(cx, |v, cx| v.set_minimal(mode, cx));
-                },
-            ),
-        ));
-        if let Some(e) = &self.device.error {
-            pane = pane.child(div().text_size(px(12.5)).text_color(t.bad).child(e.clone()));
-        }
 
         let me = cx.entity().downgrade();
         pane = pane.child(field(

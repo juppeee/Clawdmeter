@@ -337,8 +337,6 @@ static void apply_minimal(bool on) {
     Serial.printf("director: minimal %s\n", on ? "on" : "off");
 }
 
-static void on_minimal_change(bool on) { apply_minimal(on); }
-
 // ─── Init ────────────────────────────────────────────────────────────────────
 void director_init(void) {
     face_init();
@@ -347,7 +345,6 @@ void director_init(void) {
     turn_clear(&turn);
     clawd_rng_seed(&rng, now_ms() ^ 0xD1EC7u);
     last_engagement = now_ms();
-    minimal_mode_on_change(on_minimal_change);
     apply_minimal(minimal_mode());
     go(B_HOME);
     // Every press on the panel, wherever it lands, is a tap for the

@@ -239,7 +239,7 @@ pub fn probe_info(port: &str, timeout: Duration) -> Result<Option<FirmwareInfo>,
     Ok(None)
 }
 
-/// Send one firmware serial command (`minimal`, `minimal on`, …) and return
+/// Send one firmware serial command (`unpair`, …) and return
 /// the first JSON reply line that has `key`. Like [`probe_info`], opening the
 /// port doesn't reset the board.
 pub fn query_json(
@@ -652,11 +652,11 @@ mod tests {
     }
 
     #[test]
-    fn finds_minimal_reply_among_chatter() {
-        let out = "boot...\n{\"ready\":true}\nminimal\n{\"minimal\":true,\"override\":\"on\"}\n";
-        let v = find_json_with(out, "minimal").unwrap();
-        assert_eq!(v["override"], "on");
-        assert!(find_json_with("{\"minimal\":tr", "minimal").is_none(), "partial line ignored");
+    fn finds_the_reply_among_chatter() {
+        let out = "boot...\n{\"ready\":true}\nunpair\nBLE: bonds cleared\n{\"unpair\":true}\n";
+        let v = find_json_with(out, "unpair").unwrap();
+        assert_eq!(v["unpair"], true);
+        assert!(find_json_with("{\"unpair\":tr", "unpair").is_none(), "partial line ignored");
     }
 
     #[test]

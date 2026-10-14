@@ -181,18 +181,6 @@ static void send_info() {
                   CLAWD_ENV, CLAWD_VERSION, board_hal_rev());
 }
 
-// `minimal` → print state; `minimal on|off|auto` → persist an override.
-static void minimal_cmd(const char* arg) {
-    while (*arg == ' ') arg++;
-    if      (strcmp(arg, "on") == 0)   minimal_mode_set_override(MINIMAL_ON);
-    else if (strcmp(arg, "off") == 0)  minimal_mode_set_override(MINIMAL_OFF);
-    else if (strcmp(arg, "auto") == 0) minimal_mode_set_override(MINIMAL_AUTO);
-    else if (*arg) { Serial.println("usage: minimal [on|off|auto]"); return; }
-    static const char* const NAMES[] = { "auto", "on", "off" };
-    Serial.printf("{\"minimal\":%s,\"override\":\"%s\"}\n",
-                  minimal_mode() ? "true" : "false", NAMES[minimal_mode_override()]);
-}
-
 static void check_serial_cmd() {
     while (Serial.available()) {
         char c = Serial.read();
@@ -206,7 +194,6 @@ static void check_serial_cmd() {
                 clear_pairing("serial");
                 Serial.println("{\"unpair\":true}");
             }
-            else if (strncmp(cmd_buf, "minimal", 7) == 0) minimal_cmd(cmd_buf + 7);
             else if (strncmp(cmd_buf, "clawd ", 6) == 0) {
                 const bool ok = director_debug(cmd_buf + 6);
                 Serial.printf("{\"clawd\":\"%s\",\"ok\":%s}\n", cmd_buf + 6, ok ? "true" : "false");
@@ -235,7 +222,6 @@ void setup() {
     display_hal_begin();
     idle_init();        // takes over panel brightness and starts the idle timer
     brightness_init();  // load the user's saved brightness level and apply via idle
-    minimal_mode_init();
 
     power_hal_init();
     imu_hal_init();

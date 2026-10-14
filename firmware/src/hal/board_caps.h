@@ -18,10 +18,9 @@ struct BoardCaps {
     bool    has_rotation;    // IMU-driven CPU rotation in the flush callback
     bool    has_battery;     // AXP2101 battery measurement is meaningful
     bool    has_imu;         // QMI8658 (or compatible) is populated
-    bool    minimal_ui;      // board default for minimal mode: meters + a still
-                             // corner Clawd, nothing else animates (e-ink, slow
-                             // panels). Shared code must read minimal_mode()
-                             // (minimal_mode.h), which applies the user override.
+    bool    minimal_ui;      // minimal mode: meters + a still corner Clawd,
+                             // nothing else animates (e-ink, slow panels).
+                             // Shared code reads it through minimal_mode().
     bool    has_pwr_button;  // a PWR-role button reaches the firmware (AXP PKEY,
                              // expander pin or GPIO): brightness, next scene,
                              // hold-to-pair. Without one (LCD-4: KEY/PWR is a

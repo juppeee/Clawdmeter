@@ -3,7 +3,6 @@
 #include <Arduino.h>
 #include <stdlib.h>
 #include <string.h>
-#include "../../minimal_mode.h"
 
 static bool quit = false;
 
@@ -50,9 +49,6 @@ void sim_pump(void) {
             case SDLK_t:      sim_inject_event('s'); break;
             case SDLK_a:      sim_inject_activity_cycle(); break;
             case SDLK_m:      sim_inject_alert_toggle(); break;
-            case SDLK_z:
-                minimal_mode_set_override(minimal_mode() ? MINIMAL_OFF : MINIMAL_ON);
-                break;
             case SDLK_p:
                 pwr_down = true;
                 pwr_down_ms = millis();
