@@ -138,7 +138,7 @@ data. The device notifies `0x01` on REQ (`…-0004`) when it has no data yet.
 TX (`…-0003`) notifies `{"dismiss":true}` when an alert ends on the device
 through a tap or its 2-minute timeout. The app clears the alert it sent;
 it does not echo a clear back. Uncleared alerts expire in the app after
-10 minutes, or 30 seconds for a test alert. App expiry sends a clear if the
+2 minutes, like the device, or 30 seconds for a test alert. App expiry sends a clear if the
 alert was sent to the device.
 Key sets are cross-checked by `clawdmeter-core` tests against `doc["…"]` in
 `firmware/src/*.cpp`.
@@ -209,7 +209,7 @@ hardware boards, not shared code).
 
 The firmware has serial commands: `screenshot` (dumps the LVGL framebuffer;
 `./screenshot.sh out.png [port]` turns it into a PNG sized to the panel),
-`info` (env/version/rev/link JSON), `chime` (plays the ding; `buzz` still works), `chime <gain> [volume]` (tune a board's speaker until reboot: gain 0..1, ES8311 volume 0..100; the 2.16 ships 0.7 / 77, tuned by ear; the 1.8 and LCD-1.54 ship 0.7 / 75, untested by ear), `unpair` (clear bonds, re-advertise), and
+`info` (env/version/rev/link JSON), `chime` (plays the ding; `buzz` still works), `chime <gain> [volume]` (tune a board's speaker until reboot: gain 0..1, ES8311 volume 0..100; the 2.16 ships 0.7 / 77, tuned by ear; the 1.8 and LCD-1.54 ship 0.7 / 75, untested by ear), `unpair` (clear bonds, re-advertise), `ble` (link state, bonds, owner, peers), `disconnect` (drop every BLE link), and
 `clawd <show|screensaver|attention|joy|lurk|home>` to force a beat. **Use
 `clawd <beat>` + `screenshot` on every UI iteration** and Read the PNG; there
 is no need to edit the boot screen in `main.cpp` any more. C6 boards have no
