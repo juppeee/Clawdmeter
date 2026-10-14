@@ -3,7 +3,9 @@
 //! skipping it records `onboarding_done` ([`crate::onboarding`]). The board
 //! and flash steps are the flasher; the hooks step is the Hooks page.
 
-use clawdmeter_core::Paths;
+use std::path::PathBuf;
+
+use clawdmeter_core::{usage, Paths, Settings};
 use gpui::{div, prelude::*, px, Context, Entity, EventEmitter, SharedString, Window};
 
 use super::flasher::{FlashEvent, FlashMode, FlasherView, Step as FlashStep};
@@ -56,6 +58,8 @@ pub struct SetupView {
     running: bool,
     /// No tray: the window is the app.
     windowed: bool,
+    /// The Claude Code that will read usage (`None`: not found).
+    claude: Option<PathBuf>,
 }
 
 impl EventEmitter<SetupEvent> for SetupView {}
@@ -85,7 +89,10 @@ impl SetupView {
             }
         })
         .detach();
+        let claude_path = Settings::load(&paths).ok().and_then(|s| s.claude_path);
+        let claude = usage::find_claude(claude_path.as_deref(), &paths.home);
         SetupView {
+            claude,
             paths,
             step: Step::Welcome,
             flasher,
@@ -237,8 +244,25 @@ impl SetupView {
             .child(div().max_w(px(460.)).text_center().child(para(
                 t,
                 "Connect your board with a USB data cable. Setup installs firmware, pairs Bluetooth, and optionally \
-                 adds Claude Code hooks. Claude Code must be installed and signed in.",
+                 adds Claude Code hooks. Claude Code, or the Claude desktop app, must be installed and signed in.",
             )))
+            .child(match &self.claude {
+                Some(c) => div()
+                    .max_w(px(460.))
+                    .text_center()
+                    .text_size(px(12.5))
+                    .text_color(t.mute)
+                    .child(format!("Usage will be read with {}.", crate::claude_label(c, &self.paths.home)))
+                    .into_any_element(),
+                None => notice(
+                    t,
+                    Tone::Warn,
+                    "Claude Code wasn't found. Install Claude Code or the Claude desktop app, or set claude_path in \
+                     the config file.",
+                )
+                .max_w(px(460.))
+                .into_any_element(),
+            })
     }
 
     fn pair(&self, t: &Theme, cx: &Context<Self>) -> gpui::Div {

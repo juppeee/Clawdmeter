@@ -510,8 +510,86 @@ fn next_occurrence<Z: TimeZone>(
 }
 
 /// Locate the `claude` CLI: the configured path, then `PATH`, then the usual
-/// install locations (daemons under systemd/launchd get a thin `PATH`).
+/// install locations (daemons under systemd/launchd get a thin `PATH`), then
+/// the newest copy the Claude desktop app downloaded for itself
+/// ([`desktop_claude_root`], [`newest_bundled_claude`]).
 pub fn find_claude(explicit: Option<&Path>, home: &Path) -> Option<PathBuf> {
+    if explicit.is_some() {
+        return find_cli(explicit, home);
+    }
+    find_cli(None, home).or_else(|| newest_bundled_claude(&desktop_claude_root(home)?))
+}
+
+/// Where the Claude desktop app keeps the Claude Code builds it downloads:
+/// `<userData>/claude-code` (its `app.getPath("userData")`), i.e.
+/// `$XDG_CONFIG_HOME/Claude` or `~/.config/Claude` on Linux,
+/// `~/Library/Application Support/Claude` on macOS, `%APPDATA%\Claude` on
+/// Windows.
+pub fn desktop_claude_root(home: &Path) -> Option<PathBuf> {
+    let user_data = if cfg!(target_os = "macos") {
+        home.join("Library/Application Support/Claude")
+    } else if cfg!(windows) {
+        PathBuf::from(std::env::var_os("APPDATA")?).join("Claude")
+    } else {
+        std::env::var_os("XDG_CONFIG_HOME")
+            .map(PathBuf::from)
+            .filter(|p| p.is_absolute())
+            .unwrap_or_else(|| home.join(".config"))
+            .join("Claude")
+    };
+    Some(user_data.join("claude-code"))
+}
+
+/// The newest runnable Claude Code under the desktop app's `claude-code`
+/// dir. Builds live at `<version>/<checksum>/claude` (`claude.exe` on
+/// Windows; on macOS also `claude.app/Contents/MacOS/claude`). Versions sort
+/// numerically; a version with no runnable binary is skipped.
+pub fn newest_bundled_claude(root: &Path) -> Option<PathBuf> {
+    let mut versions: Vec<(Vec<u64>, PathBuf)> = std::fs::read_dir(root)
+        .ok()?
+        .filter_map(Result::ok)
+        .filter_map(|e| {
+            let name = e.file_name().into_string().ok()?;
+            let v: Vec<u64> = name.split('.').map(|p| p.parse().ok()).collect::<Option<_>>()?;
+            Some((v, e.path()))
+        })
+        .collect();
+    versions.sort_by(|a, b| b.0.cmp(&a.0));
+    let names: &[&str] = if cfg!(windows) {
+        &["claude.exe"]
+    } else if cfg!(target_os = "macos") {
+        &["claude", "claude.app/Contents/MacOS/claude"]
+    } else {
+        &["claude"]
+    };
+    versions.into_iter().find_map(|(_, dir)| {
+        let mut builds: Vec<PathBuf> =
+            std::fs::read_dir(&dir).ok()?.filter_map(Result::ok).map(|e| e.path()).filter(|p| p.is_dir()).collect();
+        builds.sort();
+        builds.push(dir);
+        builds.iter().flat_map(|b| names.iter().map(move |n| b.join(n))).find(|p| is_executable(p))
+    })
+}
+
+fn is_executable(p: &Path) -> bool {
+    let Ok(m) = std::fs::metadata(p) else { return false };
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        m.is_file() && m.permissions().mode() & 0o111 != 0
+    }
+    #[cfg(not(unix))]
+    {
+        m.is_file()
+    }
+}
+
+/// The desktop app's own copy of Claude Code (under [`desktop_claude_root`]).
+pub fn is_desktop_bundled(claude: &Path, home: &Path) -> bool {
+    desktop_claude_root(home).is_some_and(|r| claude.starts_with(r))
+}
+
+fn find_cli(explicit: Option<&Path>, home: &Path) -> Option<PathBuf> {
     if let Some(p) = explicit {
         return p.is_file().then(|| p.to_path_buf());
     }
@@ -789,6 +867,47 @@ mod tests {
 
     fn at(s: &str) -> DateTime<Utc> {
         DateTime::parse_from_rfc3339(s).unwrap().with_timezone(&Utc)
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn finds_the_newest_desktop_bundled_claude() {
+        use std::os::unix::fs::PermissionsExt;
+        let root = std::env::temp_dir().join(format!("cm-bundled-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let put = |rel: &str, exec: bool| {
+            let p = root.join(rel);
+            std::fs::create_dir_all(p.parent().unwrap()).unwrap();
+            std::fs::write(&p, "#!/bin/sh\n").unwrap();
+            std::fs::set_permissions(&p, std::fs::Permissions::from_mode(if exec { 0o755 } else { 0o644 })).unwrap();
+            p
+        };
+        assert_eq!(newest_bundled_claude(&root), None, "no dir");
+        let old = put("2.1.288/dc67a1d84fec/claude", true);
+        put("2.1.95/aaaaaaaaaaaa/claude", true);
+        assert_eq!(newest_bundled_claude(&root), Some(old.clone()), "2.1.288 beats 2.1.95");
+        // A newer version without a runnable binary is skipped; junk dirs too.
+        put("2.1.300/bbbbbbbbbbbb/claude", false);
+        std::fs::create_dir_all(root.join("2.1.301/cccccccccccc")).unwrap();
+        std::fs::create_dir_all(root.join("latest")).unwrap();
+        put("10.0.0-beta/dddddddddddd/claude", true);
+        assert_eq!(newest_bundled_claude(&root), Some(old));
+        let new = put("2.1.295/71164c85f9d2/claude", true);
+        assert_eq!(newest_bundled_claude(&root), Some(new));
+        let _ = std::fs::remove_dir_all(&root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn desktop_root_follows_xdg_config_home() {
+        let home = Path::new("/home/me");
+        // Only checks the default here: the test must not mutate the
+        // process environment other tests read.
+        if std::env::var_os("XDG_CONFIG_HOME").is_none() {
+            assert_eq!(desktop_claude_root(home), Some(PathBuf::from("/home/me/.config/Claude/claude-code")));
+        }
+        assert!(is_desktop_bundled(&desktop_claude_root(home).unwrap().join("2.1.295/71164c85f9d2/claude"), home));
+        assert!(!is_desktop_bundled(Path::new("/home/me/.local/bin/claude"), home));
     }
 
     #[test]
