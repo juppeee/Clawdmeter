@@ -11,6 +11,6 @@
 void sound_hal_init(void);
 void sound_hal_tick(void);
 void sound_hal_chime(void);
-// QA (`chime <gain> [volume]`): try a gain (0..1) and codec volume (0..100,
+// Speaker tuning (`chime <gain> [volume]`): try a gain (0..1) and codec volume (0..100,
 // < 0 keeps it) until reboot, and play the ding. No-op without sound.
 void sound_hal_tune(float gain, int volume);

@@ -189,7 +189,8 @@ static void check_serial_cmd() {
             if (strcmp(cmd_buf, "screenshot") == 0) send_screenshot();
             else if (strcmp(cmd_buf, "chime") == 0 || strcmp(cmd_buf, "buzz") == 0) sound_hal_chime();
             else if (strncmp(cmd_buf, "chime ", 6) == 0) {
-                // QA: `chime <gain> [volume]`, e.g. `chime 0.6 70` (until reboot).
+                // Dev tool for tuning a board's speaker: `chime <gain> [volume]`,
+                // e.g. `chime 0.6 70` (until reboot).
                 float g = 0;
                 int v = -1;
                 if (sscanf(cmd_buf + 6, "%f %d", &g, &v) >= 1) {
