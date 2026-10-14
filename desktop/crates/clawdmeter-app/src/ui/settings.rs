@@ -336,9 +336,29 @@ impl SettingsView {
         .detach();
     }
 
+    /// The binary to set hooks and the login entry up with, or why not.
+    fn launchable(&self) -> Result<PathBuf, String> {
+        let exe = self.launch_exe.clone().ok_or("Couldn't locate the Clawdmeter executable.")?;
+        match clawdmeter_core::launch::unstable(&exe) {
+            Some(u) => Err(format!("Clawdmeter is running from {}. {}", u.location_noun(), u.advice())),
+            None => Ok(exe),
+        }
+    }
+
     fn plan_hooks(&mut self, action: HookAction, dirs: Vec<PathBuf>) {
         self.hook_msg = None;
-        let Some(exe) = self.launch_exe.clone() else { return };
+        let exe = match (action, self.launchable()) {
+            (_, Ok(exe)) => exe,
+            (HookAction::Install, Err(why)) => {
+                self.hook_msg = Some((Tone::Bad, why));
+                return;
+            }
+            // Removing doesn't write a path.
+            (HookAction::Remove, Err(_)) => match self.launch_exe.clone() {
+                Some(exe) => exe,
+                None => return,
+            },
+        };
         let mut plans = Vec::new();
         for d in dirs {
             let plan = match action {
@@ -374,7 +394,7 @@ impl SettingsView {
                     1 => " 1 other file was already saved.".into(),
                     n => format!(" {n} other files were already saved."),
                 };
-                self.hook_msg = Some((Tone::Bad, format!("Couldn't write {what}. {}{saved}", errors::io_message(&e))));
+                self.hook_msg = Some((Tone::Bad, format!("Couldn't write {what}. {e}{saved}")));
                 self.reload();
                 return;
             }
@@ -385,10 +405,10 @@ impl SettingsView {
             Tone::Ok,
             match p.action {
                 HookAction::Install => {
-                    format!("Hooks installed in {accounts}. Existing files were backed up to settings.json.bak.")
+                    format!("Hooks installed in {accounts}. Your original settings are kept in settings.json.bak.")
                 }
                 HookAction::Remove => {
-                    format!("Hooks removed from {accounts}. Existing files were backed up to settings.json.bak.")
+                    format!("Hooks removed from {accounts}. Your original settings are kept in settings.json.bak.")
                 }
             },
         ));
@@ -735,7 +755,9 @@ impl SettingsView {
                     Some(("Review update", HookAction::Install)),
                 ),
                 HookStatus::Stale(old) => (
-                    if Path::new(old).exists() {
+                    if let Some(u) = clawdmeter_core::launch::unstable(Path::new(old)) {
+                        format!("Runs {}, {}.", tilde(old, &self.paths.home), u.location())
+                    } else if Path::new(old).exists() {
                         format!("Uses another Clawdmeter executable: {}.", tilde(old, &self.paths.home))
                     } else {
                         format!("Runs {}, which no longer exists.", tilde(old, &self.paths.home))
@@ -829,7 +851,8 @@ impl SettingsView {
                         });
                     })),
             );
-            pane = pane.child(caption(t, "Review before applying. Existing files are backed up to settings.json.bak."));
+            pane =
+                pane.child(caption(t, "Review before applying. Your original settings are kept in settings.json.bak."));
             for plan in &p.plans {
                 // Diff what changes, not how the file was formatted: compare
                 // against the old file pretty-printed the way it will be saved.
@@ -969,14 +992,13 @@ impl SettingsView {
             toggle(t, "autostart", on, true, move |_, _, cx| {
                 let home = home.clone();
                 let _ = me.update(cx, |v, cx| {
-                    let r = match v.launch_exe.clone() {
-                        _ if on => autostart::disable(&home, LaunchMode::Tray),
-                        Some(exe) => autostart::enable(&home, &exe, LaunchMode::Tray),
-                        None => Err(std::io::Error::other("Couldn't locate the Clawdmeter executable.")),
+                    let r = match v.launchable() {
+                        _ if on => autostart::disable(&home, LaunchMode::Tray).map_err(|e| errors::io_message(&e)),
+                        Ok(exe) => autostart::enable(&home, &exe, LaunchMode::Tray).map_err(|e| errors::io_message(&e)),
+                        Err(why) => Err(why),
                     };
-                    if let Err(e) = r {
-                        v.notice =
-                            Some((Tone::Bad, format!("Couldn't change Start at login. {}", errors::io_message(&e))));
+                    if let Err(why) = r {
+                        v.notice = Some((Tone::Bad, format!("Couldn't change Start at login. {why}")));
                     }
                     v.reload();
                     cx.notify();
@@ -985,6 +1007,11 @@ impl SettingsView {
         ));
         if let (Some(old), Some(exe)) = (self.autostart_stale.clone(), self.launch_exe.clone()) {
             let text = match old {
+                Some(o) if clawdmeter_core::launch::unstable(&o).is_some() => format!(
+                    "Start at login opens {}, {}.",
+                    tilde(&o.display().to_string(), &self.paths.home),
+                    clawdmeter_core::launch::unstable(&o).map_or("", |u| u.location())
+                ),
                 Some(o) if !o.exists() => format!(
                     "Start at login opens {}, which no longer exists.",
                     tilde(&o.display().to_string(), &self.paths.home)
@@ -1000,13 +1027,15 @@ impl SettingsView {
             pane =
                 pane.child(div().pb(px(6.)).child(notice(t, Tone::Warn, text).child(div().flex().pl(px(18.)).child(
                     button(t, "fix-autostart", "Use this copy", ButtonKind::Small, true, move |_, _, cx| {
-                        let r = autostart::enable(&home, &exe, LaunchMode::Tray);
                         let _ = me.update(cx, |v, cx| {
-                            if let Err(e) = r {
-                                v.notice = Some((
-                                    Tone::Bad,
-                                    format!("Couldn't change Start at login. {}", errors::io_message(&e)),
-                                ));
+                            let r = match v.launchable() {
+                                Ok(_) => {
+                                    autostart::enable(&home, &exe, LaunchMode::Tray).map_err(|e| errors::io_message(&e))
+                                }
+                                Err(why) => Err(why),
+                            };
+                            if let Err(why) = r {
+                                v.notice = Some((Tone::Bad, format!("Couldn't change Start at login. {why}")));
                             }
                             v.reload();
                             cx.notify();

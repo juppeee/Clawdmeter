@@ -360,8 +360,10 @@ pub fn status(text: Option<&str>, exe: &Path) -> HookStatus {
         return HookStatus::Legacy;
     }
     let want = quote_exe(exe);
+    // Another binary, or one that won't be there later (a disk image, a zip).
+    let stale = |e: &str| quote_exe(Path::new(e)) != want || clawdmeter_core::launch::unstable(Path::new(e)).is_some();
     if let Some(Owner::Ours { exe: other, .. }) =
-        all.iter().find(|o| matches!(o, Owner::Ours { exe: e, .. } if quote_exe(Path::new(e)) != want))
+        all.iter().find(|o| matches!(o, Owner::Ours { exe: e, .. } if stale(e)))
     {
         return HookStatus::Stale(other.clone());
     }
@@ -384,6 +386,24 @@ pub fn status(text: Option<&str>, exe: &Path) -> HookStatus {
     }
 }
 
+/// What a [`HookPlan`] does, so it can be redone on a file that changed.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum HookOp {
+    /// Install (or update) the hooks for this executable.
+    Install(PathBuf),
+    /// Remove them.
+    Remove,
+}
+
+impl HookOp {
+    fn run(&self, text: Option<&str>) -> Result<String, HookError> {
+        match self {
+            HookOp::Install(exe) => merge(text, exe),
+            HookOp::Remove => remove(text),
+        }
+    }
+}
+
 /// A pending change to one account's settings.json, for the diff view.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct HookPlan {
@@ -393,6 +413,8 @@ pub struct HookPlan {
     pub before: Option<String>,
     /// Text after the change.
     pub after: String,
+    /// The change, redone at [`HookPlan::apply`] if the file moved on.
+    pub op: HookOp,
 }
 
 impl HookPlan {
@@ -405,17 +427,29 @@ impl HookPlan {
         }
     }
 
-    /// Write it; the old file goes to `settings.json.bak` first.
-    pub fn apply(&self) -> io::Result<()> {
-        if !self.changes() {
+    /// Write it. The file is read again first: if Claude Code (or anyone)
+    /// changed it since the preview, the same change is made to the new text,
+    /// so their edits survive. The first file ever replaced is kept as
+    /// `settings.json.bak` (the settings from before Clawdmeter); later
+    /// writes leave that backup alone.
+    pub fn apply(&self) -> Result<(), HookError> {
+        let now = read_opt(&self.path)?;
+        let plan = if now == self.before {
+            self.clone()
+        } else {
+            HookPlan { after: self.op.run(now.as_deref())?, before: now, ..self.clone() }
+        };
+        if !plan.changes() {
             return Ok(());
         }
-        if let Some(dir) = self.path.parent() {
+        if let Some(dir) = plan.path.parent() {
             fs::create_dir_all(dir)?;
         }
-        if let Some(b) = &self.before {
-            fs::write(self.path.with_extension("json.bak"), b)?;
+        let bak = plan.path.with_extension("json.bak");
+        if let (Some(b), false) = (&plan.before, bak.exists()) {
+            fs::write(&bak, b)?;
         }
+        let after = &plan.after;
         // A settings.json symlinked from a dotfiles repo stays a symlink: the
         // new text replaces the file it points at.
         let target = match fs::symlink_metadata(&self.path) {
@@ -423,8 +457,8 @@ impl HookPlan {
             _ => self.path.clone(),
         };
         let tmp = target.with_extension("json.tmp");
-        fs::write(&tmp, &self.after)?;
-        fs::rename(&tmp, &target)
+        fs::write(&tmp, after)?;
+        Ok(fs::rename(&tmp, &target)?)
     }
 }
 
@@ -440,16 +474,18 @@ fn read_opt(path: &Path) -> Result<Option<String>, HookError> {
 pub fn plan_install(config_dir: &Path, exe: &Path) -> Result<HookPlan, HookError> {
     let path = config_dir.join("settings.json");
     let before = read_opt(&path)?;
-    let after = merge(before.as_deref(), exe)?;
-    Ok(HookPlan { path, before, after })
+    let op = HookOp::Install(exe.to_owned());
+    let after = op.run(before.as_deref())?;
+    Ok(HookPlan { path, before, after, op })
 }
 
 /// Plan removing the hooks from one config dir.
 pub fn plan_uninstall(config_dir: &Path) -> Result<HookPlan, HookError> {
     let path = config_dir.join("settings.json");
     let before = read_opt(&path)?;
-    let after = remove(before.as_deref())?;
-    Ok(HookPlan { path, before, after })
+    let op = HookOp::Remove;
+    let after = op.run(before.as_deref())?;
+    Ok(HookPlan { path, before, after, op })
 }
 
 /// Hook status of one config dir.
@@ -657,6 +693,28 @@ mod tests {
     }
 
     #[test]
+    fn apply_keeps_edits_made_after_the_preview() {
+        let dir = std::env::temp_dir().join(format!("cm-hookstale-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("settings.json");
+        fs::write(&path, "{\"model\":\"opus\"}").unwrap();
+        let plan = plan_install(&dir, exe()).unwrap();
+        // Claude Code writes the file while the preview is open.
+        fs::write(&path, "{\"model\":\"opus\",\"theme\":\"dark\"}").unwrap();
+        plan.apply().unwrap();
+        let v: Value = serde_json::from_str(&fs::read_to_string(&path).unwrap()).unwrap();
+        assert_eq!(v["theme"], "dark");
+        assert_eq!(dir_status(&dir, exe()), HookStatus::Installed);
+        // Broken in the meantime: nothing is written.
+        let plan = plan_uninstall(&dir).unwrap();
+        fs::write(&path, "{ not json").unwrap();
+        assert!(matches!(plan.apply(), Err(HookError::Parse(_))));
+        assert_eq!(fs::read_to_string(&path).unwrap(), "{ not json");
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
     fn plan_apply_with_backup() {
         let dir = std::env::temp_dir().join(format!("cm-hookinst-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
@@ -670,6 +728,11 @@ mod tests {
         assert!(!plan_install(&dir, exe()).unwrap().changes());
         plan_uninstall(&dir).unwrap().apply().unwrap();
         assert_eq!(dir_status(&dir, exe()), HookStatus::Missing);
+        assert_eq!(
+            fs::read_to_string(dir.join("settings.json.bak")).unwrap(),
+            "{\"model\":\"opus\"}",
+            "the backup keeps the settings from before Clawdmeter"
+        );
         #[cfg(unix)]
         {
             // A symlinked settings.json keeps its link; the target changes.

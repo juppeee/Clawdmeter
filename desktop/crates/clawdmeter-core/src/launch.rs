@@ -7,6 +7,11 @@
 //! removes; the profile's `bin/clawdmeter` symlink (`~/.nix-profile/bin`,
 //! `/etc/profiles/per-user/<user>/bin`, `/run/current-system/sw/bin`) follows
 //! upgrades. Anything else is launched from where it is.
+//!
+//! Some places can't be launched from later at all ([`Unstable`]): a macOS
+//! app opened straight from its disk image or run translocated, and a Windows
+//! exe run from inside a zip. Hooks and the login entry are not set up from
+//! there, and entries that point there count as stale.
 
 use std::ffi::OsStr;
 use std::io;
@@ -46,6 +51,94 @@ pub fn stable_launch_path_with(
     current.to_path_buf()
 }
 
+/// Why a launch path won't work later.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Unstable {
+    /// On a mounted disk image (`/Volumes/…`): gone once it is ejected.
+    DiskImage,
+    /// macOS App Translocation: a downloaded app runs from a random,
+    /// read-only copy that changes every launch.
+    Translocated,
+    /// A temporary folder, e.g. an exe run from inside a zip (Windows
+    /// extracts it to `%TEMP%\Temp1_<name>.zip\`).
+    Temporary,
+}
+
+impl Unstable {
+    /// Where the path is, for "Runs <path>, <where>."
+    pub fn location(self) -> &'static str {
+        match self {
+            Unstable::DiskImage => "which is on a disk image",
+            Unstable::Translocated => "a temporary copy macOS made",
+            Unstable::Temporary => "which is in a temporary folder",
+        }
+    }
+
+    /// Where it runs from, for "Clawdmeter is running from <noun>."
+    pub fn location_noun(self) -> &'static str {
+        match self {
+            Unstable::DiskImage => "its disk image",
+            Unstable::Translocated => "a temporary copy macOS made",
+            Unstable::Temporary => "a temporary folder",
+        }
+    }
+
+    /// What to do about it.
+    pub fn advice(self) -> &'static str {
+        match self {
+            Unstable::DiskImage | Unstable::Translocated => {
+                "Move Clawdmeter to Applications first, then open it from there."
+            }
+            Unstable::Temporary => "Extract Clawdmeter from the zip first, then run it from there.",
+        }
+    }
+}
+
+/// [`unstable`] with the environment injected: `macos` turns on the disk
+/// image and translocation checks, `temp_dirs` lists the temporary folders
+/// (compared without case when `ignore_case`).
+pub fn unstable_with(path: &Path, macos: bool, temp_dirs: &[PathBuf], ignore_case: bool) -> Option<Unstable> {
+    let names: Vec<&OsStr> = path.components().map(|c| c.as_os_str()).collect();
+    if macos {
+        if names.len() > 2 && names[1] == "Volumes" && path.has_root() {
+            return Some(Unstable::DiskImage);
+        }
+        if names.iter().any(|n| *n == "AppTranslocation") {
+            return Some(Unstable::Translocated);
+        }
+    }
+    if temp_dirs.is_empty() {
+        return None;
+    }
+    let fold = |p: &Path| -> PathBuf {
+        if ignore_case {
+            PathBuf::from(p.to_string_lossy().to_lowercase())
+        } else {
+            p.to_path_buf()
+        }
+    };
+    let folded = fold(path);
+    let in_temp = temp_dirs.iter().any(|t| !t.as_os_str().is_empty() && folded.starts_with(fold(t)));
+    // A folder named like an archive is an archive tool's extract-to-run.
+    let in_zip = names.iter().rev().skip(1).any(|n| n.to_string_lossy().to_lowercase().ends_with(".zip"));
+    (in_temp || in_zip).then_some(Unstable::Temporary)
+}
+
+/// Whether `path` (as hooks or the login entry would launch it) goes away
+/// or changes. Checks the macOS cases on macOS and temporary folders on
+/// Windows.
+pub fn unstable(path: &Path) -> Option<Unstable> {
+    let temps = if cfg!(windows) {
+        let t = std::env::temp_dir();
+        let canonical = std::fs::canonicalize(&t).ok();
+        std::iter::once(t).chain(canonical).collect()
+    } else {
+        Vec::new()
+    };
+    let check = |p: &Path| unstable_with(p, cfg!(target_os = "macos"), &temps, cfg!(windows));
+    check(path).or_else(|| std::fs::canonicalize(path).ok().and_then(|c| check(&c)))
+}
+
 /// Where the login entry and hooks should point to launch this app.
 pub fn stable_launch_path() -> io::Result<PathBuf> {
     let current = std::env::current_exe()?;
@@ -60,6 +153,35 @@ pub fn stable_launch_path() -> io::Result<PathBuf> {
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn disk_images_and_translocation_on_macos() {
+        let dmg = Path::new("/Volumes/Clawdmeter/Clawdmeter.app/Contents/MacOS/clawdmeter");
+        assert_eq!(unstable_with(dmg, true, &[], false), Some(Unstable::DiskImage));
+        assert_eq!(unstable_with(dmg, false, &[], false), None, "only on macOS");
+        let moved =
+            Path::new("/private/var/folders/xy/abc/T/AppTranslocation/1F2E/d/Clawdmeter.app/Contents/MacOS/clawdmeter");
+        assert_eq!(unstable_with(moved, true, &[], false), Some(Unstable::Translocated));
+        let installed = Path::new("/Applications/Clawdmeter.app/Contents/MacOS/clawdmeter");
+        assert_eq!(unstable_with(installed, true, &[], false), None);
+        assert_eq!(unstable_with(Path::new("/Volumes"), true, &[], false), None);
+    }
+
+    #[test]
+    fn temporary_folders_and_zips() {
+        let temp = [PathBuf::from("/Users/Me/AppData/Local/Temp")];
+        let zip = Path::new("/users/me/appdata/local/temp/Temp1_clawdmeter-v2.0.0.zip/clawdmeter.exe");
+        assert_eq!(unstable_with(zip, false, &temp, true), Some(Unstable::Temporary));
+        let extracted_temp = Path::new("/Users/Me/AppData/Local/Temp/7zO1234/clawdmeter.exe");
+        assert_eq!(unstable_with(extracted_temp, false, &temp, true), Some(Unstable::Temporary));
+        assert_eq!(unstable_with(extracted_temp, false, &temp, false), Some(Unstable::Temporary));
+        let elsewhere_zip = Path::new("/Users/Me/Downloads/clawdmeter.zip/clawdmeter.exe");
+        assert_eq!(unstable_with(elsewhere_zip, false, &temp, true), Some(Unstable::Temporary));
+        let installed = Path::new("/Users/Me/AppData/Local/Programs/Clawdmeter/clawdmeter.exe");
+        assert_eq!(unstable_with(installed, false, &temp, true), None);
+        assert_eq!(unstable_with(Path::new("/Users/Me/clawdmeter.zip"), false, &temp, true), None, "the file itself");
+        assert_eq!(unstable_with(zip, false, &[], true), None, "not checked without temp dirs");
+    }
 
     fn exists<'a>(files: &'a [&'a str]) -> impl Fn(&Path) -> bool + 'a {
         move |p| files.iter().any(|f| Path::new(f) == p)

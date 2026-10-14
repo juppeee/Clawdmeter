@@ -308,7 +308,8 @@ pub fn is_stale(home: &Path, mode: LaunchMode, want: &Path) -> bool {
         return false;
     }
     match entry_exe(home, mode) {
-        Some(exe) => exe != want || !exe.exists(),
+        // A copy on a disk image or in a temp folder won't be there later.
+        Some(exe) => exe != want || !exe.exists() || crate::launch::unstable(&exe).is_some(),
         None => true,
     }
 }
