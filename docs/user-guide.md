@@ -119,7 +119,7 @@ A tap or the device's two-minute timeout dismisses the alert on the device
 and tells the app to clear it from the tray too. Answering also clears the
 alert through hooks. Uncleared app alerts expire after 10 minutes; test
 alerts expire after 30 seconds. C6 boards show the message without the
-full-size Clawd. Optional beeps and reset chimes work on boards with an implemented audio output.
+full-size Clawd. Optional alert and reset chimes work on boards with an implemented audio output.
 Boards with the **minimal display** capability keep the meters and a still
 Clawd, with no animated scenes. This is a board capability, not a user setting.
 
@@ -154,8 +154,12 @@ seconds and preserves comments and unknown keys when saving.
 | Key | Default | Effect |
 | --- | --- | --- |
 | `config_dirs` | `~/.claude` | Comma-separated Claude Code config folders. The app selects the account whose session usage increased most recently. `CLAUDE_CONFIG_DIR` supplies the default when this key is absent. |
-| `chime` | `off` | Play a reset chime on supported audio hardware. |
-| `beep` | `off` | Play a sound with attention alerts on supported audio hardware. Tray mute lasts until restart. |
+| `reset_chime` | `off` | Chime on the device when the session usage resets (boards with a speaker). The older `chime` key still works. |
+| `alert_chime` | `off` | Chime on the device when Claude needs you (boards with a speaker). The older `beep` key still works. |
+| `desktop_chime` | `off` | Play the same chime on this computer when Claude needs you. Follows `alert_on`. |
+
+**Mute chimes** in the tray silences the alert chime and the desktop chime
+until the app restarts.
 | `clock` | `off` | `auto`, `12`, or `24` replaces the device's Usage title with a clock. |
 | `poll_interval` | automatic | Override working and no-hooks polling intervals, in seconds. The scheduler enforces at least 120 seconds per account. Quiet and other-account schedules still apply. |
 | `heartbeat_interval` | `60` | Resend cached readings between usage checks. This does not fetch usage. Keep the default unless diagnosing the connection. |

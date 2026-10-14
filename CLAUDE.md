@@ -96,7 +96,7 @@ firmware/src/
   minimal_mode.{h,cpp}      — one-room mode from BoardCaps.minimal_ui only; no user or NVS override
   idle.{h,cpp}, brightness.{h,cpp} — 30-min idle fade / sleep; PWR brightness levels in NVS
   ble.{h,cpp}               — NimBLE peripheral: data service + HID keyboard
-  chime.{h,cpp}             — reset chime / attention beep engine (boards with ES8311)
+  ding.{h,cpp}, chime.{h,cpp} — the one sound: a synthesized ding (C#5, tau 0.24 s; native-tested) for alerts and resets, streamed by the ES8311 engine
   data.h, icons.h, logo.h, clawd_still.h, font_*.c
 firmware/test/              — native unit tests: test_payload, test_signals, test_usage_rate, test_clawd_policy, test_splash_geometry
 firmware/sim/               — scenario.jsonl (default), director.jsonl (every beat), director-resume.jsonl (interruptions)
@@ -131,7 +131,7 @@ message-only.
 One JSON object per write to RX (`4c41555a-…-0002`, firmware buffer 512 B),
 always a full update. `s sr w wr st acct tp pd rd t tf c ok` (usage; `sr`/`wr`
 -1 = not started/unknown; `acct:"ent"` = spend-capped account: `s` is spend %,
-`tp/pd/rd` billing period), `b m x` (attention: beep, ASCII message, clear),
+`tp/pd/rd` billing period), `b m x` (attention: alert chime, ASCII message, clear),
 `a e es n` (fast clock: activity 0–3, event `p`/`s`/`b` + sequence, active
 sessions), `rp:1` (heartbeat replay; rate math skips it). `{"ok":false}` = no
 data. The device notifies `0x01` on REQ (`…-0004`) when it has no data yet.
@@ -209,7 +209,7 @@ hardware boards, not shared code).
 
 The firmware has serial commands: `screenshot` (dumps the LVGL framebuffer;
 `./screenshot.sh out.png [port]` turns it into a PNG sized to the panel),
-`info` (env/version/rev/link JSON), `buzz`, `unpair` (clear bonds, re-advertise), and
+`info` (env/version/rev/link JSON), `chime` (plays the ding; `buzz` still works), `unpair` (clear bonds, re-advertise), and
 `clawd <show|screensaver|attention|joy|lurk|home>` to force a beat. **Use
 `clawd <beat>` + `screenshot` on every UI iteration** and Read the PNG; there
 is no need to edit the boot screen in `main.cpp` any more. C6 boards have no
@@ -255,8 +255,10 @@ Run modes: no args = tray app (logs to `<state>/daemon.log`);
 State lives in one dir, `~/.config/clawdmeter/` (Windows:
 `%LOCALAPPDATA%\Clawdmeter\`): `config`, `events.log`, `attention`,
 `clear-<sid>`, `ble-address`, `daemon.log`, app state/locks. Config keys:
-`config_dirs`, `poll_interval`, `heartbeat_interval`, `chime`, `beep`,
-`clock`, `claude_path`, `release_repo`, `update_check`, `onboarding_done`,
+`config_dirs`, `poll_interval`, `heartbeat_interval`, `reset_chime` and
+`alert_chime` (device; the old `chime` / `beep` keys are read when these are
+absent), `desktop_chime` (the same ding on this computer via rodio, ALSA on
+Linux; `chime.rs`), `clock`, `claude_path`, `release_repo`, `update_check`, `onboarding_done`,
 `alert_on` (alert kinds the daemon lets through: the hook records `k` from
 `hook_event_name` / `notification_type`, `engine.on_attention` drops the
 rest; default all but `idle`).

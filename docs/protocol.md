@@ -37,6 +37,6 @@ alert, so the app clears its corresponding alert too.
 | `t`, `tf` | Local wall-clock epoch and 12/24-hour format, when the clock is on. |
 | `c` | `1` = the reset chime may sound. |
 | `ok` | `false` alone = no usable account data; do not treat this as a zero reading. |
-| `b`, `m`, `x` | Attention: beep, message (ASCII), end the alert. |
+| `b`, `m`, `x` | Attention: alert chime, message (ASCII), end the alert. |
 | `a`, `e`, `es`, `n` | Fast clock: activity 0–3, latest hook event (`p` prompt, `s` stop, `b` back after a gap) and its sequence number, active sessions. |
 | `rp` | `1` = a heartbeat replay, not a fresh poll; the rate math skips it. |
