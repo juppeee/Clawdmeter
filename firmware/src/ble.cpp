@@ -201,6 +201,16 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         if (s->getConnectedCount() < CONFIG_BT_NIMBLE_MAX_CONNECTIONS) {
             need_advertise = true;
         }
+        // Start pairing/encryption ourselves. RX writes are only accepted over
+        // an encrypted link, but nothing in the GATT table forces the central
+        // to pair; macOS can keep a cached GATT table after a bond clear and
+        // never read a protected HID characteristic, leaving it stuck on
+        // "Connecting" with an unencrypted link.
+        if (!info.isEncrypted()) {
+            int rc = 0;
+            bool ok = NimBLEDevice::startSecurity(info.getConnHandle(), &rc);
+            Serial.printf("BLE: startSecurity %s (rc=%d)\n", ok ? "OK" : "FAILED", rc);
+        }
     }
 
     void onDisconnect(NimBLEServer* s, NimBLEConnInfo& info, int reason) override {
@@ -403,9 +413,27 @@ const char* ble_get_mac_address(void) {
 }
 
 void ble_clear_bonds(void) {
-    NimBLEDevice::deleteAllBonds();
+    // Delete bonds one at a time (always index 0: each delete shifts the list)
+    // and report failures: deleteAllBonds() bails silently on the first error,
+    // leaving a stale bond in NVS that breaks re-pairing.
+    for (int guard = NimBLEDevice::getNumBonds(); guard > 0 && NimBLEDevice::getNumBonds() > 0; guard--) {
+        NimBLEAddress a = NimBLEDevice::getBondedAddress(0);
+        bool ok = NimBLEDevice::deleteBond(a);
+        if (!ok) {
+            // ble_gap_unpair() stops at the first missing record (e.g. our_sec
+            // already gone) and leaves the peer's security entry behind, so
+            // delete each record directly and ignore "not found".
+            struct ble_store_key_sec key;
+            memset(&key, 0, sizeof(key));
+            key.peer_addr = *a.getBase();
+            int r1 = ble_store_delete_peer_sec(&key);
+            int r2 = ble_store_delete_our_sec(&key);
+            Serial.printf("BLE: unpair failed; direct delete peer_sec rc=%d our_sec rc=%d\n", r1, r2);
+        }
+        Serial.printf("BLE: delete bond %s -> %s\n", a.toString().c_str(), ok ? "ok" : "forced");
+    }
     clear_owner();  // release ownership so the board can be handed to another machine
-    Serial.println("BLE: bonds cleared");
+    Serial.printf("BLE: bonds cleared (remaining=%d)\n", NimBLEDevice::getNumBonds());
     if (state == BLE_STATE_CONNECTED) {
         server->disconnect(server->getPeerInfo(0).getConnHandle());
     }
@@ -414,6 +442,30 @@ void ble_clear_bonds(void) {
 
 bool ble_has_bonds(void) {
     return NimBLEDevice::getNumBonds() > 0;
+}
+
+void ble_print_status(void) {
+    static const char* names[] = {"INIT", "ADVERTISING", "CONNECTED", "DISCONNECTED"};
+    Serial.printf("BLE status: state=%s bonds=%d owner=%s\n",
+        names[state], NimBLEDevice::getNumBonds(), owner_set ? owner_addr : "none");
+    if (!server) return;
+    for (uint8_t i = 0; i < server->getConnectedCount(); i++) {
+        NimBLEConnInfo ci = server->getPeerInfo(i);
+        Serial.printf("BLE status: peer=%s id=%s enc=%d bonded=%d\n",
+            ci.getAddress().toString().c_str(), ci.getIdAddress().toString().c_str(),
+            ci.isEncrypted() ? 1 : 0, ci.isBonded() ? 1 : 0);
+    }
+}
+
+void ble_disconnect_all(void) {
+    if (!server) return;
+    // Collect the handles first: each disconnect shrinks the peer list.
+    uint16_t handles[CONFIG_BT_NIMBLE_MAX_CONNECTIONS];
+    uint8_t n = 0;
+    for (uint8_t i = 0; i < server->getConnectedCount() && n < CONFIG_BT_NIMBLE_MAX_CONNECTIONS; i++) {
+        handles[n++] = server->getPeerInfo(i).getConnHandle();
+    }
+    for (uint8_t i = 0; i < n; i++) server->disconnect(handles[i]);
 }
 
 bool ble_has_data(void) {

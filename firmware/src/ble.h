@@ -15,6 +15,8 @@ const char* ble_get_device_name(void);
 const char* ble_get_mac_address(void);
 void ble_clear_bonds(void);
 bool ble_has_bonds(void);
+void ble_print_status(void);   // serial `ble`: state, bonds, owner, peers
+void ble_disconnect_all(void); // serial `disconnect`: drop every link
 bool ble_has_data(void);
 // The latest payload, copied for the caller; valid until the next call.
 const char* ble_get_data(void);

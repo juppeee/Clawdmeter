@@ -202,6 +202,8 @@ static void check_serial_cmd() {
             }
             else if (strcmp(cmd_buf, "info") == 0)  send_info();
             else if (strcmp(cmd_buf, "perf") == 0)  perf_print();
+            else if (strcmp(cmd_buf, "ble") == 0) ble_print_status();
+            else if (strcmp(cmd_buf, "disconnect") == 0) ble_disconnect_all();
             else if (strcmp(cmd_buf, "unpair") == 0) {
                 clear_pairing("serial");
                 Serial.println("{\"unpair\":true}");
