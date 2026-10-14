@@ -11,6 +11,19 @@ protocol behavior, and differences that matter when diagnosing an upgrade.
 Legend: **L** bash (Linux), **M** Python (macOS), **W** Python (Windows).
 "—" means that daemon didn't do it.
 
+## Replacing a legacy daemon
+
+The desktop app replaces the bash and Python daemons. It uses only the
+current state folder and ignores the legacy directory. Set up accounts
+and preferences in the app.
+
+1. Install the desktop app. If **Settings** reports a legacy service,
+   disable it there so only one process talks to the device. On Windows,
+   also quit the Python tray or sign out to stop the running process.
+2. Open **Hooks** and update entries that use `attention-hook.sh`. Review
+   the file changes before saving.
+3. Remove the legacy checkout's `daemon/.venv` if you no longer need it.
+
 ## Usage source
 
 The legacy daemons sent a one-token Haiku request and read usage from

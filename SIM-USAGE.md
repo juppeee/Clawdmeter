@@ -56,7 +56,7 @@ through the same parser and signal handling as hardware. `a` is activity
 the event sequence; `n` is the active-session count. The first `es` sets a
 baseline. Each later change fires an event, including a change when the
 scenario loops. `rp:1` marks a replay and excludes it from usage-rate math.
-See the [payload reference](README.md#ble-protocol) for usage fields.
+See the [payload reference](docs/protocol.md) for usage fields.
 
 ## Director walkthrough
 

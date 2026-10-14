@@ -6,6 +6,9 @@ Shared code uses capabilities, not board-name conditionals. If the HAL
 cannot express a required behavior, propose an interface change before
 adding special cases to `main.cpp` or `ui.cpp`.
 
+Before starting, check for an existing pull request for the board. Testing
+the same hardware helps more than a duplicate port.
+
 ## Choose a reference
 
 The supported ports include ESP32-S3 boards with PSRAM and ESP32-C6 boards
