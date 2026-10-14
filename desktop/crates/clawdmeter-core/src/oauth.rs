@@ -270,6 +270,31 @@ mod tests {
         assert!(!r.overage && r.spend.is_none());
     }
 
+    // A real answer from a subscription account with no window running:
+    // five_hour {utilization 0, resets_at null}, the session limit inactive,
+    // the week at 40 %.
+    #[test]
+    fn real_idle_answer_is_not_started() {
+        let body = include_str!("../tests/fixtures/usage-endpoint-idle.json");
+        let now = at("2026-10-14T02:30:00Z");
+        let r = interpret(200, None, body, now).unwrap();
+        assert_eq!(r.session, None, "a null reset is a window that hasn't started, not 0 % of one");
+        assert!(!r.window_started());
+        assert_eq!(r.week, Some(Window { pct: 40, resets_at: Some(at("2026-10-14T15:00:00.006703Z")) }));
+        assert!(r.spend.is_none() && !r.overage && r.models.is_empty());
+        let p = crate::Payload::from_reading(&r, now);
+        assert_eq!((p.s, p.sr, p.w, p.wr), (Some(0), Some(-1), Some(40), Some(750)));
+        assert_eq!(p.acct.as_deref(), Some("pro"));
+        // So the next reading comes from here again, every 12 minutes, not the probe.
+        let st = crate::usage::AccountState {
+            last: Some(r),
+            last_ok_at: Some(now.timestamp()),
+            read_started_at: Some(now.timestamp()),
+            ..Default::default()
+        };
+        assert_eq!(crate::probe::choose_source(&st, None, now.timestamp() + 60), crate::probe::Source::Usage);
+    }
+
     #[test]
     fn no_running_window() {
         let now = at("2026-10-14T05:00:00Z");
