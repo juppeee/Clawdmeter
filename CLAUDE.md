@@ -93,7 +93,7 @@ firmware/src/
   face.{h,cpp}, streak.{h,cpp} — screensaver face / curtain, and the orange streak transition (LVGL objects on lv_layer_top)
   clawd_anim.{h,cpp}        — only TU that includes splash_animations.h (~400 KB, generated, do not hand-edit)
   ui.{h,cpp}                — the meters only: cards, clock, status line, battery, seat; stale data dims to 40 % opa. compute_layout() from board_caps() (H >= 460 → large, else compact; content_y 100 / 96)
-  minimal_mode.{h,cpp}      — one-room mode (BoardCaps.minimal_ui or NVS override via `minimal on|off|auto`)
+  minimal_mode.{h,cpp}      — one-room mode from BoardCaps.minimal_ui only; no user or NVS override
   idle.{h,cpp}, brightness.{h,cpp} — 30-min idle fade / sleep; PWR brightness levels in NVS
   ble.{h,cpp}               — NimBLE peripheral: data service + HID keyboard
   chime.{h,cpp}             — reset chime / attention beep engine (boards with ES8311)
@@ -135,6 +135,11 @@ always a full update. `s sr w wr st acct tp pd rd t tf c ok` (usage; `sr`/`wr`
 `a e es n` (fast clock: activity 0–3, event `p`/`s`/`b` + sequence, active
 sessions), `rp:1` (heartbeat replay; rate math skips it). `{"ok":false}` = no
 data. The device notifies `0x01` on REQ (`…-0004`) when it has no data yet.
+TX (`…-0003`) notifies `{"dismiss":true}` when an alert ends on the device
+through a tap or its 2-minute timeout. The app clears the alert it sent;
+it does not echo a clear back. Uncleared alerts expire in the app after
+10 minutes, or 30 seconds for a test alert. App expiry sends a clear if the
+alert was sent to the device.
 Key sets are cross-checked by `clawdmeter-core` tests against `doc["…"]` in
 `firmware/src/*.cpp`.
 
@@ -173,14 +178,14 @@ rate math, chime logic). Only `ble.cpp`/`chime.cpp` are swapped for stubs.
 Keys (full map in `boards/sim/board.h`): mouse = touch · space = play/pause ·
 ←/→ step · 1-9 jump · d BLE link · b/n BOOT/secondary · p PWR · c/u/-/=
 charging/USB-only/battery · e/t prompt/stop event · a activity 0→3 · m alert ·
-z minimal mode · s screenshot BMP · esc quit.
+s screenshot BMP · esc quit.
 
 Env vars: `SIM_FAST=1` (minutes → seconds via `clawd_tuning_fast()`),
 `SIM_TRACE=1` (per-step director trace), `SIM_SHOTS="ms:path,…"` (screenshots,
 exits after the last), `SIM_TAPS="ms@x,y;…"` (`ms@x,y+hold_ms` for a touch hold),
 `SIM_NO_PWR=1` (a board without a PWR button, like LCD-4), `SIM_CMDS="ms:cmd;…"` (scripted
 serial commands; `pwr`, `prompt`, `stop`, `alert` stand for the button/keys),
-`SIM_MINIMAL=1`, `SIM_LCD_W`/`SIM_LCD_H` (other panel sizes; use a separate
+`SIM_MINIMAL=1` (sets the simulator's `BoardCaps.minimal_ui`), `SIM_LCD_W`/`SIM_LCD_H` (other panel sizes; use a separate
 `PLATFORMIO_BUILD_DIR` per size, never the scratchpad root),
 `SIM_AUTOSHOT_MS` + `SIM_AUTOSHOT_PATH` with `SDL_VIDEODRIVER=dummy` for
 headless CI shots.
@@ -204,7 +209,7 @@ hardware boards, not shared code).
 
 The firmware has serial commands: `screenshot` (dumps the LVGL framebuffer;
 `./screenshot.sh out.png [port]` turns it into a PNG sized to the panel),
-`info` (env/version/rev/link JSON), `minimal on|off|auto`, `buzz`, `unpair` (clear bonds, re-advertise), and
+`info` (env/version/rev/link JSON), `buzz`, `unpair` (clear bonds, re-advertise), and
 `clawd <show|screensaver|attention|joy|lurk|home>` to force a beat. **Use
 `clawd <beat>` + `screenshot` on every UI iteration** and Read the PNG; there
 is no need to edit the boot screen in `main.cpp` any more. C6 boards have no

@@ -36,7 +36,6 @@ The simulator HAL and Arduino shims live in `firmware/src/boards/sim/`.
 | E / T | Inject a prompt / stop event. |
 | A | Cycle activity from 0 through 3. |
 | M | Toggle an attention alert. |
-| Z | Toggle minimal display. |
 | S | Save a BMP screenshot in the current directory. |
 | Escape or window close | Quit. |
 
@@ -108,7 +107,7 @@ SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
 | `SIM_SHOTS` | `ms:path,ms:path`; ascending times, exit after the last shot. |
 | `SIM_TAPS` | `ms@x,y;ms@x,y`; a 120 ms press at each time. |
 | `SIM_CMDS` | `ms:command;ms:command`; serial commands, including `clawd peek <x>`. `pwr`, `prompt`, `stop`, `alert`, and `link` inject their corresponding input. |
-| `SIM_MINIMAL=1` | Start with minimal display enabled. |
+| `SIM_MINIMAL=1` | Set the simulator's `BoardCaps.minimal_ui` at startup to preview a minimal-display board. |
 | `SIM_TRACE=1` | Log director transitions and steps. |
 | `SIM_EDGE_WATCH=1` | Log non-black pixel counts in the bottom 16 rows and right 16 columns to expose stray edge rendering. |
 | `SIM_ROUND_EVEN=1` | Apply CO5300-style even-aligned flush rounding. |

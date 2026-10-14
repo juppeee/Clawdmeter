@@ -277,10 +277,23 @@ timing only, never new frames: the scene releases to the idle pose and holds
 a beat (anticipation), then the walk-off ramps from 1.5× to 3× over its first
 400 ms (ease-in) instead of starting at full speed.
 
+## Alert dismissal and expiry
+
+A tap or the device's 2-minute attention timeout ends the local alert and
+sends `{"dismiss":true}` on BLE TX (`…-0003`). The app clears the alert it
+sent, including its tray state, without echoing a clear back. A host `x`
+clear ends the device alert without a dismissal notification.
+
+The app also expires uncleared alerts after 10 minutes; Hooks test alerts
+expire after 30 seconds. If the alert was sent, app expiry queues a clear
+for the device. These app limits are separate from the device's 2-minute
+attention timer (`SIM_FAST` compresses that device timer to 20 seconds).
+
 ## Minimal mode
 
-When `minimal_mode()` is on (BoardCaps default, user override, `minimal` serial
-command, `z` in the sim):
+When `BoardCaps.minimal_ui` is true, `minimal_mode()` returns true. This is
+a board capability, with no NVS override, desktop setting, or serial toggle.
+`SIM_MINIMAL=1` sets the simulator capability at startup. In this mode:
 
 - One room. No stage, face, streak, lurk trip, idle acts, noticing, wave or
   joy.
@@ -290,8 +303,6 @@ command, `z` in the sim):
   it, as do `x` and the 2 min timeout.
 - The status line shows a fixed glyph and one word ("Connected", "No data",
   "Waiting") and redraws only when the state changes.
-- Switching at runtime resets Clawd to his seat with no transition. This is
-  the one hard cut, and it only happens because the user asked for it.
 
 ## Boards without PSRAM (C6)
 

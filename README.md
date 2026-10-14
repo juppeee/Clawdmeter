@@ -133,10 +133,14 @@ The device boots to the meters. Tap a show or screensaver to return to them.
 Tap the meters to bring Clawd's face up to the glass; tap again to send him
 back. A tap that wakes a sleeping panel only wakes it.
 
-Attention alerts end when you answer, tap the screen, or reach the two-minute
-timeout. C6 boards show the message without the full-size Clawd. Optional
+A tap or the device's two-minute timeout dismisses the alert on the device
+and tells the app to clear it from the tray too. Answering also clears the
+alert through hooks. Uncleared app alerts expire after 10 minutes; test
+alerts expire after 30 seconds. C6 boards show the message without the
+full-size Clawd. Optional
 beeps and reset chimes work on boards with an implemented audio output.
-**Minimal display** keeps the meters and a still Clawd, with no animated scenes.
+Boards with the **minimal display** capability keep the meters and a still
+Clawd, with no animated scenes. This is a board capability, not a user setting.
 
 The status line rotates through Claude Code's whimsical thinking verbs when
 all is well. It shows **Waiting** without a connection, **No data** before a
@@ -269,6 +273,8 @@ The device advertises a custom GATT service next to the standard HID keyboard se
 | **HID service**                | `00001812-0000-1000-8000-00805f9b34fb` |
 
 The host writes one JSON object (at most 512 bytes) to RX; every write is a complete update. The device notifies `0x01` on REQ when it has no data yet, asking for a poll.
+It sends `{"dismiss":true}` on TX when a tap or the device timeout ends an
+alert, so the app clears its corresponding alert too.
 
 ```json
 {"s":45,"sr":120,"w":28,"wr":7200,"st":"allowed","acct":"pro","ok":true,"a":2,"e":"p","es":14,"n":1}
