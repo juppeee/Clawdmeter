@@ -103,7 +103,7 @@ keeping comments and unknown keys.
 | Alert file (`attention`, `{"m","s"}`) | L, M; W: — | `clawdmeter-core/src/attention.rs` | Older than 60 s when first seen: dropped. Bare `touch`: alert without a message. |
 | Repeat alert from the waiting session | L, M: ignored | Ignored | AskUserQuestion notifies twice. |
 | `clear-<sid>` | Ends the alert only for the alerting session and only when newer (ns mtimes) | Same | |
-| Message to ASCII, 120 chars | L, M | Same (`to_ascii`) | |
+| Message to ASCII, 120 chars | L, M | Same (`to_ascii`) | The device gets a fixed line per alert kind instead (`AlertKind::device_text`); only the test alert sends its own text. |
 | Alert write | L: inside an aged replay · M: inside a fresh poll | Inside a replay (`rp:1`), or the poll if one is due | |
 | Message too long for one write | M: trims `m`, then drops it | Same (`Payload::encode`, 500-byte cap; firmware buffer is 512) | |
 | Leftover alert files on connect | L, M: deleted | Deleted | |

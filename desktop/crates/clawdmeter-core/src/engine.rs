@@ -758,7 +758,7 @@ mod tests {
         e.on_attention(Some(alert.clone()), &HashMap::new());
         let w = write(&mut e, T0 + 2).unwrap();
         assert_eq!(w.kind, WriteKind::Attention);
-        assert_eq!((w.payload.b, w.payload.m.as_deref(), w.payload.rp), (Some(1), Some("Claude needs you"), Some(1)));
+        assert_eq!((w.payload.b, w.payload.m.as_deref(), w.payload.rp), (Some(1), Some("Permission needed!"), Some(1)));
         assert!(write(&mut e, T0 + 3).is_none());
         let clears: HashMap<_, _> = [("abc".to_owned(), alert.at + Duration::from_secs(1))].into();
         e.on_attention(None, &clears);

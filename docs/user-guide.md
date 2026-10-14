@@ -115,6 +115,10 @@ The device boots to the meters. Tap a show or screensaver to return to them.
 Tap the meters to bring Clawd's face up to the glass; tap again to send him
 back. A tap that wakes a sleeping panel only wakes it.
 
+The device names what the session is waiting for in one short line:
+**Question for you**, **Permission needed!**, **Waiting for you!** (an idle
+prompt) or **MCP request!**. The test alert says **Clawdmeter test alert**.
+
 A tap or the device's two-minute timeout dismisses the alert on the device
 and tells the app to clear it from the tray too. Answering also clears the
 alert through hooks. Uncleared app alerts expire after 10 minutes; test

@@ -88,6 +88,17 @@ impl AlertKind {
             (_, Some(_)) => AlertKind::Other,
         }
     }
+
+    /// The fixed line the device shows for this kind, in place of Claude
+    /// Code's own (often long) notification text.
+    pub fn device_text(self) -> &'static str {
+        match self {
+            AlertKind::Question => "Question for you",
+            AlertKind::Permission | AlertKind::Other => "Permission needed!",
+            AlertKind::Idle => "Waiting for you!",
+            AlertKind::Elicitation => "MCP request!",
+        }
+    }
 }
 
 /// One alert read from the attention file.
@@ -101,6 +112,18 @@ pub struct Alert {
     pub kind: AlertKind,
     /// The file's mtime.
     pub at: SystemTime,
+}
+
+impl Alert {
+    /// What the device shows: the kind's [`AlertKind::device_text`], or the
+    /// test alert's own text.
+    pub fn device_message(&self) -> &str {
+        if self.session == TEST_SESSION && !self.message.is_empty() {
+            &self.message
+        } else {
+            self.kind.device_text()
+        }
+    }
 }
 
 /// Fold to ASCII (drop accents), collapse whitespace, cap at `limit` chars
@@ -267,7 +290,7 @@ impl AttentionState {
         let mut f = AttentionFields::default();
         if self.alert_unsent {
             f.beep = beep_on;
-            f.message = self.alert.as_ref().map(|a| a.message.clone()).filter(|m| !m.is_empty());
+            f.message = self.alert.as_ref().map(|a| a.device_message().to_owned());
         }
         f.clear = self.clear_unsent;
         f
@@ -413,7 +436,7 @@ mod tests {
         assert!(st.alert_unsent);
         assert_eq!(
             st.fields(false),
-            AttentionFields { beep: false, message: Some("Voce aprova a acao?".into()), clear: false }
+            AttentionFields { beep: false, message: Some("Permission needed!".into()), clear: false }
         );
         assert!(st.fields(true).beep);
         st.mark_sent();
@@ -459,6 +482,24 @@ mod tests {
         let c: HashMap<_, _> = [("s".to_owned(), t0 + Duration::from_secs(1))].into();
         st.ingest(None, &c);
         assert!(!st.pending(), "never shown, nothing to clear");
+    }
+
+    #[test]
+    fn device_shows_a_fixed_line_per_kind() {
+        let at = SystemTime::now();
+        let line = |kind, session: &str, message: &str| {
+            let mut st = AttentionState::default();
+            st.ingest(Some(Alert { message: message.into(), session: session.into(), kind, at }), &HashMap::new());
+            st.fields(false).message.unwrap()
+        };
+        let hook_text = "Claude needs your permission to use Bash";
+        assert_eq!(line(AlertKind::Question, "a", "Which file?"), "Question for you");
+        assert_eq!(line(AlertKind::Permission, "a", hook_text), "Permission needed!");
+        assert_eq!(line(AlertKind::Other, "a", hook_text), "Permission needed!");
+        assert_eq!(line(AlertKind::Idle, "a", "Claude is waiting for your input"), "Waiting for you!");
+        assert_eq!(line(AlertKind::Elicitation, "a", hook_text), "MCP request!");
+        assert_eq!(line(AlertKind::Permission, "a", ""), "Permission needed!", "a bare touch still says why");
+        assert_eq!(line(AlertKind::Permission, TEST_SESSION, "Clawdmeter test alert"), "Clawdmeter test alert");
     }
 
     #[test]
