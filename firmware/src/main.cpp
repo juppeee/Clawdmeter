@@ -270,8 +270,8 @@ void setup() {
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
     director_init();    // rooms + beats; boots on the meters (home)
 
-    Serial.printf("Dashboard ready (%s, %dx%d), waiting for data on BLE...\n",
-        board_caps().name, W, H);
+    Serial.printf("Dashboard ready (%s, %dx%d) %lu ms after boot, waiting for data on BLE...\n",
+        board_caps().name, W, H, (unsigned long)millis());
 }
 
 static ble_state_t last_ble_state = BLE_STATE_INIT;

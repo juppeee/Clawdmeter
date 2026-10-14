@@ -11,7 +11,9 @@
 // non-blocking playback task. The ding is rendered once into a buffer
 // (PSRAM where there is some) and streamed with one write, so nothing is
 // computed while the DMA waits: computing it live starved the DMA (ESP_I2S
-// keeps ~33 ms of buffers and doesn't let us grow them) and crackled.
+// keeps ~33 ms of buffers and doesn't let us grow them) and crackled. The
+// render runs in the background after init, so boot doesn't wait for it; a
+// ding asked for before it finishes is computed while it plays.
 
 // Share of the ding's own level (it peaks just under full scale): headroom
 // for the codec and the small amp. ChimeConfig.volume sets the loudness.
@@ -30,6 +32,7 @@ static float    gain       = DING_GAIN;
 static int16_t* pcm        = nullptr;   // stereo frames of the rendered ding
 static uint32_t pcm_frames = 0;
 static float    pcm_gain   = -1.0f;     // gain `pcm` was rendered at
+static volatile bool rendering = false;  // the boot-time render is running
 
 static bool es8311_setup(void) {
     es = es8311_create(0, cfg.es8311_addr);   // I2C port 0 (shared Wire bus)
@@ -57,21 +60,30 @@ static bool render(void) {
         if (!pcm) pcm = (int16_t*)heap_caps_malloc(bytes, MALLOC_CAP_8BIT);
         if (!pcm) return false;
     }
+    const float g = gain;                       // chime_tune may change it meanwhile
     const uint32_t t0 = millis();
     for (uint32_t n = 0; n < frames; n++) {
-        const int16_t s = ding_sample(n, rate, gain);
+        const int16_t s = ding_sample(n, rate, g);
         pcm[2 * n] = s;
         pcm[2 * n + 1] = s;
+        if ((n & 4095) == 4095) vTaskDelay(1);  // let the idle task (and its watchdog) run
     }
     pcm_frames = frames;
-    pcm_gain = gain;
-    Serial.printf("chime: rendered %u frames at gain %.2f in %lu ms\n", (unsigned)frames, gain,
-                  (unsigned long)(millis() - t0));
+    pcm_gain = g;
+    Serial.printf("chime: rendered %u frames at gain %.2f in %lu ms (at %lu ms since boot)\n",
+                  (unsigned)frames, g, (unsigned long)(millis() - t0), (unsigned long)millis());
     return true;
 }
 
+static void render_task(void* arg) {
+    if (!render()) Serial.println("chime: no room to pre-render; computing while playing");
+    rendering = false;
+    vTaskDelete(nullptr);
+}
+
 static void chime_task(void* arg) {
-    const bool rendered = pcm_gain == gain || render();
+    // While the boot-time render runs, compute this one live.
+    const bool rendered = !rendering && (pcm_gain == gain || render());
     if (cfg.amp_enable) cfg.amp_enable(true);
     delay(8);                                  // let the amp settle (avoids turn-on pop)
     if (rendered) {
@@ -112,7 +124,11 @@ bool chime_init(const ChimeConfig& c) {
     }
     ready = true;
     Serial.println("chime: ES8311 ready");
-    if (!render()) Serial.println("chime: no room to pre-render; computing while playing");
+    // Low priority on core 0, beside the BLE host: the loop on core 1 starts
+    // drawing at once.
+    rendering = true;
+    if (xTaskCreatePinnedToCore(render_task, "chime-render", 4096, nullptr, 1, nullptr, 0) != pdPASS)
+        rendering = false;   // render on the first play instead
     return true;
 }
 
