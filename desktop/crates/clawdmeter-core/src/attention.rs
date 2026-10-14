@@ -156,12 +156,17 @@ impl AttentionInbox {
         self.dir.join("attention")
     }
 
-    /// Consume the attention file. `None` when absent or stale.
+    /// Consume the attention file. `None` when absent or stale. The file is
+    /// moved to a private name before it is read, so an alert the hook
+    /// writes meanwhile lands in a new `attention` file for the next tick
+    /// instead of being removed unread.
     pub fn take_alert(&self, now: SystemTime) -> Option<Alert> {
-        let path = self.flag();
-        let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok()?;
+        let path = self.dir.join("attention.taking");
+        fs::rename(self.flag(), &path).ok()?;
+        let mtime = fs::metadata(&path).and_then(|m| m.modified()).ok();
         let raw = fs::read_to_string(&path).unwrap_or_default();
         let _ = fs::remove_file(&path);
+        let mtime = mtime?;
         if now.duration_since(mtime).unwrap_or_default() >= ATTENTION_MAX_AGE {
             return None;
         }
@@ -193,6 +198,7 @@ impl AttentionInbox {
     /// Drop leftovers (on connect, like the old daemons).
     pub fn reset(&self) {
         let _ = fs::remove_file(self.flag());
+        let _ = fs::remove_file(self.dir.join("attention.taking"));
         let _ = self.take_clears();
     }
 
@@ -348,6 +354,7 @@ mod tests {
 
         fs::write(d.join("attention"), "not json").unwrap();
         assert_eq!(inbox.take_alert(SystemTime::now()).unwrap().session, "");
+        assert!(!d.join("attention.taking").exists(), "nothing left behind");
         let _ = fs::remove_dir_all(&d);
     }
 
