@@ -31,12 +31,14 @@ response headers. The app has Claude Code do the same while an account's
 5-hour window is known to be running (`claude -p --output-format
 stream-json --verbose`, its `rate_limit_event`; `clawdmeter-core/src/probe.rs`),
 and runs `claude --output-format json -p /usage` otherwise, since a message
-would start a window. Claude Code owns authentication; Clawdmeter does not
-read OAuth tokens or call the API itself.
+would start a window. Otherwise it asks `GET /api/oauth/usage` with the token
+Claude Code stored (`clawdmeter-core/src/oauth.rs`), read-only like the old
+daemons and never refreshed; `claude -p /usage` is the last resort when no
+token is readable.
 
 | Behaviour | Old daemons | Rust | Notes |
 |---|---|---|---|
-| Read the OAuth token | L: `<dir>/.credentials.json`, isolating `claudeAiOauth` · M: same file, else Keychain `Claude Code-credentials` (hex-dump decode) · W: `CLAUDE_CREDENTIALS_PATH`, `CLAUDE_CONFIG_DIR`, `~/.claude`, `%LOCALAPPDATA%\Claude`, `%APPDATA%\Claude` | Not read | The CLI reads its own credentials (Keychain item per config dir on macOS). |
+| Read the OAuth token | L: `<dir>/.credentials.json`, isolating `claudeAiOauth` · M: same file, else Keychain `Claude Code-credentials` (hex-dump decode) · W: `CLAUDE_CREDENTIALS_PATH`, `CLAUDE_CONFIG_DIR`, `~/.claude`, `%LOCALAPPDATA%\Claude`, `%APPDATA%\Claude` | Read, never refreshed, for the idle source: `<dir>/.credentials.json` (`claudeAiOauth`), else on macOS the Keychain item Claude Code uses for that dir (`Claude Code-credentials`, `-<sha256(dir)[..8]>` for a non-default dir; hex-dump decode) | The probe (Claude Code itself) reads its own credentials; an expired token is skipped until Claude Code renews it. |
 | Never refresh the token ("free-ride") | M, W | Same by construction | The CLI owns refresh. |
 | Session % (`s`) | `round(5h-utilization × 100)` | `Current session: N% used` → `s` (`clawdmeter-core/src/usage.rs`) | The CLI floors utilization before printing, so `s` can read one point lower than the old `round()`. |
 | Weekly % (`w`) | `round(7d-utilization × 100)` | `Current week (all models)` | |

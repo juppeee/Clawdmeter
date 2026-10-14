@@ -170,13 +170,21 @@ run as `daemon.log.1`. **Settings** links to the log and config file.
 
 ### Refresh timing
 
-Usage is read through Claude Code; Clawdmeter never reads OAuth
-credentials or calls Anthropic's API itself. Two sources are used per account:
+Two sources are used per account:
 
 - **While the account's 5-hour session is running**, Clawdmeter has Claude
   Code send one short Haiku message (no tools, hooks, MCP servers or saved
   session) and reads the usage from its rate-limit headers.
-- **Otherwise**, it runs `claude -p /usage`, which sends no message.
+- **Otherwise**, it asks Claude's usage endpoint
+  (`api.anthropic.com/api/oauth/usage`) with the sign-in Claude Code already
+  stored (`.credentials.json` in the account folder, or the macOS Keychain).
+  Clawdmeter only reads that token; it never refreshes it, so after a long
+  break usage waits until Claude Code or the Claude desktop app renews it. A
+  rate-limited answer pauses that account's checks until exactly when the
+  server says, across restarts and whatever asks (Refresh now included),
+  because asking during the pause makes it longer; the app shows "Usage
+  paused by Anthropic until HH:MM". Without any
+  readable sign-in it falls back to `claude -p /usage`.
 
 Sending a message starts a session when none is running, so the message is
 only sent while a session is known to be running: its last known reset is
@@ -194,8 +202,11 @@ every 12 minutes.
 
 Claude Code is found through `claude_path`, then `PATH` and the usual install
 folders, then the copy the Claude desktop app downloads for itself (the newest
-version under its `claude-code` folder). Settings → Advanced and the Accounts
-page say which one is in use.
+version under its `claude-code` folder: `~/.config/Claude/claude-code` on
+Linux, verified; `~/Library/Application Support/Claude/claude-code` on macOS
+and `%APPDATA%\Claude\claude-code` on Windows, from the desktop app's code).
+Settings → Advanced and the Accounts page say which one is in use. Without
+Claude Code, usage still updates every 12 minutes from the usage endpoint.
 
 Every trigger, including manual refresh, respects a two-minute minimum gap
 and any retry delay. Transient failures delay retries by 10, 20, then 30

@@ -261,46 +261,57 @@ State lives in one dir, `~/.config/clawdmeter/` (Windows:
 `hook_event_name` / `notification_type`, `engine.on_attention` drops the
 rest; default all but `idle`).
 
-Usage source (per account, `probe.rs`): while the account's 5-hour window is
-known to be running, a probe (`claude -p --model haiku --output-format
-stream-json --verbose --no-session-persistence --strict-mcp-config --tools ""`,
-hooks and auto memory off, cwd = state dir) reads the `rate_limit_event`
-headers; a probe miss falls back to `/usage` unless it is backing off.
+Usage sources (per account, `probe.rs`, `oauth.rs`): while the account's
+5-hour window is known to be running, a probe (`claude -p --model haiku
+--output-format stream-json --verbose --no-session-persistence
+--strict-mcp-config --tools ""`, hooks and auto memory off, cwd = state dir)
+reads the `rate_limit_event` headers. Otherwise (and on a probe miss, unless
+backing off) the idle source: `GET https://api.anthropic.com/api/oauth/usage`
+with the account's OAuth token, read-only from `<config dir>/.credentials.json`
+or the macOS Keychain (`Claude Code-credentials`, plus `-<sha256(config
+dir)[..8]>` for a non-default dir, as Claude Code names it). **The token is
+never refreshed**: an expired one is skipped until Claude Code / Claude
+Desktop renews it. `claude -p /usage` only runs when no token is readable.
 **The probe must never start a window** (owner's rule): `choose_source` allows
 it only when the last known five-hour reset is > 5 min away, or a
 prompt/tool event from that account (events.log carries the config dir, from
 the hook input's `transcript_path`) came after it, within 5 h. A window that
 ends with no activity since becomes "not started" with no call; anything
-uncertain (first run, unattributed activity, near a reset) uses `/usage`,
-which starts nothing. Spend-capped accounts always use `/usage`. `claude` is
-found via `claude_path` → `PATH`/install dirs → the newest Claude-desktop-bundled
-build (`<userData>/claude-code/<version>/<hash>/claude`).
+uncertain (first run, unattributed activity, near a reset) uses the idle
+source, which sends no message. Spend-capped accounts always use it. `claude`
+is found via `claude_path` → `PATH`/install dirs → the newest
+Claude-desktop-bundled build (`<userData>/claude-code/<version>/<hash>/claude`;
+verified on disk on Linux, the macOS/Windows variants come from the desktop
+app's code and Electron's userData paths). With no `claude` at all there is no
+probe: the endpoint answers every 12 min, window or not.
 
-Cadence (`cadence.rs`): `/usage` makes Claude Code hit `GET
-/api/oauth/usage`, which is rate-limited per account. With a window known to
-be running (the probe): shown account prompt → poll now, then 3 min while
-working; ~10 s after a Stop; 5 min with no hooks or between a Stop and 10
-quiet min; 15 min after that; other accounts every 10 min. With no window
-known (or before the first reading): `/usage` every 12 min, not sped up by
-prompts; a known reset wakes the account once. No account is polled twice
-within 2 min, whatever asked (prompt, Stop, device REQ, tray "Refresh now").
-Backoff (`backoff.rs`, `/usage` only): a 429 makes `/usage` print no `Current …` lines and
-Claude Code remembers the 429 for ~600 s per token (its
-`<config dir>/debug/latest` says `fetchUtilization: 429 remembered for this
-bearer; not asking again for Ns`), so any transient miss (no lines,
-timeout, odd output) parks that account 10 → 20 → 30 min, reset on success;
-nothing bypasses it. When the debug log exists, `usage.rs` reads it and
-reports `UsageError::RateLimited`. A parked shown account stays shown with
-its last values. Heartbeat replays (`rp:1`) every `heartbeat_interval`
-(60 s) keep the firmware's 90 s `DATA_FRESH_MS` open, and stop after 3
-consecutive misses so the device shows stale. A failed poll is never a zero.
+Cadence (`cadence.rs`): with a window known to be running (the probe): shown
+account prompt → poll now, then 3 min while working; ~10 s after a Stop; 5 min
+with no hooks or between a Stop and 10 quiet min; 15 min after that; other
+accounts every 10 min. With no window known (or before the first reading, or
+without `claude`): the idle source every 12 min, not sped up by prompts; a
+known reset wakes the account once. No account is polled twice within 2 min,
+whatever asked (prompt, Stop, device REQ, tray "Refresh now").
+Backoff (`backoff.rs`, idle source only): a 429 from the endpoint parks the
+account for exactly its `retry-after`; other transient misses (no 429 header,
+offline, `/usage` printing no `Current …` lines, timeouts) park it 10 → 20 →
+30 min, reset on success; nothing bypasses it (Refresh now, device REQ and
+prompts included; the probe is a different path and stays allowed). Calls
+during a block make the server lengthen it (589 → 1353 → 2721 → 3600 s
+seen), so blocks are saved to `<state>/usage-blocks.json` and restored at
+start-up (`--once` honours them too); the Overview and Accounts page say
+"Usage paused by Anthropic until HH:MM". A parked shown account stays
+shown with its last values. Heartbeat replays (`rp:1`) every
+`heartbeat_interval` (60 s) keep the firmware's 90 s `DATA_FRESH_MS` open, and
+stop after 3 consecutive misses so the device shows stale. A failed poll is
+never a zero.
 
 ```bash
 cargo fmt --all --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo test --workspace --locked
 cargo clippy -p clawdmeter-app --target x86_64-pc-windows-gnu -- -D warnings   # Windows cfg check from Linux
-cargo run -p clawdmeter-app -- --once                                        # sanity: real /usage → payload
+cargo run -p clawdmeter-app -- --once                                        # sanity: real usage (idle source) → payload
 ```
 
 Linux build deps: see `.github/actions/linux-desktop-deps/action.yml`. GPUI
