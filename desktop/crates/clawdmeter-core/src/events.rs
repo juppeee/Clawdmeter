@@ -98,17 +98,49 @@ pub struct EventTail {
     path: PathBuf,
     offset: u64,
     partial: String,
-    ident: Option<u64>,
+    ident: FileIdent,
+    /// Tell files apart by inode too (Unix). Windows has no stable file id
+    /// in std, so there the first line alone tells a rolled log apart.
+    inodes: bool,
+}
+
+/// What tells one log file from the next: its inode where there is one, and
+/// its first line (a new log starts with a newer timestamp).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+struct FileIdent {
+    ino: Option<u64>,
+    head: Option<String>,
+}
+
+/// The first line can't be longer than this (a timestamp, an event name and
+/// a session id); a longer prefix without a newline is still being written.
+const HEAD_BYTES: u64 = 256;
+
+impl FileIdent {
+    fn of(path: &Path, meta: &fs::Metadata, inodes: bool) -> Self {
+        let head = read_range(path, 0, meta.len().min(HEAD_BYTES))
+            .ok()
+            .and_then(|s| s.split_once('\n').map(|(line, _)| line.to_owned()));
+        FileIdent { ino: if inodes { inode(meta) } else { None }, head }
+    }
+
+    /// Known to be a different file from `prev`: something both know differs.
+    fn differs(&self, prev: &FileIdent) -> bool {
+        fn known_and_differ<T: PartialEq>(a: &Option<T>, b: &Option<T>) -> bool {
+            matches!((a, b), (Some(a), Some(b)) if a != b)
+        }
+        known_and_differ(&self.ino, &prev.ino) || known_and_differ(&self.head, &prev.head)
+    }
 }
 
 #[cfg(unix)]
-fn file_ident(m: &fs::Metadata) -> Option<u64> {
+fn inode(m: &fs::Metadata) -> Option<u64> {
     use std::os::unix::fs::MetadataExt;
     Some(m.ino())
 }
 
 #[cfg(not(unix))]
-fn file_ident(_m: &fs::Metadata) -> Option<u64> {
+fn inode(_m: &fs::Metadata) -> Option<u64> {
     None
 }
 
@@ -126,8 +158,9 @@ impl EventTail {
                 s.lines().filter_map(parse_line).collect()
             })
             .unwrap_or_default();
-        let ident = meta.as_ref().and_then(file_ident);
-        (EventTail { path, offset: len, partial: String::new(), ident }, seed)
+        let inodes = cfg!(unix);
+        let ident = meta.as_ref().map(|m| FileIdent::of(&path, m, inodes)).unwrap_or_default();
+        (EventTail { path, offset: len, partial: String::new(), ident, inodes }, seed)
     }
 
     /// True when the log (or its rolled copy) exists: the hooks are installed.
@@ -152,14 +185,13 @@ impl EventTail {
             return out;
         };
         let len = meta.len();
-        let ident = file_ident(&meta);
-        // A new inode means the hook rolled the log: finish the old one from
-        // `.1`. Shrinking in place is a truncation: just start over. (Without
-        // inodes, on Windows, a roll looks like a truncation and loses at most
-        // the lines of the last tick.)
-        let rolled = ident.is_some() && self.ident.is_some() && ident != self.ident;
-        if rolled && self.offset > 0 {
-            self.drain_rolled(&mut out);
+        let ident = FileIdent::of(&self.path, &meta, self.inodes);
+        // A different file means the hook rolled the log: finish the old one
+        // from `.1`. Shrinking in place is a truncation: just start over.
+        if ident.differs(&self.ident) {
+            if self.offset > 0 {
+                self.drain_rolled(&mut out);
+            }
         } else if len < self.offset {
             self.offset = 0;
             self.partial.clear();
@@ -175,11 +207,12 @@ impl EventTail {
     }
 
     /// Read what's left of the rolled file past our offset, if it is the file
-    /// we were following (it is at least as long as what we read).
+    /// we were following (same identity, at least as long as what we read).
     fn drain_rolled(&mut self, out: &mut Vec<HookEvent>) {
         let rolled = self.rolled();
-        if let Ok(len) = fs::metadata(&rolled).map(|m| m.len()) {
-            if len > self.offset {
+        if let Ok(meta) = fs::metadata(&rolled) {
+            let len = meta.len();
+            if len > self.offset && !FileIdent::of(&rolled, &meta, self.inodes).differs(&self.ident) {
                 if let Ok(chunk) = read_range(&rolled, self.offset, len) {
                     self.consume(&chunk, out);
                 }
@@ -457,13 +490,44 @@ mod tests {
 
     #[test]
     fn tail_follows_truncates_and_rotates() {
-        let dir = std::env::temp_dir().join(format!("cm-tail-{}", std::process::id()));
+        follows_truncates_and_rotates("inode", true);
+    }
+
+    // Windows: std has no file id, so the first line tells the logs apart.
+    #[test]
+    fn tail_rotates_without_inodes() {
+        follows_truncates_and_rotates("head", false);
+    }
+
+    #[test]
+    fn stale_rolled_file_is_not_replayed() {
+        let dir = std::env::temp_dir().join(format!("cm-tail-stale-{}", std::process::id()));
+        let _ = fs::remove_dir_all(&dir);
+        fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("events.log");
+        fs::write(dir.join("events.log.1"), "1 Stop old\n2 Stop old\n3 Stop old\n").unwrap();
+        fs::write(&path, "10 Stop a\n").unwrap();
+        let (mut tail, _) = EventTail::open(&path);
+        tail.inodes = false;
+        tail.ident.ino = None;
+        // Rewritten in place with a new first line: not the old roll's tail.
+        fs::write(&path, "20 Stop b\n").unwrap();
+        assert_eq!(tail.poll(), vec![ev(20, "Stop", "b")]);
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    fn follows_truncates_and_rotates(tag: &str, inodes: bool) {
+        let dir = std::env::temp_dir().join(format!("cm-tail-{tag}-{}", std::process::id()));
         let _ = fs::remove_dir_all(&dir);
         fs::create_dir_all(&dir).unwrap();
         let path = dir.join("events.log");
         let rolled = dir.join("events.log.1");
         fs::write(&path, "1 UserPromptSubmit old\n2 Stop -\n").unwrap();
         let (mut tail, seed) = EventTail::open(&path);
+        if !inodes {
+            tail.inodes = false;
+            tail.ident.ino = None;
+        }
         assert_eq!(seed.len(), 2);
         assert_eq!(seed[1].session, "", "\"-\" means no session");
         assert!(tail.poll().is_empty(), "history isn't replayed");
