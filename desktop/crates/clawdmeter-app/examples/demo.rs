@@ -133,6 +133,7 @@ fn fake_status(paths: &Paths, retrying: bool, refresh: Option<String>, idle: boo
             device_key: Some("AA:BB:CC:DD:EE:FF".into()),
             device_name: Some("Clawdmeter".into()),
             account: Some(paths.home.join(".claude").display().to_string()),
+            claude: Some(paths.home.join(".local/bin/claude").display().to_string()),
             session_pct: Some(if idle { 0 } else { 34 }),
             week_pct: Some(62),
             window_started: !idle,

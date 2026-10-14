@@ -13,6 +13,7 @@ use clawdmeter_ble::{
     MAX_WRITE,
 };
 use clawdmeter_core::attention::AttentionInbox;
+use clawdmeter_core::backoff;
 use clawdmeter_core::engine::PollPlan;
 use clawdmeter_core::events::EventTail;
 use clawdmeter_core::probe;
@@ -122,11 +123,7 @@ fn poll_all(claude: Option<PathBuf>, plan: PollPlan, home: PathBuf, cwd: PathBuf
         .into_iter()
         .zip(plan.plans)
         .map(|(d, p)| {
-            let r = match (&claude, &p) {
-                (_, probe::Plan::Known(r)) => Ok(r.clone()),
-                (Some(c), _) => probe::poll(c, &d, &home, &cwd, &p, now),
-                (None, _) => Err(UsageError::Spawn("claude CLI not found (set claude_path in the config)".into())),
-            };
+            let r = probe::poll(claude.as_deref(), &d, &home, &cwd, &p, now);
             (d, r)
         })
         .collect()
@@ -144,6 +141,10 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         settings.config_dirs.iter().map(|d| d.display().to_string()).collect::<Vec<_>>().join(", ")
     );
     let mut engine = Engine::new(settings);
+    // Blocks the usage endpoint set survive restarts (a call during one
+    // lengthens it).
+    engine.restore_blocks(&backoff::load_blocks(&paths.usage_blocks_file()), unix_now());
+    let mut saved_blocks = engine.blocks(unix_now());
     let host = HostClock { utc_offset_secs: 0, prefers_12h: clawdmeter_core::platform::prefers_12h() };
     let inbox = AttentionInbox::new(&paths.state_dir);
     let (mut tail, seed) = EventTail::open(paths.events_log());
@@ -155,8 +156,12 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     let mut claude = usage::find_claude(engine.settings().claude_path.as_deref(), &paths.home);
     match &claude {
         Some(c) => log::info!("claude CLI: {}", c.display()),
-        None => log::warn!("claude CLI not found; set claude_path in {}", paths.config_file.display()),
+        None => log::warn!(
+            "claude CLI not found (set claude_path in {}); usage comes from the usage endpoint every 12 min",
+            paths.config_file.display()
+        ),
     }
+    engine.set_claude_found(claude.is_some());
 
     let mut link: Option<DeviceLink> = None;
     let mut device_events: Option<DeviceEvents> = None;
@@ -225,6 +230,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     claude = usage::find_claude(s.claude_path.as_deref(), &paths.home);
                 }
                 engine.update_settings(s);
+                engine.set_claude_found(claude.is_some());
             }
         }
 
@@ -266,6 +272,13 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
                     }
                 }
                 engine.on_poll_results(unix_now(), results);
+                let blocks = engine.blocks(unix_now());
+                if blocks != saved_blocks {
+                    if let Err(e) = backoff::save_blocks(&paths.usage_blocks_file(), &blocks) {
+                        log::warn!("couldn't save usage blocks: {e}");
+                    }
+                    saved_blocks = blocks;
+                }
             }
         }
         if polling.is_none() {
@@ -395,11 +408,20 @@ pub fn once(paths: &Paths) -> i32 {
         }
     };
     let claude = usage::find_claude(settings.claude_path.as_deref(), &paths.home);
-    // Nothing is known yet, so /usage for every account (it starts no window).
+    let now = unix_now();
+    let mut engine = Engine::new(settings.clone());
+    engine.restore_blocks(&backoff::load_blocks(&paths.usage_blocks_file()), now);
+    // A blocked account isn't asked: a call during a block lengthens it.
+    let blocked = engine.blocks(now);
+    for (d, b) in &blocked {
+        println!("{}: {}", d.display(), usage::paused_message(b.until, clawdmeter_core::platform::utc_offset_secs()));
+    }
+    // Nothing is known yet, so the idle source for every account (no message).
+    let accounts: Vec<PathBuf> = settings.config_dirs.iter().filter(|d| !blocked.contains_key(*d)).cloned().collect();
     let plan = PollPlan {
         reason: clawdmeter_core::cadence::PollReason::Startup,
-        accounts: settings.config_dirs.clone(),
-        plans: vec![probe::Plan::Usage; settings.config_dirs.len()],
+        plans: vec![probe::Plan::Usage; accounts.len()],
+        accounts,
     };
     let results = poll_all(claude, plan, paths.home.clone(), paths.state_dir.clone());
     let mut ok = false;
@@ -422,9 +444,10 @@ pub fn once(paths: &Paths) -> i32 {
             Err(e) => println!("{}: {e}", d.display()),
         }
     }
-    let now = unix_now();
-    let mut engine = Engine::new(settings);
     engine.on_poll_results(now, results);
+    if let Err(e) = backoff::save_blocks(&paths.usage_blocks_file(), &engine.blocks(unix_now())) {
+        eprintln!("couldn't save usage blocks: {e}");
+    }
     let host = HostClock {
         utc_offset_secs: clawdmeter_core::platform::utc_offset_secs(),
         prefers_12h: clawdmeter_core::platform::prefers_12h(),

@@ -14,3 +14,5 @@ chrono-tz.workspace = true
 dirs.workspace = true
 log.workspace = true
 unicode-normalization.workspace = true
+ureq.workspace = true
+sha2.workspace = true

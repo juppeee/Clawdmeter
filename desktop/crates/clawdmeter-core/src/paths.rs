@@ -65,6 +65,11 @@ impl Paths {
         self.state_dir.join("ble-address")
     }
 
+    /// Each account's usage-endpoint block (backoff), kept across restarts.
+    pub fn usage_blocks_file(&self) -> PathBuf {
+        self.state_dir.join("usage-blocks.json")
+    }
+
     /// Downloaded firmware images.
     pub fn firmware_cache(&self) -> PathBuf {
         self.cache_dir.join("firmware")

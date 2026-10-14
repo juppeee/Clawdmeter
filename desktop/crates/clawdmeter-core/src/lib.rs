@@ -4,6 +4,7 @@
 //!
 //! * [`paths`], [`config`]: the shared state dir (`~/.config/clawdmeter`) and its files.
 //! * [`usage`]: run and parse `claude --output-format json -p /usage`.
+//! * [`oauth`]: usage from Claude's usage endpoint with Claude Code's stored sign-in.
 //! * [`probe`]: usage from one message's rate-limit headers, and when that is allowed.
 //! * [`events`]: the hook events log (fast clock) and the activity tracker.
 //! * [`attention`]: the attention hook's alert / clear files (written by
@@ -27,6 +28,7 @@ pub mod config;
 pub mod engine;
 pub mod events;
 pub mod launch;
+pub mod oauth;
 pub mod paths;
 pub mod payload;
 pub mod platform;

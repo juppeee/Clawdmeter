@@ -9,6 +9,7 @@ use std::time::SystemTime;
 use chrono::{DateTime, TimeZone, Utc};
 
 use crate::attention::{Alert, AttentionState};
+use crate::backoff::SavedBlock;
 use crate::cadence::{heartbeat_due, AccountClock, Cadence, PollReason, Scheduler};
 use crate::config::Settings;
 use crate::events::{Activity, HookEvent, Signal};
@@ -111,6 +112,9 @@ pub struct EngineStatus {
     /// The earliest a refresh of the shown account can poll it (the
     /// per-account gap and backoff); `None`: right away.
     pub refresh_at: Option<i64>,
+    /// The usage endpoint has blocked the shown account (a 429) until then:
+    /// nothing asks it before.
+    pub paused_until: Option<i64>,
     /// The shown account is being polled.
     pub polling: bool,
 }
@@ -138,6 +142,8 @@ pub struct Engine {
     last_event_ts: Option<i64>,
     /// Latest prompt or tool activity that names no configured account.
     unattributed_activity: Option<i64>,
+    /// A `claude` binary was found, so the probe can run.
+    claude_found: bool,
 }
 
 fn utc(now: i64) -> DateTime<Utc> {
@@ -168,6 +174,7 @@ impl Engine {
             sent_n: None,
             last_event_ts: None,
             unattributed_activity: None,
+            claude_found: true,
         }
     }
 
@@ -255,10 +262,43 @@ impl Engine {
         }
     }
 
+    /// Whether a `claude` binary was found. Without one the probe can't run,
+    /// so the idle source (the usage endpoint) answers on its slower cadence
+    /// even while a window runs.
+    pub fn set_claude_found(&mut self, found: bool) {
+        self.claude_found = found;
+    }
+
+    /// The accounts whose usage endpoint is blocked at `now`, to save
+    /// across restarts.
+    pub fn blocks(&self, now: i64) -> BTreeMap<PathBuf, SavedBlock> {
+        self.accounts
+            .iter()
+            .filter_map(|(d, a)| {
+                let until = a.backoff.until().filter(|u| *u > now)?;
+                Some((d.clone(), SavedBlock { strikes: a.backoff.strikes(), until }))
+            })
+            .collect()
+    }
+
+    /// Restore saved blocks (at start-up). Expired ones are dropped; the
+    /// rest keep the endpoint and `claude -p /usage` away from that account
+    /// until they pass, whatever asks.
+    pub fn restore_blocks(&mut self, blocks: &BTreeMap<PathBuf, SavedBlock>, now: i64) {
+        for (d, b) in blocks.iter().filter(|(d, b)| b.until > now && self.settings.config_dirs.contains(d)) {
+            let st = self.accounts.entry(d.clone()).or_default();
+            st.backoff = crate::backoff::Backoff::restore(b.strikes, b.until);
+            st.last_error.get_or_insert(UsageError::Throttled { retry_after_secs: None });
+        }
+    }
+
     /// Where this account's next reading would come from at `now`.
     fn source(&self, dir: &PathBuf, now: i64) -> Source {
         let empty = AccountState::default();
-        probe::choose_source(self.accounts.get(dir).unwrap_or(&empty), self.unattributed_activity, now)
+        match probe::choose_source(self.accounts.get(dir).unwrap_or(&empty), self.unattributed_activity, now) {
+            Source::Probe if !self.claude_found => Source::Usage,
+            s => s,
+        }
     }
 
     fn clock(&self, dir: &PathBuf, now: i64) -> AccountClock {
@@ -491,7 +531,12 @@ impl Engine {
                 .filter_map(|(k, a)| {
                     a.last_error.as_ref().map(|e| AccountError {
                         dir: k.clone(),
-                        message: e.user_message(a.backoff.remaining(now)),
+                        message: match a.backoff.until().filter(|u| *u > now) {
+                            Some(until) if e.is_throttle() => {
+                                crate::usage::paused_message(until, crate::platform::utc_offset_secs())
+                            }
+                            _ => e.user_message(a.backoff.remaining(now)),
+                        },
                         retrying: e.is_transient(),
                     })
                 })
@@ -503,6 +548,15 @@ impl Engine {
             mood: st.and_then(|a| a.last.as_ref()).map(|_| self.rate.mood(self.activity.level(now))),
             next_poll_at: self.next_due(now).map(|(t, _)| t),
             refresh_at: self.active.as_ref().and_then(|a| self.refresh_at(a, now)),
+            // The shown account, or the first one while nothing is shown yet.
+            paused_until: self
+                .active
+                .as_ref()
+                .or(self.settings.config_dirs.first())
+                .and_then(|d| self.accounts.get(d))
+                .filter(|a| a.last_error.as_ref().is_some_and(UsageError::is_throttle))
+                .and_then(|a| a.backoff.until())
+                .filter(|u| *u > now),
             polling: self.active.as_ref().is_some_and(|a| self.in_flight.contains(a)),
         }
     }
@@ -857,7 +911,7 @@ mod tests {
         assert_eq!(e.status(T0 + 700).refresh_at, Some(T0 + 800), "a refresh waits for the backoff too");
         // Second miss: 20 minutes.
         assert_eq!(poll(&mut e, T0 + 800, |_| Err(UsageError::RateLimited { retry_after_secs: 400 })), vec![a.clone()]);
-        assert!(e.status(T0 + 800).errors[0].message.ends_with("about 20 minutes."));
+        assert!(e.status(T0 + 800).errors[0].message.starts_with("Usage paused by Anthropic until "));
         assert_eq!(poll(&mut e, T0 + 1120, |_| Ok(usage_reading(10))), vec![b.clone()], "B every 12 minutes");
         assert!(e.begin_poll(T0 + 1999).is_none_or(|p| !p.accounts.contains(&a)));
         // Back: errors clear, and the device gets a poll write.
@@ -865,6 +919,44 @@ mod tests {
         assert!(polled.contains(&a));
         assert!(e.status(T0 + 2000).errors.is_empty());
         assert_eq!(write(&mut e, T0 + 2000).unwrap().kind, WriteKind::Poll);
+    }
+
+    // Without a claude binary there's no probe: the usage endpoint answers
+    // every 12 minutes, window or not.
+    #[test]
+    fn without_claude_the_endpoint_answers_on_its_cadence() {
+        let mut e = Engine::new(settings(""));
+        e.set_hooks_installed(true);
+        e.set_claude_found(false);
+        let a = PathBuf::from("/h/.claude");
+        e.on_poll_results(T0, vec![(a.clone(), Ok(reading(15)))]);
+        let mine = HookEvent { account: Some(a.clone()), ..ev(T0 + 200, "UserPromptSubmit") };
+        e.on_hook_event(&mine, T0 + 200);
+        assert!(e.begin_poll(T0 + 200).is_none(), "a prompt doesn't speed it up");
+        assert_eq!(plans(&mut e, T0 + 720), vec![ProbePlan::Usage]);
+    }
+
+    // A block survives a restart: nothing calls the endpoint or /usage for
+    // that account until it passes, not even a refresh request.
+    #[test]
+    fn a_saved_block_holds_after_a_restart() {
+        let a = PathBuf::from("/h/.claude");
+        let mut e = Engine::new(settings(""));
+        e.on_poll_results(T0, vec![(a.clone(), Err(UsageError::Throttled { retry_after_secs: Some(3600) }))]);
+        let saved = e.blocks(T0 + 10);
+        assert_eq!(saved.get(&a).map(|b| b.until), Some(T0 + 3600));
+        let mut fresh = Engine::new(settings(""));
+        fresh.restore_blocks(&saved, T0 + 100);
+        assert!(fresh.begin_poll(T0 + 100).is_none(), "start-up waits for the block");
+        fresh.request_refresh(T0 + 200);
+        assert!(fresh.begin_poll(T0 + 200).is_none(), "so does Refresh now");
+        assert!(fresh.status(T0 + 200).errors[0].message.starts_with("Usage paused by Anthropic until "));
+        assert_eq!(fresh.status(T0 + 200).paused_until, Some(T0 + 3600));
+        assert_eq!(fresh.begin_poll(T0 + 3600).map(|p| p.plans), Some(vec![ProbePlan::Usage]));
+        // Expired blocks aren't restored.
+        let mut later = Engine::new(settings(""));
+        later.restore_blocks(&saved, T0 + 4000);
+        assert!(later.blocks(T0 + 4000).is_empty());
     }
 
     fn plans(e: &mut Engine, now: i64) -> Vec<ProbePlan> {

@@ -256,9 +256,9 @@ impl SetupView {
                     .into_any_element(),
                 None => notice(
                     t,
-                    Tone::Warn,
-                    "Claude Code wasn't found. Install Claude Code or the Claude desktop app, or set claude_path in \
-                     the config file.",
+                    Tone::Plain,
+                    "Claude Code wasn't found, so usage will update every 12 minutes. Install Claude Code or the \
+                     Claude desktop app for updates while you work.",
                 )
                 .max_w(px(460.))
                 .into_any_element(),

@@ -46,6 +46,18 @@ impl Backoff {
         pause
     }
 
+    /// The server said when to come back (a 429's `retry-after`): park for
+    /// exactly that long. Counts as a strike for later misses.
+    pub fn park_exact(&mut self, now: i64, secs: i64) {
+        self.strikes = self.strikes.saturating_add(1);
+        self.until = Some(now.saturating_add(secs.max(0)));
+    }
+
+    /// Restore a saved block.
+    pub fn restore(strikes: u32, until: i64) -> Self {
+        Backoff { strikes, until: Some(until) }
+    }
+
     /// A good poll: back to normal.
     pub fn on_success(&mut self) {
         *self = Backoff::default();
@@ -72,9 +84,65 @@ impl Backoff {
     }
 }
 
+/// One account's saved block.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SavedBlock {
+    /// Strikes so far.
+    pub strikes: u32,
+    /// Unix seconds before which the account's usage endpoint is left alone.
+    pub until: i64,
+}
+
+/// Read the saved blocks (`{"<config dir>": {"until": …, "strikes": …}}`);
+/// a missing or unreadable file is no blocks.
+pub fn load_blocks(path: &std::path::Path) -> std::collections::BTreeMap<std::path::PathBuf, SavedBlock> {
+    let Ok(text) = std::fs::read_to_string(path) else { return Default::default() };
+    let Ok(serde_json::Value::Object(m)) = serde_json::from_str(&text) else { return Default::default() };
+    m.into_iter()
+        .filter_map(|(dir, v)| {
+            let until = v.get("until")?.as_i64()?;
+            let strikes = v.get("strikes").and_then(|s| s.as_u64()).unwrap_or(1).min(u32::MAX as u64) as u32;
+            Some((std::path::PathBuf::from(dir), SavedBlock { strikes, until }))
+        })
+        .collect()
+}
+
+/// Write the blocks (replacing the file).
+pub fn save_blocks(
+    path: &std::path::Path,
+    blocks: &std::collections::BTreeMap<std::path::PathBuf, SavedBlock>,
+) -> std::io::Result<()> {
+    let m: serde_json::Map<String, serde_json::Value> = blocks
+        .iter()
+        .map(|(d, b)| (d.display().to_string(), serde_json::json!({"until": b.until, "strikes": b.strikes})))
+        .collect();
+    if let Some(dir) = path.parent() {
+        std::fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    std::fs::write(&tmp, serde_json::Value::Object(m).to_string())?;
+    std::fs::rename(tmp, path)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn blocks_survive_a_round_trip() {
+        let dir = std::env::temp_dir().join(format!("cm-blocks-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let path = dir.join("usage-blocks.json");
+        assert!(load_blocks(&path).is_empty());
+        let mut m = std::collections::BTreeMap::new();
+        m.insert(std::path::PathBuf::from("/h/.claude"), SavedBlock { strikes: 2, until: 1_791_950_000 });
+        m.insert(std::path::PathBuf::from("/h/My Claude"), SavedBlock { strikes: 1, until: 5 });
+        save_blocks(&path, &m).unwrap();
+        assert_eq!(load_blocks(&path), m);
+        std::fs::write(&path, "garbage").unwrap();
+        assert!(load_blocks(&path).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
 
     #[test]
     fn ladder_then_cap_then_reset() {

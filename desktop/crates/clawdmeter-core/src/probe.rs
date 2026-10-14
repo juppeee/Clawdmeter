@@ -186,36 +186,55 @@ pub fn run_probe(
 /// What [`poll`] does, chosen by the engine.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Plan {
-    /// The probe; on a miss, `/usage` when `usage_fallback` (the account
-    /// isn't backing off).
+    /// The probe; on a miss, the idle source when `usage_fallback` (the
+    /// account isn't backing off).
     Probe {
-        /// Fall back to `/usage` when the probe misses.
+        /// Fall back to the idle source when the probe misses.
         usage_fallback: bool,
     },
-    /// `/usage` only.
+    /// The idle source: the usage endpoint ([`crate::oauth`]), or
+    /// `claude -p /usage` when no token is readable.
     Usage,
     /// This reading, no call ([`Source::NotStarted`]).
     Known(UsageReading),
 }
 
-/// Read one account by `plan`. `cwd` is where the probe runs.
+/// The idle source for one account: the usage endpoint with Claude Code's
+/// token, else (no readable token) `claude -p /usage`.
+pub fn poll_idle(
+    claude: Option<&Path>,
+    config_dir: &Path,
+    home: &Path,
+    now: DateTime<Utc>,
+) -> Result<UsageReading, UsageError> {
+    if let Some(r) = crate::oauth::poll_endpoint(config_dir, home, now) {
+        return r;
+    }
+    match claude {
+        Some(c) => usage::poll_account(c, config_dir, home, now),
+        None => Err(UsageError::Spawn("no Claude Code sign-in or claude CLI found".into())),
+    }
+}
+
+/// Read one account by `plan`. `cwd` is where the probe runs; without a
+/// `claude` binary the probe can't run and the idle source answers.
 pub fn poll(
-    claude: &Path,
+    claude: Option<&Path>,
     config_dir: &Path,
     home: &Path,
     cwd: &Path,
     plan: &Plan,
     now: DateTime<Utc>,
 ) -> Result<UsageReading, UsageError> {
-    match plan {
-        Plan::Known(r) => Ok(r.clone()),
-        Plan::Usage => usage::poll_account(claude, config_dir, home, now),
-        Plan::Probe { usage_fallback } => match run_probe(claude, config_dir, home, cwd, usage::CLI_TIMEOUT) {
+    match (plan, claude) {
+        (Plan::Known(r), _) => Ok(r.clone()),
+        (Plan::Usage, _) | (Plan::Probe { .. }, None) => poll_idle(claude, config_dir, home, now),
+        (Plan::Probe { usage_fallback }, Some(c)) => match run_probe(c, config_dir, home, cwd, usage::CLI_TIMEOUT) {
             Ok(r) => Ok(r),
             Err(e) if e.is_auth() || !usage_fallback => Err(e),
             Err(e) => {
-                log::info!("{}: probe missed ({e}); asking /usage", config_dir.display());
-                usage::poll_account(claude, config_dir, home, now)
+                log::info!("{}: probe missed ({e}); asking the usage endpoint", config_dir.display());
+                poll_idle(claude, config_dir, home, now)
             }
         },
     }

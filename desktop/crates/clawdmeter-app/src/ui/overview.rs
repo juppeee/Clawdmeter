@@ -94,11 +94,20 @@ pub enum RefreshState {
     Wait(i64),
     /// A press checks right away.
     Ready,
+    /// The usage endpoint blocked the shown account until then (unix s):
+    /// nothing asks it before, a press included.
+    Paused(i64),
 }
 
 /// The refresh button's state for `s`; `pressed` is a press not yet served.
 pub fn refresh_state(s: &StatusSnapshot, pressed: bool, now: i64) -> RefreshState {
-    if s.polling || pressed {
+    if s.polling {
+        return RefreshState::Checking;
+    }
+    if let Some(until) = s.paused_until.filter(|u| *u > now) {
+        return RefreshState::Paused(until);
+    }
+    if pressed {
         return RefreshState::Checking;
     }
     match s.refresh_at {
@@ -288,6 +297,12 @@ impl OverviewView {
         let note: Option<SharedString> = match &state {
             RefreshState::Checking => Some("Checking…".into()),
             RefreshState::Wait(secs) => Some(format!("Can check again in {}", wait_text(*secs)).into()),
+            RefreshState::Paused(until) => Some(
+                clawdmeter_core::usage::paused_message(*until, clawdmeter_core::platform::utc_offset_secs())
+                    .trim_end_matches('.')
+                    .to_owned()
+                    .into(),
+            ),
             RefreshState::Ready => None,
         };
         let checking = state == RefreshState::Checking;
@@ -322,6 +337,9 @@ mod tests {
         let polling = StatusSnapshot { polling: true, ..Default::default() };
         assert_eq!(refresh_state(&polling, false, 1_000), RefreshState::Checking);
         assert_eq!(refresh_state(&StatusSnapshot::default(), false, 0), RefreshState::Ready);
+        let paused = StatusSnapshot { paused_until: Some(4_600), refresh_at: Some(4_600), ..Default::default() };
+        assert_eq!(refresh_state(&paused, true, 1_000), RefreshState::Paused(4_600), "a press doesn't ask");
+        assert_eq!(refresh_state(&paused, false, 4_600), RefreshState::Ready);
     }
 
     #[test]

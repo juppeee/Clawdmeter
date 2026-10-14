@@ -140,6 +140,18 @@ pub enum UsageError {
         /// Seconds until Claude Code asks the endpoint again.
         retry_after_secs: i64,
     },
+    /// The usage endpoint answered 429 ([`crate::oauth`]).
+    Throttled {
+        /// Its `retry-after`, when it sent one: honoured exactly.
+        retry_after_secs: Option<i64>,
+    },
+    /// The account's OAuth token has expired; Claude Code refreshes it, we
+    /// don't.
+    TokenExpired,
+    /// The usage endpoint refused the token (401 / 403).
+    TokenRejected,
+    /// The usage endpoint couldn't be reached.
+    Offline(String),
 }
 
 impl std::fmt::Display for UsageError {
@@ -154,6 +166,11 @@ impl std::fmt::Display for UsageError {
             UsageError::RateLimited { retry_after_secs } => {
                 write!(f, "usage endpoint rate-limited (429); claude retries in {retry_after_secs}s")
             }
+            UsageError::Throttled { retry_after_secs: Some(s) } => write!(f, "usage endpoint 429, retry-after {s}s"),
+            UsageError::Throttled { retry_after_secs: None } => write!(f, "usage endpoint 429"),
+            UsageError::TokenExpired => write!(f, "OAuth token expired; waiting for Claude Code to refresh it"),
+            UsageError::TokenRejected => write!(f, "usage endpoint refused the OAuth token"),
+            UsageError::Offline(e) => write!(f, "usage endpoint unreachable: {e}"),
         }
     }
 }
@@ -178,7 +195,14 @@ impl UsageError {
                 | UsageError::BadOutput(_)
                 | UsageError::NoUsageLines(_)
                 | UsageError::RateLimited { .. }
+                | UsageError::Throttled { .. }
+                | UsageError::Offline(_)
         )
+    }
+
+    /// A 429 from the usage endpoint (ours, or Claude Code's).
+    pub fn is_throttle(&self) -> bool {
+        matches!(self, UsageError::Throttled { .. } | UsageError::RateLimited { .. })
     }
 
     /// Claude Code's 429 memory, when its debug log told us.
@@ -209,9 +233,23 @@ impl UsageError {
             UsageError::NotLoggedIn(_) => "Sign in to Claude Code for this account folder.".into(),
             UsageError::NotSubscription => "This account doesn't report subscription usage limits.".into(),
             UsageError::NoUsageLines(_) => format!("No usage data was returned. {again}"),
-            UsageError::RateLimited { .. } => format!("Usage requests are temporarily limited. {again}"),
+            UsageError::RateLimited { .. } | UsageError::Throttled { .. } => {
+                format!("Usage requests are temporarily limited. {again}")
+            }
+            UsageError::TokenExpired | UsageError::TokenRejected => {
+                "Waiting for Claude Code to renew its sign-in. Using Claude Code or the Claude desktop app renews it."
+                    .into()
+            }
+            UsageError::Offline(_) => format!("Couldn't reach Claude. {again}"),
         }
     }
+}
+
+/// "Usage paused by Anthropic until 14:05." for a block ending at `until`
+/// (unix seconds), shown at `utc_offset` (seconds east of UTC).
+pub fn paused_message(until: i64, utc_offset: i64) -> String {
+    let t = DateTime::<Utc>::from_timestamp(until + utc_offset, 0).unwrap_or_default();
+    format!("Usage paused by Anthropic until {}.", t.format("%H:%M"))
 }
 
 fn snippet(s: &str) -> String {
@@ -834,8 +872,13 @@ impl AccountState {
             }
             Err(e) => {
                 self.misses = self.misses.saturating_add(1);
-                if e.is_transient() {
-                    self.backoff.on_miss(now, e.retry_after());
+                match e {
+                    // The endpoint said exactly how long: no more, no less.
+                    UsageError::Throttled { retry_after_secs: Some(s) } => self.backoff.park_exact(now, s),
+                    _ if e.is_transient() => {
+                        self.backoff.on_miss(now, e.retry_after());
+                    }
+                    _ => {}
                 }
                 self.last_error = Some(e);
             }
@@ -1050,6 +1093,13 @@ mod tests {
         a.record(2900, Err(UsageError::NotLoggedIn("x".into())));
         a.record(2950, Err(UsageError::Spawn("x".into())));
         assert_eq!(a.backoff.until(), None);
+    }
+
+    #[test]
+    fn paused_until_clock_time() {
+        // 2026-10-14T01:19:13Z + 3600 s, shown in UTC and at UTC+2.
+        assert_eq!(paused_message(1_791_940_753 + 3600, 0), "Usage paused by Anthropic until 02:19.");
+        assert_eq!(paused_message(1_791_940_753 + 3600, 7200), "Usage paused by Anthropic until 04:19.");
     }
 
     #[test]

@@ -632,10 +632,15 @@ impl SettingsView {
                 "The default Claude Code folder is ~/.claude. Add a config folder for each other account you want \
                  to monitor. The device follows the account whose session usage increased most recently.",
             ))
-            .when_some(self.snap.as_ref().and_then(|s| s.claude.clone()), |d, c| {
+            .when_some(self.snap.as_ref(), |d, snap| {
                 d.child(caption(
                     t,
-                    format!("Usage is read with {}.", crate::claude_label(Path::new(&c), &self.paths.home)),
+                    match &snap.claude {
+                        Some(c) => {
+                            format!("Usage is read with {}.", crate::claude_label(Path::new(c), &self.paths.home))
+                        }
+                        None => "Claude Code not found, usage updates every 12 min.".to_owned(),
+                    },
                 ))
             });
         let active = self.snap.as_ref().and_then(|s| s.account.clone());
@@ -1070,9 +1075,9 @@ impl SettingsView {
                 div().pt(px(12.)).child(
                     notice(
                         t,
-                        Tone::Warn,
-                        "Claude Code wasn't found, so usage can't be read. Install Claude Code or the Claude desktop app, or \
-                         set claude_path in the config file.",
+                        Tone::Plain,
+                        "Claude Code wasn't found, so usage updates every 12 minutes. Install Claude Code or the Claude \
+                         desktop app for updates while you work, or set claude_path in the config file.",
                     )
                     .child(div().flex().pl(px(18.)).child(button(
                         t,

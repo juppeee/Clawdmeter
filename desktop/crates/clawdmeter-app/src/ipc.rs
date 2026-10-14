@@ -113,6 +113,9 @@ pub struct StatusSnapshot {
     /// gap and backoff); `None`: right away.
     #[serde(default)]
     pub refresh_at: Option<i64>,
+    /// The usage endpoint blocked the shown account until then (a 429).
+    #[serde(default)]
+    pub paused_until: Option<i64>,
     /// The shown account is being polled.
     #[serde(default)]
     pub polling: bool,
@@ -172,6 +175,7 @@ impl StatusSnapshot {
             device_firmware: None,
             tray: format!("{:?}", tray_state(s, now)),
             refresh_at: e.refresh_at,
+            paused_until: e.paused_until,
             polling: e.polling,
             windowed: false,
             session_resets_at: reading
