@@ -448,7 +448,7 @@ const PARTITION_TABLE: usize = 0x8000;
 pub fn preserved_ranges(image: &[u8]) -> Vec<Range<usize>> {
     let table = image.get(PARTITION_TABLE..PARTITION_TABLE + 0xC00).unwrap_or(&[]);
     let mut out = Vec::new();
-    for e in table.chunks_exact(32) {
+    for e in table.as_chunks::<32>().0 {
         if e[..2] != [0xAA, 0x50] {
             break;
         }

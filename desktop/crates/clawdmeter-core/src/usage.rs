@@ -534,7 +534,7 @@ fn next_occurrence<Z: TimeZone>(
     let candidates: Vec<NaiveDate> = match md {
         // An explicit year is taken as printed, past or not.
         Some(MonthDay { month, day, year: Some(y) }) => {
-            return NaiveDate::from_ymd_opt(y, month, day).and_then(&resolve);
+            return NaiveDate::from_ymd_opt(y, month, day).and_then(resolve);
         }
         Some(MonthDay { month, day, year: None }) => (local_now.year() - 1..=local_now.year() + 1)
             .filter_map(|y| NaiveDate::from_ymd_opt(y, month, day))
