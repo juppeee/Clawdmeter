@@ -3,9 +3,11 @@
 
 // Board-agnostic ES8311 + I2S chime engine. A board's sound.cpp fills in a
 // ChimeConfig (its I2S pins, codec address, volume, and a power-amp enable
-// hook) and calls chime_init() once; chime_play() then synthesizes the ding
-// (ding.h) and streams it to the codec in a one-shot FreeRTOS task so the
-// LVGL loop never blocks. Any sample rate works; 16-bit stereo.
+// hook) and calls chime_init() once; the ding (ding.h) is rendered in the
+// background after setup and streamed to the codec by a one-shot FreeRTOS
+// task, so the LVGL loop never blocks. It plays once at boot. Any sample rate
+// the ES8311 table has works (boards without PSRAM use 22.05 kHz); 16-bit
+// stereo out.
 //
 // amp_enable is the only part that differs structurally between boards: the
 // 2.16 toggles a GPIO, the 1.8 drives an XCA9554 expander line. May be null.
@@ -24,10 +26,11 @@ struct ChimeConfig {
 // engine inert (chime_play becomes a no-op). Wire/I2C must already be up.
 bool chime_init(const ChimeConfig& cfg);
 
-// Queue one ding (non-blocking). No-op if not ready or already playing.
+// Queue one ding (non-blocking). No-op if not ready or already playing;
+// before the render is done, it plays when the render finishes.
 void chime_play(void);
 
-// Currently a no-op (playback runs in its own task); kept for HAL symmetry.
+// Call every loop: the first call starts the background render.
 void chime_tick(void);
 
 // Speaker tuning: set the ding's gain (0..1 of its own level) and, when volume >= 0, the
