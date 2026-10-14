@@ -6,8 +6,7 @@
 // hook) and calls chime_init() once; the ding (ding.h) is rendered in the
 // background after setup and streamed to the codec by a one-shot FreeRTOS
 // task, so the LVGL loop never blocks. It plays once at boot. Any sample rate
-// the ES8311 table has works (boards without PSRAM use 22.05 kHz); 16-bit
-// stereo out.
+// the ES8311 table has works; 16-bit stereo out.
 //
 // amp_enable is the only part that differs structurally between boards: the
 // 2.16 toggles a GPIO, the 1.8 drives an XCA9554 expander line. May be null.
