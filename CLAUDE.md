@@ -209,7 +209,7 @@ hardware boards, not shared code).
 
 The firmware has serial commands: `screenshot` (dumps the LVGL framebuffer;
 `./screenshot.sh out.png [port]` turns it into a PNG sized to the panel),
-`info` (env/version/rev/link JSON), `chime` (plays the ding; `buzz` still works), `unpair` (clear bonds, re-advertise), and
+`info` (env/version/rev/link JSON), `chime` (plays the ding; `buzz` still works), `chime <gain> [volume]` (tune a board's speaker until reboot: gain 0..1, ES8311 volume 0..100; the 2.16 ships 0.7 / 77, tuned by ear; the 1.8 and LCD-1.54 ship 0.7 / 75, untested by ear), `unpair` (clear bonds, re-advertise), and
 `clawd <show|screensaver|attention|joy|lurk|home>` to force a beat. **Use
 `clawd <beat>` + `screenshot` on every UI iteration** and Read the PNG; there
 is no need to edit the boot screen in `main.cpp` any more. C6 boards have no
