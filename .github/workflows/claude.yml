@@ -12,6 +12,7 @@ jobs:
   claude:
     if: |
       contains(github.event.comment.body || github.event.review.body, '@claude') &&
+      !startsWith(github.event.comment.body || github.event.review.body, '@claude review') &&
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
                github.event.comment.author_association || github.event.review.author_association)
     runs-on: ubuntu-latest
