@@ -8,7 +8,9 @@
 # BlueZ needs the host's D-Bus anyway, and the host's GPU drivers load their
 # own libzstd/liblzma/libsystemd, which must not be shadowed by older copies.
 # Vulkan and the Wayland client are dlopen()ed by GPUI and come from the host
-# with the drivers; nothing GPU-side goes into the image. Build on the oldest
+# with the drivers; nothing GPU-side goes into the image. libasound stays the
+# host's too: its config and plugins (PipeWire / PulseAudio routing for the
+# desktop chime) live on the host. Build on the oldest
 # supported distro (release.yml uses ubuntu-22.04): the image's glibc floor is
 # the builder's.
 set -euo pipefail
@@ -56,5 +58,6 @@ export PATH="$work/tools:$PATH"
   --exclude-library 'libgcrypt.so*' --exclude-library 'libgpg-error.so*' \
   --exclude-library 'liblz4.so*' --exclude-library 'liblzma.so*' \
   --exclude-library 'libzstd.so*' --exclude-library 'libcap.so*' \
+  --exclude-library 'libasound.so*' \
   --output appimage)
 ls -l "$out"

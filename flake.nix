@@ -17,6 +17,7 @@
       # Linked at build time (pkg-config) or found through the rpath.
       linkLibs =
         pkgs: with pkgs; [
+          alsa-lib
           dbus
           fontconfig
           freetype
