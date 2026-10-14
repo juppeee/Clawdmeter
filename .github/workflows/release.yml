@@ -42,7 +42,7 @@ jobs:
       matrix: ${{ steps.envs.outputs.matrix }}
       names: ${{ steps.envs.outputs.names }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - name: Check the tag is a version
         # The firmware, manifest.json and the app's update check all compare
         # this numerically; `v*` alone would also match e.g. `very-old`.
@@ -70,7 +70,7 @@ jobs:
       # and the desktop app compares it with manifest.json's version.
       PLATFORMIO_BUILD_FLAGS: -DCLAWD_VERSION=\"${{ github.ref_name }}\"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: ./.github/actions/setup-pio
         with:
           cache-key: ${{ matrix.board }}
@@ -79,7 +79,7 @@ jobs:
         run: >-
           python tools/ci/merge_firmware.py --env "${{ matrix.env }}"
           --version "$TAG" --out-dir dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: firmware-${{ matrix.env }}
           path: dist/
@@ -104,7 +104,7 @@ jobs:
             os: windows-latest
             targets: x86_64-pc-windows-msvc
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - if: runner.os == 'Linux'
         uses: ./.github/actions/linux-desktop-deps
       # The toolchain from desktop/rust-toolchain.toml, plus the targets.
@@ -116,7 +116,7 @@ jobs:
           rustup target add ${TARGETS//,/ }
         env:
           TARGETS: ${{ matrix.targets }}
-      - uses: Swatinem/rust-cache@v2
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           workspaces: desktop
           key: release-${{ matrix.name }}
@@ -239,7 +239,7 @@ jobs:
             -o "dist/clawdmeter-$TAG-${{ matrix.name }}.msi"
           rm -f dist/*.wixpdb
           ls -l dist
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: desktop-${{ matrix.name }}
           path: dist/
@@ -252,8 +252,8 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           path: dist
           merge-multiple: true
@@ -265,7 +265,7 @@ jobs:
           rm -f dist/*-"$TAG".json   # per-env sidecars, folded into manifest.json
           (cd dist && sha256sum -- * > SHA256SUMS)
           cat dist/manifest.json
-      - uses: softprops/action-gh-release@v2
+      - uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           files: dist/*
           generate_release_notes: true
