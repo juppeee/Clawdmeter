@@ -124,7 +124,7 @@ prompt) or **MCP request!**. The test alert says **Clawdmeter test alert**.
 
 A tap or the device's two-minute timeout dismisses the alert on the device
 and tells the app to clear it from the tray too. Answering also clears the
-alert through hooks. Uncleared app alerts expire after 10 minutes; test
+alert through hooks. Uncleared app alerts expire after 2 minutes too; test
 alerts expire after 30 seconds. C6 boards show the message without the
 full-size Clawd. Optional alert and reset chimes work on boards with an implemented audio output; those boards also ding once when they start.
 Boards with the **minimal display** capability keep the meters and a still

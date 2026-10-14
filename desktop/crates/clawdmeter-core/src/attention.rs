@@ -27,8 +27,9 @@ use unicode_normalization::UnicodeNormalization;
 
 /// Alerts older than this when first seen are ignored.
 pub const ATTENTION_MAX_AGE: Duration = Duration::from_secs(60);
-/// An alert nothing has cleared ends this long after it was raised.
-pub const ALERT_TTL: Duration = Duration::from_secs(10 * 60);
+/// An alert nothing has cleared ends this long after it was raised: the
+/// device's own alert timeout, so both drop it together.
+pub const ALERT_TTL: Duration = Duration::from_secs(2 * 60);
 /// The test alert ends sooner: nothing ever clears its session.
 pub const TEST_ALERT_TTL: Duration = Duration::from_secs(30);
 /// The session id of the Hooks page's test alert.

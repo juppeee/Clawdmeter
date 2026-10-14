@@ -21,8 +21,10 @@ The host writes one complete JSON object to RX per write. The app limits
 payloads to 500 bytes; the firmware has a 512-byte receive buffer, including
 the terminating null byte. The device notifies `0x01` on REQ when it has no
 data yet, asking for a poll.
-It sends `{"dismiss":true}` on TX when a tap or the device timeout ends an
-alert, so the app clears its corresponding alert too.
+It sends `{"dismiss":true}` on TX when a tap or the device's 2-minute timeout
+ends an alert, so the app clears its corresponding alert too. The app expires
+an alert nothing cleared after the same 2 minutes (a test alert after 30
+seconds) and sends `x` if the device still shows it.
 
 ```json
 {"s":45,"sr":120,"w":28,"wr":7200,"st":"allowed","acct":"pro","ok":true,"a":2,"e":"p","es":14,"n":1}
