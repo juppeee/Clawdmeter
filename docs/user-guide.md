@@ -185,14 +185,15 @@ Two sources are used per account:
   session) and reads the usage from its rate-limit headers.
 - **Otherwise**, it asks Claude's usage endpoint
   (`api.anthropic.com/api/oauth/usage`) with the sign-in Claude Code already
-  stored (`.credentials.json` in the account folder, or the macOS Keychain).
-  Clawdmeter only reads that token; it never refreshes it, so after a long
-  break usage waits until Claude Code or the Claude desktop app renews it. A
-  rate-limited answer pauses that account's checks until exactly when the
-  server says, across restarts and whatever asks (Refresh now included),
-  because asking during the pause makes it longer; the app shows "Usage
-  paused by Anthropic until HH:MM". Without any
-  readable sign-in it falls back to `claude -p /usage`.
+  stored (the macOS Keychain, or `.credentials.json` in the account folder).
+  Clawdmeter only reads that token; it never refreshes it. When it has
+  expired or is refused, Clawdmeter runs `claude -p /usage` instead, which
+  renews it and sends no message. A rate-limited answer pauses that
+  account's checks until exactly when the server says, across restarts and
+  whatever asks (Refresh now included), because asking during the pause
+  makes it longer; the app shows "Usage paused by Anthropic until HH:MM".
+  Other misses retry after 10, 20, then 30 minutes. Without any readable
+  sign-in it falls back to `claude -p /usage`.
 
 Sending a message starts a session when none is running, so the message is
 only sent while a session is known to be running: its last known reset is

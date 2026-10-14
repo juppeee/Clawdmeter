@@ -853,9 +853,29 @@ pub struct AccountState {
     /// [`crate::probe::anchor`]: the user's own activity started a window
     /// there.
     pub first_activity: Option<i64>,
+    /// Consecutive probe misses (see [`crate::probe::PROBE_MISS_LIMIT`]).
+    pub probe_misses: u32,
 }
 
 impl AccountState {
+    /// Record one [`crate::probe::Polled`]: an idle-source result as
+    /// [`AccountState::record`]; a probe's own miss counts as a miss but
+    /// doesn't back off the idle source, whose rate limit it never touched.
+    pub fn record_polled(&mut self, now: i64, polled: crate::probe::Polled) {
+        if polled.probe_missed {
+            self.probe_misses = self.probe_misses.saturating_add(1);
+        } else if !polled.idle && polled.result.is_ok() {
+            self.probe_misses = 0;
+        }
+        match polled.result {
+            Err(e) if !polled.idle => {
+                self.misses = self.misses.saturating_add(1);
+                self.last_error = Some(e);
+            }
+            r => self.record(now, r),
+        }
+    }
+
     /// Record a poll outcome. A transient miss starts or extends the
     /// account's backoff; a good reading clears it.
     pub fn record(&mut self, now: i64, result: Result<UsageReading, UsageError>) {
@@ -866,6 +886,9 @@ impl AccountState {
                 self.read_started_at = Some(self.last_attempt_at.unwrap_or(now).min(now));
                 let anchor = crate::probe::anchor(self);
                 self.first_activity = self.first_activity.filter(|t| anchor.is_some_and(|a| *t > a));
+                if self.first_activity.is_none() {
+                    self.probe_misses = 0;
+                }
                 self.misses = 0;
                 self.last_error = None;
                 self.backoff.on_success();
@@ -875,7 +898,9 @@ impl AccountState {
                 match e {
                     // The endpoint said exactly how long: no more, no less.
                     UsageError::Throttled { retry_after_secs: Some(s) } => self.backoff.park_exact(now, s),
-                    _ if e.is_transient() => {
+                    // A refused token is retried on the ladder too, not
+                    // every poll.
+                    _ if e.is_transient() || e == UsageError::TokenRejected => {
                         self.backoff.on_miss(now, e.retry_after());
                     }
                     _ => {}

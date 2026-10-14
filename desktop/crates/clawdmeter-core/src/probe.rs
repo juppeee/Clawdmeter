@@ -41,6 +41,9 @@ pub const WINDOW_SECS: i64 = 5 * 3600;
 /// How close to a window's end the probe stops: a message that lands after
 /// the reset would start the next window. `/usage` covers the gap.
 pub const PROBE_MARGIN_SECS: i64 = 5 * 60;
+/// Consecutive probe misses after which a window inferred from activity
+/// alone is left to the idle source ([`choose_source`]).
+pub const PROBE_MISS_LIMIT: u32 = 3;
 /// The message the probe sends.
 pub const PROBE_PROMPT: &str = "Reply with just: ok";
 /// Claude Code settings for the probe: none of the user's hooks (they would
@@ -89,7 +92,10 @@ pub fn choose_source(st: &AccountState, unattributed: Option<i64>, now: i64) -> 
     }
     if let Some(first) = st.first_activity {
         // That activity started a window; it runs WINDOW_SECS from there.
-        return if now < first + WINDOW_SECS - PROBE_MARGIN_SECS { Source::Probe } else { Source::Usage };
+        // A probe that keeps missing on that inference alone stops: the
+        // idle source answers instead.
+        let probe = now < first + WINDOW_SECS - PROBE_MARGIN_SECS && st.probe_misses < PROBE_MISS_LIMIT;
+        return if probe { Source::Probe } else { Source::Usage };
     }
     // The known window just ended and nothing here started another: show
     // it over at once. After that, `/usage` keeps watch (a window can start
@@ -200,19 +206,42 @@ pub enum Plan {
 }
 
 /// The idle source for one account: the usage endpoint with Claude Code's
-/// token, else (no readable token) `claude -p /usage`.
+/// token, else (no readable token) `claude -p /usage`. An expired or
+/// refused token also goes to `/usage`: Claude Code renews its own sign-in
+/// there, and `/usage` sends no message.
 pub fn poll_idle(
     claude: Option<&Path>,
     config_dir: &Path,
     home: &Path,
     now: DateTime<Utc>,
 ) -> Result<UsageReading, UsageError> {
-    if let Some(r) = crate::oauth::poll_endpoint(config_dir, home, now) {
-        return r;
+    match (crate::oauth::poll_endpoint(config_dir, home, now), claude) {
+        (Some(Err(e @ (UsageError::TokenExpired | UsageError::TokenRejected))), Some(c)) => {
+            log::info!("{}: {e}; asking claude /usage", config_dir.display());
+            usage::poll_account(c, config_dir, home, now)
+        }
+        (Some(r), _) => r,
+        (None, Some(c)) => usage::poll_account(c, config_dir, home, now),
+        (None, None) => Err(UsageError::Spawn("no Claude Code sign-in or claude CLI found".into())),
     }
-    match claude {
-        Some(c) => usage::poll_account(c, config_dir, home, now),
-        None => Err(UsageError::Spawn("no Claude Code sign-in or claude CLI found".into())),
+}
+
+/// One account's poll outcome, with where it came from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Polled {
+    /// The reading, or the miss that ended the poll.
+    pub result: Result<UsageReading, UsageError>,
+    /// The result is the idle source's (the endpoint or `/usage`), whose
+    /// misses back the account off.
+    pub idle: bool,
+    /// The probe ran and missed (the idle source may have answered after).
+    pub probe_missed: bool,
+}
+
+impl From<Result<UsageReading, UsageError>> for Polled {
+    /// An idle-source result.
+    fn from(result: Result<UsageReading, UsageError>) -> Self {
+        Polled { result, idle: true, probe_missed: false }
     }
 }
 
@@ -225,16 +254,17 @@ pub fn poll(
     cwd: &Path,
     plan: &Plan,
     now: DateTime<Utc>,
-) -> Result<UsageReading, UsageError> {
+) -> Polled {
+    let probe = |result, probe_missed| Polled { result, idle: false, probe_missed };
     match (plan, claude) {
-        (Plan::Known(r), _) => Ok(r.clone()),
-        (Plan::Usage, _) | (Plan::Probe { .. }, None) => poll_idle(claude, config_dir, home, now),
+        (Plan::Known(r), _) => probe(Ok(r.clone()), false),
+        (Plan::Usage, _) | (Plan::Probe { .. }, None) => poll_idle(claude, config_dir, home, now).into(),
         (Plan::Probe { usage_fallback }, Some(c)) => match run_probe(c, config_dir, home, cwd, usage::CLI_TIMEOUT) {
-            Ok(r) => Ok(r),
-            Err(e) if e.is_auth() || !usage_fallback => Err(e),
+            Ok(r) => probe(Ok(r), false),
+            Err(e) if e.is_auth() || !usage_fallback => probe(Err(e), true),
             Err(e) => {
                 log::info!("{}: probe missed ({e}); asking the usage endpoint", config_dir.display());
-                poll_idle(claude, config_dir, home, now)
+                Polled { result: poll_idle(claude, config_dir, home, now), idle: true, probe_missed: true }
             }
         },
     }
@@ -243,6 +273,45 @@ pub fn poll(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    // An expired token goes to `claude -p /usage` (a stand-in script here),
+    // which renews it; without a CLI the expiry is reported.
+    #[cfg(unix)]
+    #[test]
+    fn expired_token_asks_the_cli() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = std::env::temp_dir().join(format!("cm-idle-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let cfg = dir.join(".claude");
+        std::fs::create_dir_all(&cfg).unwrap();
+        std::fs::write(cfg.join(".credentials.json"), r#"{"claudeAiOauth":{"accessToken":"t","expiresAt":1000}}"#)
+            .unwrap();
+        let fixture = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/pro.json");
+        let fake = dir.join("claude");
+        std::fs::write(&fake, format!("#!/bin/sh\ncat '{}'\n", fixture.display())).unwrap();
+        std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let now = Utc::now();
+        assert_eq!(poll_idle(None, &cfg, &dir, now), Err(UsageError::TokenExpired));
+        assert!(poll_idle(Some(&fake), &cfg, &dir, now).is_ok());
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn probe_misses_on_activity_alone_hand_over_to_the_idle_source() {
+        let mut st = state(reading(None, Some((20, Some(T0 + 86_400)))), T0);
+        st.first_activity = Some(T0 + 60);
+        assert_eq!(choose_source(&st, None, T0 + 120), Source::Probe);
+        let miss = || Polled { result: Err(UsageError::Timeout), idle: false, probe_missed: true };
+        for _ in 0..PROBE_MISS_LIMIT {
+            st.record_polled(T0 + 120, miss());
+        }
+        assert_eq!(st.backoff.until(), None, "a probe miss doesn't block the idle source");
+        assert_eq!(choose_source(&st, None, T0 + 300), Source::Usage);
+        // A known reset ahead still allows the probe.
+        let mut known = state(reading(Some((5, Some(T0 + 3600))), None), T0);
+        known.probe_misses = PROBE_MISS_LIMIT;
+        assert_eq!(choose_source(&known, None, T0 + 120), Source::Probe);
+    }
 
     const T0: i64 = 1_791_930_000;
 

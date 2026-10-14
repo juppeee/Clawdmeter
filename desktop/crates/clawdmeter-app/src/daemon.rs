@@ -17,7 +17,7 @@ use clawdmeter_core::backoff;
 use clawdmeter_core::engine::PollPlan;
 use clawdmeter_core::events::EventTail;
 use clawdmeter_core::probe;
-use clawdmeter_core::usage::{self, UsageError, UsageReading};
+use clawdmeter_core::usage;
 use clawdmeter_core::{unix_now, Engine, EngineStatus, HostClock, Paths, Settings, WriteKind};
 use tokio::sync::{mpsc, watch};
 use tokio::task::JoinHandle;
@@ -113,7 +113,7 @@ pub fn spawn(paths: Paths) -> DaemonHandle {
     DaemonHandle { commands: cmd_tx, status: st_rx, thread: Some(thread) }
 }
 
-type PollResults = Vec<(PathBuf, Result<UsageReading, UsageError>)>;
+type PollResults = Vec<(PathBuf, probe::Polled)>;
 type ConnectResult = Result<(DeviceLink, DeviceEvents), LinkError>;
 
 /// Read each account of a poll plan: the probe, `/usage`, or a reading known
@@ -273,7 +273,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         if polling.as_ref().is_some_and(JoinHandle::is_finished) {
             if let Ok(results) = polling.take().expect("checked").await {
                 for (d, r) in &results {
-                    if let Err(e) = r {
+                    if let Err(e) = &r.result {
                         log::warn!("{}: {e}", d.display());
                     }
                 }
@@ -432,7 +432,7 @@ pub fn once(paths: &Paths) -> i32 {
     let results = poll_all(claude, plan, paths.home.clone(), paths.state_dir.clone());
     let mut ok = false;
     for (d, r) in &results {
-        match r {
+        match &r.result {
             Ok(r) if r.is_spend_only() => {
                 ok = true;
                 println!("{}: spend limit {}% used", d.display(), r.session_pct());

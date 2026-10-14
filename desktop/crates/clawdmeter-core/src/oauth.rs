@@ -18,9 +18,11 @@
 //! The token is only read, never refreshed: Claude Code (or the Claude
 //! desktop app) owns it. It lives in `<config dir>/.credentials.json`
 //! (`{"claudeAiOauth": {"accessToken", "expiresAt", …}}`) or, on macOS, in
-//! the login Keychain under Claude Code's service name ([`keychain_service`]).
-//! An expired token is skipped until Claude Code refreshes it. A 429 parks
-//! the account for exactly the `retry-after` the server sends.
+//! the login Keychain under Claude Code's service name ([`keychain_service`]),
+//! which is read first there. An expired or refused token isn't used: the
+//! account asks `claude -p /usage` instead, which renews it
+//! ([`crate::probe::poll_idle`]). A 429 parks the account for exactly the
+//! `retry-after` the server sends.
 
 use std::path::Path;
 use std::time::Duration;
@@ -36,8 +38,19 @@ use crate::usage::{Spend, SpendPeriod, UsageError, UsageReading, Window};
 pub const USAGE_URL: &str = "https://api.anthropic.com/api/oauth/usage";
 /// The beta header OAuth calls need.
 pub const OAUTH_BETA: &str = "oauth-2025-04-20";
-/// The User-Agent sent with the call.
-pub const USER_AGENT: &str = concat!("claude-cli/2.1.296 (external, clawdmeter/", env!("CARGO_PKG_VERSION"), ")");
+/// The version in the User-Agent: `CLAWDMETER_VERSION` at build time (the
+/// release tag), else the crate version.
+const VERSION: &str = match option_env!("CLAWDMETER_VERSION") {
+    Some(v) => v,
+    None => env!("CARGO_PKG_VERSION"),
+};
+
+/// The User-Agent sent with the call: `clawdmeter/<version>`.
+pub fn user_agent() -> String {
+    let v = VERSION.trim();
+    let v = v.strip_prefix('v').unwrap_or(v);
+    format!("clawdmeter/{}", if v.is_empty() { env!("CARGO_PKG_VERSION") } else { v })
+}
 /// Timeout for the call.
 pub const HTTP_TIMEOUT: Duration = Duration::from_secs(20);
 
@@ -101,17 +114,34 @@ fn decode_keychain(raw: &str) -> String {
     t.to_owned()
 }
 
-/// Read one account's token (never refreshing it): its credentials file,
-/// else (macOS) the Keychain. `None` when there is none to read.
-pub fn read_token(config_dir: &Path, home: &Path) -> Option<Token> {
-    if let Ok(text) = std::fs::read_to_string(config_dir.join(".credentials.json")) {
-        if let Some(t) = parse_credentials(&text) {
-            return Some(t);
+/// Of the stored tokens, in order of preference, the first that hasn't
+/// expired at `now`, else the first one (expired) so the caller can say so.
+fn pick_token(found: impl IntoIterator<Item = Option<Token>>, now: i64) -> Option<Token> {
+    let found: Vec<Token> = found.into_iter().flatten().collect();
+    found.iter().find(|t| !t.expired(now)).or(found.first()).cloned()
+}
+
+fn file_token(config_dir: &Path) -> Option<Token> {
+    parse_credentials(&std::fs::read_to_string(config_dir.join(".credentials.json")).ok()?)
+}
+
+/// Read one account's token (never refreshing it). macOS: the Keychain,
+/// where Claude Code keeps it, then a credentials file (an old one may be
+/// left behind); elsewhere the credentials file. `None` when there is none
+/// to read.
+pub fn read_token(config_dir: &Path, home: &Path, now: i64) -> Option<Token> {
+    if cfg!(target_os = "macos") {
+        let keychain = keychain_token(config_dir, home);
+        if keychain.as_ref().is_some_and(|t| !t.expired(now)) {
+            return keychain;
         }
+        pick_token([keychain, file_token(config_dir)], now)
+    } else {
+        file_token(config_dir)
     }
-    if !cfg!(target_os = "macos") {
-        return None;
-    }
+}
+
+fn keychain_token(config_dir: &Path, home: &Path) -> Option<Token> {
     let user = std::env::var("USER").ok().filter(|u| !u.is_empty()).unwrap_or_else(|| "claude-code-user".into());
     let out = std::process::Command::new("security")
         .args(["find-generic-password", "-a", &user, "-w", "-s", &keychain_service(config_dir, home)])
@@ -199,7 +229,7 @@ pub fn fetch_usage(token: &Token, now: DateTime<Utc>) -> Result<UsageReading, Us
         .get(USAGE_URL)
         .header("Authorization", &format!("Bearer {}", token.access))
         .header("anthropic-beta", OAUTH_BETA)
-        .header("User-Agent", USER_AGENT)
+        .header("User-Agent", &user_agent())
         .header("Accept", "application/json")
         .call()
         .map_err(|e| UsageError::Offline(e.to_string()))?;
@@ -212,7 +242,7 @@ pub fn fetch_usage(token: &Token, now: DateTime<Utc>) -> Result<UsageReading, Us
 /// Read one account from the endpoint. `Ok(None)` when it has no readable
 /// token (the caller falls back to `claude -p /usage`).
 pub fn poll_endpoint(config_dir: &Path, home: &Path, now: DateTime<Utc>) -> Option<Result<UsageReading, UsageError>> {
-    let token = read_token(config_dir, home)?;
+    let token = read_token(config_dir, home, now.timestamp())?;
     if token.expired(now.timestamp()) {
         return Some(Err(UsageError::TokenExpired));
     }
@@ -330,6 +360,37 @@ mod tests {
         st.record(1000, Err(UsageError::TokenExpired));
         assert_eq!(st.backoff.until(), None);
         assert!(!UsageError::TokenExpired.is_auth());
+    }
+
+    #[test]
+    fn a_refused_token_backs_off_on_the_ladder() {
+        let mut st = crate::usage::AccountState::default();
+        st.record(1000, Err(UsageError::TokenRejected));
+        assert_eq!(st.backoff.until(), Some(1600));
+        st.record(1600, Err(UsageError::TokenRejected));
+        assert_eq!(st.backoff.until(), Some(2800));
+    }
+
+    #[test]
+    fn the_first_fresh_token_wins() {
+        let tok = |a: &str, exp: i64| Some(Token { access: a.into(), expires_at_ms: Some(exp * 1000) });
+        let now = 1_000_000;
+        // Keychain expired, file fresh: the file.
+        assert_eq!(pick_token([tok("kc", now - 10), tok("file", now + 3600)], now).unwrap().access, "file");
+        // Both fresh: the first.
+        assert_eq!(pick_token([tok("kc", now + 3600), tok("file", now + 3600)], now).unwrap().access, "kc");
+        // Both expired: the first, so the caller reports it expired.
+        let t = pick_token([None, tok("file", now - 10), tok("x", now - 5)], now).unwrap();
+        assert_eq!(t.access, "file");
+        assert!(t.expired(now));
+        assert_eq!(pick_token([None, None], now), None);
+    }
+
+    #[test]
+    fn honest_user_agent() {
+        let ua = user_agent();
+        assert!(ua.starts_with("clawdmeter/") && !ua.contains("claude-cli"), "{ua}");
+        assert!(!ua.contains("/v"), "no leading v: {ua}");
     }
 
     #[test]

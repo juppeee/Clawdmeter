@@ -280,11 +280,12 @@ impl Engine {
         self.claude_found = found;
     }
 
-    /// The accounts whose usage endpoint is blocked at `now`, to save
-    /// across restarts.
+    /// The accounts whose usage endpoint is blocked at `now` by a 429, to
+    /// save across restarts. Other misses back off in memory only.
     pub fn blocks(&self, now: i64) -> BTreeMap<PathBuf, SavedBlock> {
         self.accounts
             .iter()
+            .filter(|(_, a)| a.last_error.as_ref().is_some_and(UsageError::is_throttle))
             .filter_map(|(d, a)| {
                 let until = a.backoff.until().filter(|u| *u > now)?;
                 Some((d.clone(), SavedBlock { strikes: a.backoff.strikes(), until }))
@@ -372,16 +373,18 @@ impl Engine {
     }
 
     /// Results of one poll (the accounts of a [`PollPlan`]).
-    pub fn on_poll_results(&mut self, now: i64, results: Vec<(PathBuf, Result<UsageReading, UsageError>)>) {
+    /// A plain `Result` counts as the idle source's.
+    pub fn on_poll_results<R: Into<probe::Polled>>(&mut self, now: i64, results: Vec<(PathBuf, R)>) {
+        let results: Vec<(PathBuf, probe::Polled)> = results.into_iter().map(|(d, r)| (d, r.into())).collect();
         let polled = !results.is_empty();
-        let ok_dirs: Vec<PathBuf> = results.iter().filter(|(_, r)| r.is_ok()).map(|(d, _)| d.clone()).collect();
+        let ok_dirs: Vec<PathBuf> = results.iter().filter(|(_, r)| r.result.is_ok()).map(|(d, _)| d.clone()).collect();
         for (dir, r) in results {
             let st = self.accounts.entry(dir.clone()).or_default();
             // Results without a `begin_poll` (`--once`) count as attempted now.
             if !self.in_flight.contains(&dir) {
                 st.last_attempt_at = Some(now);
             }
-            st.record(now, r);
+            st.record_polled(now, r);
             if let (Some(left), Some(e)) = (st.backoff.remaining(now), &st.last_error) {
                 log::info!("{}: {e}; not polling it for {left}s", dir.display());
             }
@@ -1040,6 +1043,27 @@ mod tests {
         // The user's own prompt starts a window: the probe, at once.
         e.on_hook_event(&mine(T0 + 4500), T0 + 4500);
         assert_eq!(plans(&mut e, T0 + 4500), vec![ProbePlan::Probe { usage_fallback: true }]);
+    }
+
+    // Only a 429 is saved as a block (and called a pause by Anthropic); a
+    // timeout or odd output backs off in memory only.
+    #[test]
+    fn only_throttles_are_saved_as_blocks() {
+        let mut e = Engine::new(settings("config_dirs = ~/.claude, ~/.w\n"));
+        let (a, b) = (PathBuf::from("/h/.claude"), PathBuf::from("/h/.w"));
+        poll(&mut e, T0, |d| {
+            if d == a {
+                Err(UsageError::Throttled { retry_after_secs: Some(900) })
+            } else {
+                Err(UsageError::Timeout)
+            }
+        });
+        let blocks = e.blocks(T0 + 1);
+        assert_eq!(blocks.keys().collect::<Vec<_>>(), vec![&a]);
+        let errors = e.status(T0 + 1).errors;
+        let msg = |d: &PathBuf| errors.iter().find(|x| &x.dir == d).unwrap().message.clone();
+        assert!(msg(&a).starts_with("Usage paused by Anthropic until "));
+        assert!(!msg(&b).contains("paused"), "{}", msg(&b));
     }
 
     // An account with no reading at all can't be shown; the other one is.
