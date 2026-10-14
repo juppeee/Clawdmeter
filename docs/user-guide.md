@@ -170,14 +170,32 @@ run as `daemon.log.1`. **Settings** links to the log and config file.
 
 ### Refresh timing
 
-The app runs `claude --output-format json -p /usage` for each account.
-It parses Claude Code's usage output; Clawdmeter does not make its own
-model request or read OAuth credentials directly.
+Usage is read through Claude Code; Clawdmeter never reads OAuth
+credentials or calls Anthropic's API itself. Two sources are used per account:
 
-With hooks, the shown account is checked after a prompt, every 3 minutes
-while working, and about 10 seconds after a turn stops. Checks fall to every
-5 minutes during the first 10 quiet minutes, then every 15 minutes. Without
-hooks, checks run every 5 minutes. Other accounts are checked every 10 minutes.
+- **While the account's 5-hour session is running**, Clawdmeter has Claude
+  Code send one short Haiku message (no tools, hooks, MCP servers or saved
+  session) and reads the usage from its rate-limit headers.
+- **Otherwise**, it runs `claude -p /usage`, which sends no message.
+
+Sending a message starts a session when none is running, so the message is
+only sent while a session is known to be running: its last known reset is
+more than 5 minutes away, or your own prompt or tool use in that account
+started one (the hooks tell which account a session belongs to). When a
+session ends with no activity since, the device shows it as not started
+without asking at all.
+
+With a session running, the shown account is checked after a prompt, every 3
+minutes while working, and about 10 seconds after a turn stops. Checks fall
+to every 5 minutes during the first 10 quiet minutes, then every 15 minutes.
+Without hooks, checks run every 5 minutes. Other accounts are checked every
+10 minutes. With no session known to be running, `/usage` checks each account
+every 12 minutes.
+
+Claude Code is found through `claude_path`, then `PATH` and the usual install
+folders, then the copy the Claude desktop app downloads for itself (the newest
+version under its `claude-code` folder). Settings → Advanced and the Accounts
+page say which one is in use.
 
 Every trigger, including manual refresh, respects a two-minute minimum gap
 and any retry delay. Transient failures delay retries by 10, 20, then 30

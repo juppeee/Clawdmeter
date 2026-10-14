@@ -27,9 +27,12 @@ and preferences in the app.
 ## Usage source
 
 The legacy daemons sent a one-token Haiku request and read usage from
-response headers. The app runs `claude --output-format json -p /usage`
-per account and parses its output. Claude Code owns authentication;
-Clawdmeter does not read OAuth tokens or issue a model request itself.
+response headers. The app has Claude Code do the same while an account's
+5-hour window is known to be running (`claude -p --output-format
+stream-json --verbose`, its `rate_limit_event`; `clawdmeter-core/src/probe.rs`),
+and runs `claude --output-format json -p /usage` otherwise, since a message
+would start a window. Claude Code owns authentication; Clawdmeter does not
+read OAuth tokens or call the API itself.
 
 | Behaviour | Old daemons | Rust | Notes |
 |---|---|---|---|

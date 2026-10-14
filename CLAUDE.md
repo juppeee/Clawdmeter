@@ -261,13 +261,30 @@ State lives in one dir, `~/.config/clawdmeter/` (Windows:
 `hook_event_name` / `notification_type`, `engine.on_attention` drops the
 rest; default all but `idle`).
 
-Cadence (per account, `cadence.rs`): every `/usage` makes Claude Code hit
-`GET /api/oauth/usage`, which is rate-limited per account, so the budget is
-small. Shown account: prompt → poll now, then 3 min while working; ~10 s
-after a Stop; 5 min with no hooks or between a Stop and 10 quiet min; 15 min
-after that. Other accounts: every 10 min. No account is polled twice within
-2 min, whatever asked (prompt, Stop, device REQ, tray "Refresh now").
-Backoff (`backoff.rs`): a 429 makes `/usage` print no `Current …` lines and
+Usage source (per account, `probe.rs`): while the account's 5-hour window is
+known to be running, a probe (`claude -p --model haiku --output-format
+stream-json --verbose --no-session-persistence --strict-mcp-config --tools ""`,
+hooks and auto memory off, cwd = state dir) reads the `rate_limit_event`
+headers; a probe miss falls back to `/usage` unless it is backing off.
+**The probe must never start a window** (owner's rule): `choose_source` allows
+it only when the last known five-hour reset is > 5 min away, or a
+prompt/tool event from that account (events.log carries the config dir, from
+the hook input's `transcript_path`) came after it, within 5 h. A window that
+ends with no activity since becomes "not started" with no call; anything
+uncertain (first run, unattributed activity, near a reset) uses `/usage`,
+which starts nothing. Spend-capped accounts always use `/usage`. `claude` is
+found via `claude_path` → `PATH`/install dirs → the newest Claude-desktop-bundled
+build (`<userData>/claude-code/<version>/<hash>/claude`).
+
+Cadence (`cadence.rs`): `/usage` makes Claude Code hit `GET
+/api/oauth/usage`, which is rate-limited per account. With a window known to
+be running (the probe): shown account prompt → poll now, then 3 min while
+working; ~10 s after a Stop; 5 min with no hooks or between a Stop and 10
+quiet min; 15 min after that; other accounts every 10 min. With no window
+known (or before the first reading): `/usage` every 12 min, not sped up by
+prompts; a known reset wakes the account once. No account is polled twice
+within 2 min, whatever asked (prompt, Stop, device REQ, tray "Refresh now").
+Backoff (`backoff.rs`, `/usage` only): a 429 makes `/usage` print no `Current …` lines and
 Claude Code remembers the 429 for ~600 s per token (its
 `<config dir>/debug/latest` says `fetchUtilization: 429 remembered for this
 bearer; not asking again for Ns`), so any transient miss (no lines,
