@@ -47,7 +47,7 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSRunningApplication"] }
 dispatch2 = "0.3"
 
-# Embeds the app icon in clawdmeter.exe (build.rs). Host-gated: only a
+# Embeds the app icon and manifest in clawdmeter.exe (build.rs). Host-gated: only a
 # Windows build machine compiles it.
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3"

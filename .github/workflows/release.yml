@@ -132,6 +132,10 @@ jobs:
           for t in "${targets[@]}"; do
             cargo build --release --locked -p clawdmeter-app --target "$t"
           done
+      - name: Run Windows executable
+        if: runner.os == 'Windows'
+        shell: bash
+        run: desktop/target/x86_64-pc-windows-msvc/release/clawdmeter.exe --version
       - name: Package
         shell: bash
         run: |
