@@ -45,6 +45,11 @@ struct HookPreview {
     plans: Vec<HookPlan>,
 }
 
+/// How long "Sent" stays on the test alert button.
+const TEST_ALERT_SENT: Duration = Duration::from_secs(3);
+/// How long a test alert failure stays beside the button.
+const TEST_ALERT_FAILED: Duration = Duration::from_secs(8);
+
 #[derive(Default)]
 struct DeviceState {
     probing: bool,
@@ -75,6 +80,11 @@ pub struct SettingsView {
     hooks: Vec<HookRow>,
     preview: Option<HookPreview>,
     hook_msg: Option<(Tone, String)>,
+    /// The last test alert's outcome, shown on and beside its button for a
+    /// few seconds. `Err` holds the reason it didn't reach the app.
+    test_alert: Option<Result<(), String>>,
+    /// Bumped per test alert so an older reset timer leaves a newer result.
+    test_alert_seq: u32,
     /// The binary hooks and the login entry launch (`None`: couldn't be
     /// determined). See [`clawdmeter_core::launch`].
     launch_exe: Option<PathBuf>,
@@ -121,6 +131,8 @@ impl SettingsView {
             hooks: Vec::new(),
             preview: None,
             hook_msg: None,
+            test_alert: None,
+            test_alert_seq: 0,
             launch_exe: hooks::hook_binary().ok(),
             device: DeviceState::default(),
             usb,
@@ -393,18 +405,29 @@ impl SettingsView {
         self.reload();
     }
 
-    fn send_test_alert(&mut self) {
+    fn send_test_alert(&mut self, cx: &mut Context<Self>) {
         let path = self.paths.attention_file();
         let body = serde_json::json!({"m": "Clawdmeter test alert", "s": "clawdmeter-test"});
-        self.hook_msg = Some(
-            match std::fs::create_dir_all(&self.paths.state_dir).and_then(|_| std::fs::write(&path, body.to_string())) {
-                Ok(()) if self.snap.is_none() => {
-                    (Tone::Warn, "Clawdmeter isn't running. Start it, then send another test alert.".into())
+        let written =
+            std::fs::create_dir_all(&self.paths.state_dir).and_then(|_| std::fs::write(&path, body.to_string()));
+        self.test_alert = Some(match written {
+            Ok(()) if self.snap.is_none() => Err("Clawdmeter isn't running.".into()),
+            Ok(()) => Ok(()),
+            Err(e) => Err(format!("Couldn't send it. {}", errors::io_message(&e))),
+        });
+        self.test_alert_seq += 1;
+        let seq = self.test_alert_seq;
+        let hold = if self.test_alert == Some(Ok(())) { TEST_ALERT_SENT } else { TEST_ALERT_FAILED };
+        cx.spawn(async move |this, cx| {
+            cx.background_executor().timer(hold).await;
+            let _ = this.update(cx, |v, cx| {
+                if v.test_alert_seq == seq {
+                    v.test_alert = None;
+                    cx.notify();
                 }
-                Ok(()) => (Tone::Ok, "Test alert queued. Check the device; tap it to dismiss.".into()),
-                Err(e) => (Tone::Bad, format!("Couldn't send the test alert. {}", errors::io_message(&e))),
-            },
-        );
+            });
+        })
+        .detach();
     }
 
     // ---------------------------------------------------------------- panes
@@ -866,6 +889,7 @@ impl SettingsView {
             pane = pane.child(
                 div()
                     .flex()
+                    .items_center()
                     .gap(px(8.))
                     .when(n > 0, |d| {
                         d.child(button(t, "install-all", label, ButtonKind::Primary, true, move |_, _, cx| {
@@ -877,19 +901,16 @@ impl SettingsView {
                         }))
                     })
                     .when(!self.embedded, |d| {
-                        d.child(button(
-                            t,
-                            "test-alert",
-                            "Send test alert",
-                            ButtonKind::Normal,
-                            true,
-                            move |_, _, cx| {
-                                let _ = me2.update(cx, |v, cx| {
-                                    v.send_test_alert();
-                                    cx.notify();
-                                });
-                            },
-                        ))
+                        let label = if self.test_alert == Some(Ok(())) { "Sent" } else { "Send test alert" };
+                        d.child(button(t, "test-alert", label, ButtonKind::Normal, true, move |_, _, cx| {
+                            let _ = me2.update(cx, |v, cx| {
+                                v.send_test_alert(cx);
+                                cx.notify();
+                            });
+                        }))
+                        .when_some(self.test_alert.clone().and_then(Result::err), |d, why| {
+                            d.child(div().text_size(px(12.5)).text_color(t.bad).child(why))
+                        })
                     }),
             );
         }
@@ -1291,6 +1312,24 @@ mod tests {
             v.launch_exe.clone().unwrap()
         });
         assert_eq!(autostart::entry_exe(&paths.home, LaunchMode::Tray), Some(want));
+        let _ = std::fs::remove_dir_all(&paths.home);
+    }
+
+    #[gpui::test]
+    fn test_alert_reports_on_its_button(cx: &mut TestAppContext) {
+        let paths = home("test-alert");
+        let p = paths.clone();
+        let (view, cx) = cx.add_window_view(move |_, cx| SettingsView::with_usb(p, Page::Hooks, false, cx));
+        click(cx, "test-alert");
+        assert!(paths.attention_file().exists());
+        // No app-status.json: the app isn't running to pick it up.
+        view.read_with(cx, |v, _| {
+            assert_eq!(v.test_alert, Some(Err("Clawdmeter isn't running.".into())));
+            assert!(v.hook_msg.is_none(), "no banner");
+        });
+        cx.executor().advance_clock(TEST_ALERT_FAILED);
+        cx.run_until_parked();
+        view.read_with(cx, |v, _| assert_eq!(v.test_alert, None));
         let _ = std::fs::remove_dir_all(&paths.home);
     }
 
