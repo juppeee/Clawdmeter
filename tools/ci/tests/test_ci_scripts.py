@@ -10,6 +10,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import xml.etree.ElementTree as ET
 from pathlib import Path
 
 CI = Path(__file__).resolve().parents[1]
@@ -181,6 +182,33 @@ class HardwareEnvsTest(unittest.TestCase):
                              ["sim", "test_native"])
             self.assertEqual(json.loads(run("hardware_envs.py", "--ini", str(p), "--matrix").stdout),
                              [{"env": "board_a", "board": "esp32-s3-devkitc-1"}])
+
+
+class WindowsResourcesTest(unittest.TestCase):
+    APP = REPO / "desktop/crates/clawdmeter-app"
+
+    def test_manifest_requires_common_controls_v6(self):
+        assembly = ET.parse(self.APP / "clawdmeter.exe.manifest").getroot()
+        ns = {"asm": "urn:schemas-microsoft-com:asm.v1"}
+        self.assertEqual(assembly.tag, "{urn:schemas-microsoft-com:asm.v1}assembly")
+        self.assertEqual(assembly.get("manifestVersion"), "1.0")
+        identity = assembly.find("asm:dependency/asm:dependentAssembly/asm:assemblyIdentity", ns)
+        self.assertIsNotNone(identity)
+        self.assertEqual(identity.attrib, {
+            "type": "win32",
+            "name": "Microsoft.Windows.Common-Controls",
+            "version": "6.0.0.0",
+            "processorArchitecture": "*",
+            "publicKeyToken": "6595b64144ccf1df",
+            "language": "*",
+        })
+
+    def test_build_embeds_manifest_as_process_resource(self):
+        build = (self.APP / "build.rs").read_text()
+        self.assertIn('manifest.join("clawdmeter.exe.manifest")', build)
+        self.assertIn(r'1 ICON \"{quoted}\"\n1 24 \"{quoted_manifest}\"\n', build)
+        self.assertIn('println!("cargo:rerun-if-changed={}", app_manifest.display());', build)
+        self.assertIn(".manifest_required()", build)
 
 
 if __name__ == "__main__":

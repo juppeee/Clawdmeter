@@ -6,7 +6,7 @@
 //! (palette indices, row-major) and `IDLE_PALETTE` (0xRRGGBB, index 0 =
 //! background).
 //!
-//! On Windows it also embeds the app icon in `clawdmeter.exe`.
+//! On Windows it also embeds the app icon and manifest in `clawdmeter.exe`.
 
 use std::env;
 use std::fs;
@@ -49,29 +49,33 @@ fn array_after(src: &str, marker: &str) -> Vec<u32> {
 }
 
 /// The exe's icon in Explorer, the taskbar and Alt-Tab, from the `.ico`
-/// that `tools/packaging/make_icons.py` renders. Windows hosts only: the
+/// that `tools/packaging/make_icons.py` renders, and the Common-Controls v6
+/// manifest required by TaskDialogIndirect. Windows hosts only: the
 /// resource compiler ships with the Windows build tools, and release.yml
 /// builds Windows on Windows.
 #[cfg(windows)]
-fn windows_icon(manifest: &Path) {
+fn windows_resources(manifest: &Path) {
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return;
     }
     let root = manifest.ancestors().nth(3).expect("repo root");
     let ico = root.join("tools").join("packaging").join("icons").join("clawdmeter.ico");
+    let app_manifest = manifest.join("clawdmeter.exe.manifest");
     println!("cargo:rerun-if-changed={}", ico.display());
+    println!("cargo:rerun-if-changed={}", app_manifest.display());
     let rc = PathBuf::from(env::var("OUT_DIR").unwrap()).join("clawdmeter.rc");
     let quoted = ico.display().to_string().replace('\\', "\\\\");
-    fs::write(&rc, format!("1 ICON \"{quoted}\"\n")).expect("write clawdmeter.rc");
-    embed_resource::compile(&rc, embed_resource::NONE).manifest_required().expect("embed the app icon");
+    let quoted_manifest = app_manifest.display().to_string().replace('\\', "\\\\");
+    fs::write(&rc, format!("1 ICON \"{quoted}\"\n1 24 \"{quoted_manifest}\"\n")).expect("write clawdmeter.rc");
+    embed_resource::compile(&rc, embed_resource::NONE).manifest_required().expect("embed the app icon and manifest");
 }
 
 #[cfg(not(windows))]
-fn windows_icon(_: &Path) {}
+fn windows_resources(_: &Path) {}
 
 fn main() {
     let manifest = PathBuf::from(env::var("CARGO_MANIFEST_DIR").unwrap());
-    windows_icon(&manifest);
+    windows_resources(&manifest);
     let header = manifest.join("../../../firmware/src/splash_animations.h");
     println!("cargo:rerun-if-changed={}", header.display());
     let src = fs::read_to_string(&header)
