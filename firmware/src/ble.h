@@ -16,6 +16,7 @@ const char* ble_get_mac_address(void);
 void ble_clear_bonds(void);
 bool ble_has_bonds(void);
 bool ble_has_data(void);
+// The latest payload, copied for the caller; valid until the next call.
 const char* ble_get_data(void);
 void ble_send_ack(void);
 void ble_send_nack(void);

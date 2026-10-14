@@ -72,7 +72,12 @@ static const uint16_t DESIRED_TIMEOUT   = 600;   // ×10ms = 6s, matches PPCP
 static volatile uint16_t param_fix_handle = CONN_HANDLE_NONE;  // pending retry
 static volatile uint32_t param_fix_at_ms  = 0;                 // when to send it
 static volatile uint16_t param_fix_spent  = CONN_HANDLE_NONE;  // one per connection
+// RX writes land in rx_buf on the NimBLE host task (core 0); the loop parses
+// on core 1. Both sides copy under rx_lock, and the loop parses its own copy
+// (parse_buf), so a write never changes the text mid-parse.
 static char rx_buf[BLE_BUF_SIZE];
+static char parse_buf[BLE_BUF_SIZE];
+static portMUX_TYPE rx_lock = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool data_ready = false;
 static volatile bool has_received_data = false;
 static char mac_str[18];
@@ -279,9 +284,11 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
         }
         std::string val = chr->getValue();
         size_t len = std::min(val.length(), (size_t)(BLE_BUF_SIZE - 1));
+        portENTER_CRITICAL(&rx_lock);
         memcpy(rx_buf, val.c_str(), len);
         rx_buf[len] = '\0';
         data_ready = true;
+        portEXIT_CRITICAL(&rx_lock);
         has_received_data = true;
     }
 };
@@ -414,8 +421,11 @@ bool ble_has_data(void) {
 }
 
 const char* ble_get_data(void) {
+    portENTER_CRITICAL(&rx_lock);
+    memcpy(parse_buf, rx_buf, sizeof(parse_buf));
     data_ready = false;
-    return rx_buf;
+    portEXIT_CRITICAL(&rx_lock);
+    return parse_buf;
 }
 
 void ble_send_ack(void) {
