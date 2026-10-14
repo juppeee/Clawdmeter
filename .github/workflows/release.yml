@@ -61,7 +61,8 @@ jobs:
     needs: envs
     runs-on: ubuntu-latest
     strategy:
-      fail-fast: true
+      # One board's failure shouldn't hide the others'; publish needs all.
+      fail-fast: false
       matrix:
         include: ${{ fromJSON(needs.envs.outputs.matrix) }}
     env:
@@ -89,7 +90,8 @@ jobs:
     needs: envs   # only for the tag check
     runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: true
+      # One platform's failure shouldn't hide the others'; publish needs all.
+      fail-fast: false
       matrix:
         include:
           - name: linux-x86_64
@@ -105,9 +107,15 @@ jobs:
       - uses: actions/checkout@v4
       - if: runner.os == 'Linux'
         uses: ./.github/actions/linux-desktop-deps
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.targets }}
+      # The toolchain from desktop/rust-toolchain.toml, plus the targets.
+      - name: Rust toolchain
+        shell: bash
+        working-directory: desktop
+        run: |
+          rustup toolchain install
+          rustup target add ${TARGETS//,/ }
+        env:
+          TARGETS: ${{ matrix.targets }}
       - uses: Swatinem/rust-cache@v2
         with:
           workspaces: desktop
