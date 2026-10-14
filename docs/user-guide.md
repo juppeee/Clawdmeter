@@ -14,7 +14,7 @@ The macOS and Windows packages are not signed with a publisher certificate.
 | macOS | `clawdmeter-<version>-macos-universal.dmg` | Open it and drag **Clawdmeter** to **Applications**. The first launch is blocked: open **System Settings → Privacy & Security**, click **Open Anyway**, then allow Bluetooth access. |
 | Windows | `clawdmeter-<version>-windows-x86_64.msi` | Run it. If SmartScreen stops it, click **More info → Run anyway**. Installs for your user only (no admin) with a Start Menu entry; newer versions upgrade in place. |
 | Debian, Ubuntu | `clawdmeter_<version>_amd64.deb` | `sudo apt install ./clawdmeter_<version>_amd64.deb` |
-| Other Linux | `clawdmeter-<version>-x86_64.AppImage` | `chmod +x clawdmeter-*.AppImage` and run it. Keep it in one place: the Claude Code hooks point at the file. |
+| Other Linux | `clawdmeter-<version>-x86_64.AppImage` | `chmod +x clawdmeter-*.AppImage` and run it. Keep it in one place: Start at login opens the file. The Claude Code hooks run a copy of its binary in `~/.config/clawdmeter/appimage/`, renewed when the AppImage changes. |
 | NixOS, Nix | — | `nix run github:HermannBjorgvin/Clawdmeter`, or see [Nix](#nix). |
 
 Portable archives (`.tar.gz` for Linux and macOS, `.zip` for Windows) are on
@@ -86,8 +86,11 @@ Bluetooth bonds. The LCD-4's PWR key resets the board; it does not clear pairing
 ## Hooks and privacy
 
 Open **Hooks**, select the accounts to update, and review the changes to
-`settings.json` before saving. Existing files are backed up to
-`settings.json.bak`. Other hooks remain in place.
+`settings.json` before saving. Changes Claude Code makes to the file while
+the review is open are kept. The first time a file is changed, the original
+is saved as `settings.json.bak`; later changes keep that backup. Other hooks
+remain in place. On macOS, move Clawdmeter to Applications before setting up
+hooks or Start at login; on Windows, extract it from the zip first.
 
 Hooks let Clawd react to activity and show alerts. The local event log
 contains timestamps, event types, and session IDs. Alerts also store the

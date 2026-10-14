@@ -85,9 +85,12 @@ pub struct SettingsView {
     test_alert: Option<Result<(), String>>,
     /// Bumped per test alert so an older reset timer leaves a newer result.
     test_alert_seq: u32,
-    /// The binary hooks and the login entry launch (`None`: couldn't be
+    /// The binary the login entry launches (`None`: couldn't be
     /// determined). See [`clawdmeter_core::launch`].
     launch_exe: Option<PathBuf>,
+    /// The binary the hooks run: the same, except an AppImage's copy under
+    /// the state dir.
+    hook_exe: Option<PathBuf>,
     device: DeviceState,
     /// Probe USB for a board (off in tests).
     usb: bool,
@@ -120,6 +123,7 @@ impl SettingsView {
             }
         })
         .detach();
+        let hook_exe = hooks::hook_binary(&paths.state_dir).ok();
         let mut v = SettingsView {
             settings: Settings::from_config(&ConfigFile::default(), &paths, None),
             paths,
@@ -133,7 +137,8 @@ impl SettingsView {
             hook_msg: None,
             test_alert: None,
             test_alert_seq: 0,
-            launch_exe: hooks::hook_binary().ok(),
+            launch_exe: clawdmeter_core::launch::stable_launch_path().ok(),
+            hook_exe,
             device: DeviceState::default(),
             usb,
             autostart_on: false,
@@ -217,7 +222,7 @@ impl SettingsView {
             .iter()
             .map(|d| HookRow {
                 dir: d.clone(),
-                status: match &self.launch_exe {
+                status: match &self.hook_exe {
                     Some(exe) => hooks::dir_status(d, exe),
                     None => HookStatus::Unreadable("Couldn't locate the Clawdmeter executable.".into()),
                 },
@@ -336,25 +341,31 @@ impl SettingsView {
         .detach();
     }
 
-    /// The binary to set hooks and the login entry up with, or why not.
-    fn launchable(&self) -> Result<PathBuf, String> {
-        let exe = self.launch_exe.clone().ok_or("Couldn't locate the Clawdmeter executable.")?;
-        match clawdmeter_core::launch::unstable(&exe) {
-            Some(u) => Err(format!("Clawdmeter is running from {}. {}", u.location_noun(), u.advice())),
-            None => Ok(exe),
+    /// The binary to set the hooks (`hooks`) or the login entry up with,
+    /// or why not.
+    fn launchable(&self, hooks: bool) -> Result<PathBuf, String> {
+        let missing = || "Couldn't locate the Clawdmeter executable.".to_owned();
+        let exe = self.launch_exe.clone().ok_or_else(missing)?;
+        if let Some(u) = clawdmeter_core::launch::unstable(&exe) {
+            return Err(format!("Clawdmeter is running from {}. {}", u.location_noun(), u.advice()));
+        }
+        if hooks {
+            self.hook_exe.clone().ok_or_else(missing)
+        } else {
+            Ok(exe)
         }
     }
 
     fn plan_hooks(&mut self, action: HookAction, dirs: Vec<PathBuf>) {
         self.hook_msg = None;
-        let exe = match (action, self.launchable()) {
+        let exe = match (action, self.launchable(true)) {
             (_, Ok(exe)) => exe,
             (HookAction::Install, Err(why)) => {
                 self.hook_msg = Some((Tone::Bad, why));
                 return;
             }
             // Removing doesn't write a path.
-            (HookAction::Remove, Err(_)) => match self.launch_exe.clone() {
+            (HookAction::Remove, Err(_)) => match self.hook_exe.clone() {
                 Some(exe) => exe,
                 None => return,
             },
@@ -992,7 +1003,7 @@ impl SettingsView {
             toggle(t, "autostart", on, true, move |_, _, cx| {
                 let home = home.clone();
                 let _ = me.update(cx, |v, cx| {
-                    let r = match v.launchable() {
+                    let r = match v.launchable(false) {
                         _ if on => autostart::disable(&home, LaunchMode::Tray).map_err(|e| errors::io_message(&e)),
                         Ok(exe) => autostart::enable(&home, &exe, LaunchMode::Tray).map_err(|e| errors::io_message(&e)),
                         Err(why) => Err(why),
@@ -1028,7 +1039,7 @@ impl SettingsView {
                 pane.child(div().pb(px(6.)).child(notice(t, Tone::Warn, text).child(div().flex().pl(px(18.)).child(
                     button(t, "fix-autostart", "Use this copy", ButtonKind::Small, true, move |_, _, cx| {
                         let _ = me.update(cx, |v, cx| {
-                            let r = match v.launchable() {
+                            let r = match v.launchable(false) {
                                 Ok(_) => {
                                     autostart::enable(&home, &exe, LaunchMode::Tray).map_err(|e| errors::io_message(&e))
                                 }

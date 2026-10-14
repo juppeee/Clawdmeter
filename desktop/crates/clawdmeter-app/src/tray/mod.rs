@@ -443,6 +443,10 @@ pub fn run(paths: Paths) -> i32 {
 
 fn run_locked(paths: Paths, _lock: Option<std::fs::File>) -> i32 {
     log::info!("=== Clawdmeter {} ===", crate::version());
+    // An AppImage renews the binary copy its hooks run (see launch::hook_binary).
+    if std::env::var_os("APPIMAGE").is_some() {
+        let _ = crate::hooks::install::hook_binary(&paths.state_dir);
+    }
     // Commands left by windows while no tray process ran (a "quit" among
     // them would end this run on its first tick).
     let stale = ipc::take_commands(&paths);

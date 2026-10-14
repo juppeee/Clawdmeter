@@ -8,6 +8,11 @@
 //! `/etc/profiles/per-user/<user>/bin`, `/run/current-system/sw/bin`) follows
 //! upgrades. Anything else is launched from where it is.
 //!
+//! Hooks run on every tool call, and launching an AppImage FUSE-mounts it
+//! each time, so from an AppImage the hooks run a copy of its binary and
+//! bundled libraries under the state dir instead ([`hook_binary`]), renewed
+//! whenever the AppImage changes. The login entry still opens the AppImage.
+//!
 //! Some places can't be launched from later at all ([`Unstable`]): a macOS
 //! app opened straight from its disk image or run translocated, and a Windows
 //! exe run from inside a zip. Hooks and the login entry are not set up from
@@ -150,9 +155,105 @@ pub fn stable_launch_path() -> io::Result<PathBuf> {
     ))
 }
 
+/// Where an AppImage's hook copy lives under the state dir.
+pub const APPIMAGE_COPY_DIR: &str = "appimage";
+const COPY_STAMP: &str = "source";
+
+/// The binary Claude Code's hooks should run: from an AppImage, a copy
+/// under `state_dir` ([`appimage_copy`]); otherwise [`stable_launch_path`].
+/// A copy that can't be made falls back to the AppImage itself.
+pub fn hook_binary(state_dir: &Path, version: &str) -> io::Result<PathBuf> {
+    let env = |k| std::env::var_os(k).filter(|v| !v.is_empty());
+    if let (Some(image), Some(appdir)) = (env("APPIMAGE"), env("APPDIR")) {
+        let dest = state_dir.join(APPIMAGE_COPY_DIR);
+        match appimage_copy(Path::new(&image), Path::new(&appdir), &dest, version) {
+            Ok(bin) => return Ok(bin),
+            Err(e) => log::warn!("couldn't copy the AppImage's binary for the hooks ({e}); hooks run the AppImage"),
+        }
+    }
+    stable_launch_path()
+}
+
+/// Copy `<appdir>/usr/bin/clawdmeter` and `<appdir>/usr/lib` (the bundled
+/// libraries the binary's `$ORIGIN/../lib` rpath finds) to `dest`, unless
+/// the copy there came from this AppImage file and `version` already.
+/// Returns the copied binary.
+pub fn appimage_copy(image: &Path, appdir: &Path, dest: &Path, version: &str) -> io::Result<PathBuf> {
+    let meta = std::fs::metadata(image)?;
+    let mtime = meta.modified().ok().and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok()).unwrap_or_default();
+    let stamp = format!("{version}\n{}\n{}\n{}\n", image.display(), meta.len(), mtime.as_nanos());
+    let bin = dest.join("usr/bin").join(binary_name());
+    if bin.is_file() && std::fs::read_to_string(dest.join(COPY_STAMP)).is_ok_and(|s| s == stamp) {
+        return Ok(bin);
+    }
+    let mut fresh = dest.as_os_str().to_owned();
+    fresh.push(".new");
+    let fresh = PathBuf::from(fresh);
+    let _ = std::fs::remove_dir_all(&fresh);
+    std::fs::create_dir_all(fresh.join("usr/bin"))?;
+    std::fs::copy(appdir.join("usr/bin").join(binary_name()), fresh.join("usr/bin").join(binary_name()))?;
+    let lib = appdir.join("usr/lib");
+    if lib.is_dir() {
+        copy_tree(&lib, &fresh.join("usr/lib"))?;
+    }
+    std::fs::write(fresh.join(COPY_STAMP), &stamp)?;
+    let _ = std::fs::remove_dir_all(dest);
+    std::fs::rename(&fresh, dest)?;
+    Ok(bin)
+}
+
+/// Copy a directory tree, keeping symlinks (library version links) as links.
+fn copy_tree(from: &Path, to: &Path) -> io::Result<()> {
+    std::fs::create_dir_all(to)?;
+    for entry in std::fs::read_dir(from)? {
+        let entry = entry?;
+        let (src, dst) = (entry.path(), to.join(entry.file_name()));
+        let kind = entry.file_type()?;
+        if kind.is_symlink() {
+            #[cfg(unix)]
+            std::os::unix::fs::symlink(std::fs::read_link(&src)?, &dst)?;
+            #[cfg(not(unix))]
+            std::fs::copy(&src, &dst).map(|_| ())?;
+        } else if kind.is_dir() {
+            copy_tree(&src, &dst)?;
+        } else {
+            std::fs::copy(&src, &dst)?;
+        }
+    }
+    Ok(())
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn appimage_copy_is_made_once_per_image() {
+        let root = std::env::temp_dir().join(format!("cm-appimage-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&root);
+        let (appdir, dest, image) = (root.join("mnt"), root.join("state/appimage"), root.join("Clawdmeter.AppImage"));
+        std::fs::create_dir_all(appdir.join("usr/bin")).unwrap();
+        std::fs::create_dir_all(appdir.join("usr/lib")).unwrap();
+        std::fs::write(appdir.join("usr/bin/clawdmeter"), "v1").unwrap();
+        std::fs::write(appdir.join("usr/lib/libfoo.so.1.2"), "lib").unwrap();
+        std::os::unix::fs::symlink("libfoo.so.1.2", appdir.join("usr/lib/libfoo.so.1")).unwrap();
+        std::fs::write(&image, "image v1").unwrap();
+
+        let bin = appimage_copy(&image, &appdir, &dest, "2.0.0").unwrap();
+        assert_eq!(bin, dest.join("usr/bin/clawdmeter"));
+        assert_eq!(std::fs::read_to_string(&bin).unwrap(), "v1");
+        assert_eq!(std::fs::read_link(dest.join("usr/lib/libfoo.so.1")).unwrap(), Path::new("libfoo.so.1.2"));
+
+        // Same image: the copy stays.
+        std::fs::write(appdir.join("usr/bin/clawdmeter"), "v2").unwrap();
+        appimage_copy(&image, &appdir, &dest, "2.0.0").unwrap();
+        assert_eq!(std::fs::read_to_string(&bin).unwrap(), "v1");
+        // A new version (or a replaced image): copied again.
+        appimage_copy(&image, &appdir, &dest, "2.0.1").unwrap();
+        assert_eq!(std::fs::read_to_string(&bin).unwrap(), "v2");
+        assert!(!root.join("state/appimage.new").exists());
+        let _ = std::fs::remove_dir_all(&root);
+    }
 
     #[test]
     fn disk_images_and_translocation_on_macos() {

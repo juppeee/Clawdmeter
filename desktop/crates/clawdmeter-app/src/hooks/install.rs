@@ -39,10 +39,11 @@ pub const HOOKS: [HookSpec; 5] = [
     HookSpec { event: "PreToolUse", matcher: Some("AskUserQuestion"), args: "alert event" },
 ];
 
-/// The binary hooks should run: the path that outlives this process (the
-/// AppImage, a Nix profile's `bin/clawdmeter`, else this executable).
-pub fn hook_binary() -> io::Result<PathBuf> {
-    clawdmeter_core::launch::stable_launch_path()
+/// The binary hooks should run: the path that outlives this process (an
+/// AppImage's copy under `state_dir`, a Nix profile's `bin/clawdmeter`,
+/// else this executable). See [`clawdmeter_core::launch::hook_binary`].
+pub fn hook_binary(state_dir: &Path) -> io::Result<PathBuf> {
+    clawdmeter_core::launch::hook_binary(state_dir, crate::version())
 }
 
 /// The command line for one hook. Windows paths are double-quoted with
