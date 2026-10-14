@@ -57,8 +57,7 @@ portable archives, and Nix setup.
 
 ## Credits
 
-- Pixel-art Clawd animations are Anthropic's official mascot art (claude.ai/code, Claude Code desktop), archived and converted by the tooling in `tools/` and `research/clawd-official/`.
-- The original macOS daemon and flash helper were ported by [Chris Davidson (@lorddavidson)](https://github.com/lorddavidson).
+- Pixel-art Clawd animations are Anthropic's IP.
 - Lucide icon set ([lucide.dev](https://lucide.dev), MIT) for the Bluetooth, battery and USB glyphs.
 - Anthropic brand fonts (Tiempos Text, Styrene B); see the warning below.
 
