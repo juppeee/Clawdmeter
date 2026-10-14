@@ -29,3 +29,7 @@ void chime_play(void);
 
 // Currently a no-op (playback runs in its own task); kept for HAL symmetry.
 void chime_tick(void);
+
+// QA: set the ding's gain (0..1 of its own level) and, when volume >= 0, the
+// codec volume (0..100) until reboot, then play it.
+void chime_tune(float gain, int volume);

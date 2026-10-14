@@ -24,6 +24,7 @@ void sound_hal_init(void) {
 }
 
 void sound_hal_chime(void) { chime_play(); }
+void sound_hal_tune(float gain, int volume) { chime_tune(gain, volume); }
 void sound_hal_tick(void)       { chime_tick(); }
 
 #endif  // BOARD_HAS_SOUND
