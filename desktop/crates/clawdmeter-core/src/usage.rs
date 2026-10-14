@@ -239,7 +239,7 @@ pub fn parse_cli_output(stdout: &str, now: DateTime<Utc>) -> Result<UsageReading
     }
 }
 
-fn classify_auth(text: &str) -> Option<UsageError> {
+pub(crate) fn classify_auth(text: &str) -> Option<UsageError> {
     let l = text.to_ascii_lowercase();
     if l.contains("not logged in")
         || l.contains("/login")
@@ -548,15 +548,11 @@ pub fn find_claude(explicit: Option<&Path>, home: &Path) -> Option<PathBuf> {
 /// Default per-call timeout for the CLI (it answers in about a second).
 pub const CLI_TIMEOUT: Duration = Duration::from_secs(30);
 
-/// Build the command for one account. `~/.claude` (the CLI's own default) runs
-/// with `CLAUDE_CONFIG_DIR` unset, because setting it changes where the CLI
-/// looks for `.claude.json` and which Keychain item it reads on macOS.
-pub fn usage_command(claude: &Path, config_dir: &Path, home: &Path) -> Command {
-    let mut cmd = Command::new(claude);
-    cmd.args(["--output-format", "json", "-p", "/usage"])
-        .stdin(Stdio::null())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped());
+/// Point a CLI command at one account. `~/.claude` (the CLI's own default)
+/// runs with `CLAUDE_CONFIG_DIR` unset, because setting it changes where the
+/// CLI looks for `.claude.json` and which Keychain item it reads on macOS.
+pub(crate) fn for_account(cmd: &mut Command, config_dir: &Path, home: &Path) {
+    cmd.stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped());
     if config_dir == home.join(".claude") {
         cmd.env_remove("CLAUDE_CONFIG_DIR");
     } else {
@@ -568,12 +564,26 @@ pub fn usage_command(claude: &Path, config_dir: &Path, home: &Path) -> Command {
         const CREATE_NO_WINDOW: u32 = 0x0800_0000;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
+}
+
+/// Build the `/usage` command for one account.
+pub fn usage_command(claude: &Path, config_dir: &Path, home: &Path) -> Command {
+    let mut cmd = Command::new(claude);
+    cmd.args(["--output-format", "json", "-p", "/usage"]);
+    for_account(&mut cmd, config_dir, home);
     cmd
 }
 
 /// Run `/usage` for one account (blocking) and return the CLI's stdout.
 pub fn run_usage_cli(claude: &Path, config_dir: &Path, home: &Path, timeout: Duration) -> Result<String, UsageError> {
-    let mut child = usage_command(claude, config_dir, home).spawn().map_err(|e| UsageError::Spawn(e.to_string()))?;
+    run_cli(usage_command(claude, config_dir, home), timeout)
+}
+
+/// Run a prepared CLI command (blocking, killed after `timeout`) and return
+/// its stdout. A failed exit with no JSON on stdout is an auth problem when
+/// the CLI says so, else [`UsageError::BadOutput`].
+pub(crate) fn run_cli(mut cmd: Command, timeout: Duration) -> Result<String, UsageError> {
+    let mut child = cmd.spawn().map_err(|e| UsageError::Spawn(e.to_string()))?;
     let mut stdout = child.stdout.take().expect("piped");
     let mut stderr = child.stderr.take().expect("piped");
     let out_reader = std::thread::spawn(move || {
@@ -720,6 +730,13 @@ pub struct AccountState {
     pub last_attempt_at: Option<i64>,
     /// Pause after transient misses (rate limiting).
     pub backoff: Backoff,
+    /// When the poll that produced `last` started (unix seconds): what it
+    /// says was true then.
+    pub read_started_at: Option<i64>,
+    /// The first prompt or tool activity from this account after
+    /// [`crate::probe::anchor`]: the user's own activity started a window
+    /// there.
+    pub first_activity: Option<i64>,
 }
 
 impl AccountState {
@@ -730,6 +747,9 @@ impl AccountState {
             Ok(r) => {
                 self.last = Some(r);
                 self.last_ok_at = Some(now);
+                self.read_started_at = Some(self.last_attempt_at.unwrap_or(now).min(now));
+                let anchor = crate::probe::anchor(self);
+                self.first_activity = self.first_activity.filter(|t| anchor.is_some_and(|a| *t > a));
                 self.misses = 0;
                 self.last_error = None;
                 self.backoff.on_success();
@@ -748,6 +768,13 @@ impl AccountState {
     /// miss with the last good reading over [`STALE_AFTER_SECS`] old.
     pub fn is_stale(&self, now: i64) -> bool {
         self.misses >= STALE_AFTER_MISSES || (self.misses > 0 && self.age(now).is_some_and(|a| a > STALE_AFTER_SECS))
+    }
+
+    /// Note prompt or tool activity from this account at `ts`.
+    pub fn note_activity(&mut self, ts: i64) {
+        if self.first_activity.is_none() && crate::probe::anchor(self).is_some_and(|a| ts > a) {
+            self.first_activity = Some(ts);
+        }
     }
 
     /// Seconds since the last good reading.

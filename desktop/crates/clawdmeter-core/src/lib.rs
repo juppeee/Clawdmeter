@@ -4,6 +4,7 @@
 //!
 //! * [`paths`], [`config`]: the shared state dir (`~/.config/clawdmeter`) and its files.
 //! * [`usage`]: run and parse `claude --output-format json -p /usage`.
+//! * [`probe`]: usage from one message's rate-limit headers, and when that is allowed.
 //! * [`events`]: the hook events log (fast clock) and the activity tracker.
 //! * [`attention`]: the attention hook's alert / clear files (written by
 //!   `clawdmeter hook`; the installer lives in the app crate).
@@ -29,6 +30,7 @@ pub mod launch;
 pub mod paths;
 pub mod payload;
 pub mod platform;
+pub mod probe;
 pub mod rate;
 pub mod selector;
 pub mod usage;

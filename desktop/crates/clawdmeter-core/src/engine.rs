@@ -13,6 +13,7 @@ use crate::cadence::{heartbeat_due, AccountClock, Cadence, PollReason, Scheduler
 use crate::config::Settings;
 use crate::events::{Activity, HookEvent, Signal};
 use crate::payload::{clock_fields, Payload};
+use crate::probe::{self, Plan as ProbePlan, Source};
 use crate::rate::{Mood, RateTracker};
 use crate::selector::PlanSelector;
 use crate::usage::{AccountState, UsageError, UsageReading};
@@ -63,6 +64,9 @@ pub struct PollPlan {
     pub reason: PollReason,
     /// The accounts due now; the rest wait (cadence, gap or backoff).
     pub accounts: Vec<PathBuf>,
+    /// How to read each of `accounts` (same order): the probe, `/usage`, or
+    /// a reading known without a call ([`crate::probe::choose_source`]).
+    pub plans: Vec<ProbePlan>,
 }
 
 /// One account's last poll error, for the settings window.
@@ -132,6 +136,8 @@ pub struct Engine {
     sent_a_at: i64,
     sent_n: Option<u32>,
     last_event_ts: Option<i64>,
+    /// Latest prompt or tool activity that names no configured account.
+    unattributed_activity: Option<i64>,
 }
 
 fn utc(now: i64) -> DateTime<Utc> {
@@ -161,6 +167,7 @@ impl Engine {
             sent_a_at: i64::MIN / 2,
             sent_n: None,
             last_event_ts: None,
+            unattributed_activity: None,
         }
     }
 
@@ -194,6 +201,12 @@ impl Engine {
 
     /// One live hook event.
     pub fn on_hook_event(&mut self, ev: &HookEvent, now: i64) {
+        if ev.kind.sends_messages() {
+            match ev.account.as_ref().and_then(|a| self.settings.config_dirs.iter().find(|d| *d == a)) {
+                Some(d) => self.accounts.entry(d.clone()).or_default().note_activity(ev.ts),
+                None => self.unattributed_activity = self.unattributed_activity.max(Some(ev.ts)),
+            }
+        }
         match self.activity.ingest(ev) {
             Signal::Prompt { .. } => {
                 self.scheduler.on_prompt(now);
@@ -242,22 +255,36 @@ impl Engine {
         }
     }
 
-    fn clock(&self, dir: &PathBuf) -> AccountClock {
+    /// Where this account's next reading would come from at `now`.
+    fn source(&self, dir: &PathBuf, now: i64) -> Source {
+        let empty = AccountState::default();
+        probe::choose_source(self.accounts.get(dir).unwrap_or(&empty), self.unattributed_activity, now)
+    }
+
+    fn clock(&self, dir: &PathBuf, now: i64) -> AccountClock {
         let st = self.accounts.get(dir);
+        let source = self.source(dir, now);
         AccountClock {
             shown: self.active.as_ref().is_none_or(|a| a == dir),
             last_attempt: st.and_then(|a| a.last_attempt_at),
             last_failed: st.is_some_and(|a| a.last_error.is_some()),
-            blocked_until: st.and_then(|a| a.backoff.until()),
+            // The backoff is `/usage`'s (its endpoint's rate limit).
+            blocked_until: st.and_then(|a| a.backoff.until()).filter(|_| source == Source::Usage),
+            usage_only: source == Source::Usage,
+            wake_at: st
+                .and_then(|a| a.last.as_ref())
+                .and_then(|r| r.session.as_ref())
+                .and_then(|w| w.resets_at)
+                .map(|t| t.timestamp()),
         }
     }
 
     fn account_due(&self, dir: &PathBuf, now: i64) -> (i64, PollReason) {
-        self.scheduler.account_due(&self.clock(dir), &self.activity, self.hooks_installed, now)
+        self.scheduler.account_due(&self.clock(dir, now), &self.activity, self.hooks_installed, now)
     }
 
-    fn refresh_at(&self, dir: &PathBuf) -> Option<i64> {
-        self.scheduler.earliest_poll(&self.clock(dir))
+    fn refresh_at(&self, dir: &PathBuf, now: i64) -> Option<i64> {
+        self.scheduler.earliest_poll(&self.clock(dir, now))
     }
 
     /// The earliest account's next poll: (unix seconds, reason).
@@ -276,11 +303,21 @@ impl Engine {
         let reason = self.poll_due(now)?;
         let accounts: Vec<PathBuf> =
             self.settings.config_dirs.iter().filter(|d| self.account_due(d, now).0 <= now).cloned().collect();
+        let plans = accounts
+            .iter()
+            .map(|d| match self.source(d, now) {
+                Source::Probe => ProbePlan::Probe {
+                    usage_fallback: self.accounts.get(d).is_none_or(|a| a.backoff.remaining(now).is_none()),
+                },
+                Source::Usage => ProbePlan::Usage,
+                Source::NotStarted(r) => ProbePlan::Known(r),
+            })
+            .collect();
         for d in &accounts {
             self.accounts.entry(d.clone()).or_default().last_attempt_at = Some(now);
         }
         self.in_flight = accounts.clone();
-        Some(PollPlan { reason, accounts })
+        Some(PollPlan { reason, accounts, plans })
     }
 
     /// Results of one poll (the accounts of a [`PollPlan`]).
@@ -465,7 +502,7 @@ impl Engine {
             hooks: self.activity.hooks_seen,
             mood: st.and_then(|a| a.last.as_ref()).map(|_| self.rate.mood(self.activity.level(now))),
             next_poll_at: self.next_due(now).map(|(t, _)| t),
-            refresh_at: self.active.as_ref().and_then(|a| self.refresh_at(a)),
+            refresh_at: self.active.as_ref().and_then(|a| self.refresh_at(a, now)),
             polling: self.active.as_ref().is_some_and(|a| self.in_flight.contains(a)),
         }
     }
@@ -497,7 +534,7 @@ mod tests {
     }
 
     fn ev(ts: i64, kind: &str) -> HookEvent {
-        HookEvent { ts, kind: HookKind::parse(kind), session: "s1".into() }
+        HookEvent { ts, kind: HookKind::parse(kind), session: "s1".into(), account: None }
     }
 
     fn write(e: &mut Engine, now: i64) -> Option<Write> {
@@ -777,20 +814,26 @@ mod tests {
         Err(UsageError::NoUsageLines("You are currently using your subscription".into()))
     }
 
+    /// A reading with no known window (a session line without a reset), so
+    /// `/usage` stays the source.
+    fn usage_reading(s: u32) -> UsageReading {
+        UsageReading { session: Some(Window { pct: s, resets_at: None }), ..reading(s) }
+    }
+
     // The owner's case: the shown account's /usage comes back without its
     // lines (429). It keeps being shown with its last values, isn't polled
     // again for 10 minutes whatever asks, and the other account keeps its
-    // own 10-minute rhythm.
+    // own rhythm (12 min while no window is known).
     #[test]
     fn rate_limited_shown_account_backs_off_and_stays() {
         let mut e = Engine::new(settings("config_dirs = ~/.claude, ~/.claude-work\n"));
         e.set_hooks_installed(true);
         let (a, b) = (PathBuf::from("/h/.claude"), PathBuf::from("/h/.claude-work"));
         let pct = |d: &Path| if d == a { 40 } else { 10 };
-        assert_eq!(poll(&mut e, T0, |d| Ok(reading(pct(d)))), vec![a.clone(), b.clone()]);
+        assert_eq!(poll(&mut e, T0, |d| Ok(usage_reading(pct(d)))), vec![a.clone(), b.clone()]);
         assert_eq!(e.status(T0).active_account, Some(a.clone()));
-        e.on_hook_event(&ev(T0 + 200, "UserPromptSubmit"), T0 + 200);
-        assert_eq!(poll(&mut e, T0 + 200, |_| no_lines()), vec![a.clone()], "the prompt polls the shown account only");
+        e.request_refresh(T0 + 200);
+        assert_eq!(poll(&mut e, T0 + 200, |d| if d == a { no_lines() } else { Ok(usage_reading(10)) }).len(), 2);
         let st = e.status(T0 + 200);
         assert_eq!(st.active_account, Some(a.clone()), "a rate limit doesn't flip the shown account");
         assert_eq!(st.reading.map(|r| r.session_pct()), Some(40));
@@ -802,13 +845,12 @@ mod tests {
                 retrying: true,
             }]
         );
-        // A refresh request polls only the account that isn't backing off,
-        // and prompts wait for the backoff too.
-        e.request_refresh(T0 + 300);
-        assert_eq!(poll(&mut e, T0 + 300, |_| Ok(reading(10))), vec![b.clone()]);
-        assert_eq!(e.status(T0 + 300).active_account, Some(a.clone()));
-        e.on_hook_event(&ev(T0 + 400, "UserPromptSubmit"), T0 + 400);
-        for t in [T0 + 400, T0 + 599, T0 + 799] {
+        // A refresh request polls only the account that isn't backing off.
+        e.request_refresh(T0 + 400);
+        assert_eq!(poll(&mut e, T0 + 400, |_| Ok(usage_reading(10))), vec![b.clone()]);
+        assert_eq!(e.status(T0 + 400).active_account, Some(a.clone()));
+        e.on_hook_event(&ev(T0 + 450, "UserPromptSubmit"), T0 + 450);
+        for t in [T0 + 450, T0 + 599, T0 + 799] {
             assert!(e.begin_poll(t).is_none(), "nothing due at {t}");
         }
         assert_eq!(e.status(T0 + 700).next_poll_at, Some(T0 + 800));
@@ -816,13 +858,59 @@ mod tests {
         // Second miss: 20 minutes.
         assert_eq!(poll(&mut e, T0 + 800, |_| Err(UsageError::RateLimited { retry_after_secs: 400 })), vec![a.clone()]);
         assert!(e.status(T0 + 800).errors[0].message.ends_with("about 20 minutes."));
-        assert_eq!(poll(&mut e, T0 + 900, |_| Ok(reading(10))), vec![b.clone()], "B every 10 minutes");
+        assert_eq!(poll(&mut e, T0 + 1120, |_| Ok(usage_reading(10))), vec![b.clone()], "B every 12 minutes");
         assert!(e.begin_poll(T0 + 1999).is_none_or(|p| !p.accounts.contains(&a)));
         // Back: errors clear, and the device gets a poll write.
-        let polled = poll(&mut e, T0 + 2000, |d| Ok(reading(pct(d) + 5)));
+        let polled = poll(&mut e, T0 + 2000, |d| Ok(usage_reading(pct(d) + 5)));
         assert!(polled.contains(&a));
         assert!(e.status(T0 + 2000).errors.is_empty());
         assert_eq!(write(&mut e, T0 + 2000).unwrap().kind, WriteKind::Poll);
+    }
+
+    fn plans(e: &mut Engine, now: i64) -> Vec<ProbePlan> {
+        e.begin_poll(now).map(|p| p.plans).unwrap_or_default()
+    }
+
+    // The probe runs only while a window is known to be running, isn't held
+    // up by /usage's backoff, and a window that ends quietly needs no call.
+    #[test]
+    fn the_probe_never_starts_a_window() {
+        let mut e = Engine::new(settings(""));
+        e.set_hooks_installed(true);
+        let a = PathBuf::from("/h/.claude");
+        // Unknown at first: /usage.
+        assert_eq!(plans(&mut e, T0), vec![ProbePlan::Usage]);
+        e.on_poll_results(T0, vec![(a.clone(), Ok(reading(15)))]); // resets at T0 + 3600
+                                                                   // Known window: the probe, on the working cadence after a prompt.
+        let mine = |ts| HookEvent { account: Some(a.clone()), ..ev(ts, "UserPromptSubmit") };
+        e.on_hook_event(&mine(T0 + 200), T0 + 200);
+        assert_eq!(plans(&mut e, T0 + 200), vec![ProbePlan::Probe { usage_fallback: true }]);
+        // A probe miss with /usage backing off: the probe still runs, alone.
+        e.on_poll_results(T0 + 200, vec![(a.clone(), no_lines())]);
+        e.on_hook_event(&mine(T0 + 400), T0 + 400);
+        assert_eq!(plans(&mut e, T0 + 400), vec![ProbePlan::Probe { usage_fallback: false }]);
+        e.on_poll_results(T0 + 400, vec![(a.clone(), Ok(reading(20)))]);
+        // Inside the margin before the reset: /usage, which can't start one.
+        assert_eq!(plans(&mut e, T0 + 3400), vec![ProbePlan::Usage]);
+        e.on_poll_results(T0 + 3400, vec![(a.clone(), Ok(reading(20)))]);
+        // At the reset, with nothing since: over, no call.
+        assert_eq!(e.status(T0 + 3500).next_poll_at, Some(T0 + 3600), "the reset wakes it");
+        let Some(PollPlan { reason, plans: due, .. }) = e.begin_poll(T0 + 3600) else { panic!() };
+        assert_eq!(reason, PollReason::WindowEnd);
+        let [ProbePlan::Known(r)] = due.as_slice() else { panic!("{due:?}") };
+        assert_eq!(r.session, None);
+        assert_eq!(r.week, reading(20).week, "weekly kept until its own reset");
+        e.on_poll_results(T0 + 3600, vec![(a.clone(), Ok(r.clone()))]);
+        assert_eq!(e.status(T0 + 3600).reading.map(|r| r.session_pct()), Some(0));
+        // Now /usage keeps watch every 12 min; another account's (or an
+        // unknown) prompt doesn't open the probe.
+        e.on_hook_event(&ev(T0 + 3700, "UserPromptSubmit"), T0 + 3700);
+        assert!(e.begin_poll(T0 + 3700).is_none());
+        assert_eq!(plans(&mut e, T0 + 3600 + 720), vec![ProbePlan::Usage]);
+        e.on_poll_results(T0 + 4320, vec![(a.clone(), Ok(usage_reading(0)))]);
+        // The user's own prompt starts a window: the probe, at once.
+        e.on_hook_event(&mine(T0 + 4500), T0 + 4500);
+        assert_eq!(plans(&mut e, T0 + 4500), vec![ProbePlan::Probe { usage_fallback: true }]);
     }
 
     // An account with no reading at all can't be shown; the other one is.

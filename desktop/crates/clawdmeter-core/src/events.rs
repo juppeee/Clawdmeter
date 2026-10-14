@@ -39,6 +39,12 @@ impl HookKind {
             other => HookKind::Other(other.to_owned()),
         }
     }
+    /// The event means the session talked to the API (or is about to): a
+    /// prompt, a tool call, the end of a turn. That starts a 5-hour window
+    /// when none is running.
+    pub fn sends_messages(&self) -> bool {
+        matches!(self, HookKind::UserPromptSubmit | HookKind::PostToolUse | HookKind::PreToolUse | HookKind::Stop)
+    }
 }
 
 /// One events.log line.
@@ -50,22 +56,35 @@ pub struct HookEvent {
     pub kind: HookKind,
     /// Session id (may be empty).
     pub session: String,
+    /// The Claude Code config dir (account) the session runs under, when the
+    /// hook could tell.
+    pub account: Option<PathBuf>,
 }
 
-/// Parse `<unix_ts> <HookEventName> [<session_id>]`. Fractional timestamps are
-/// accepted (truncated). Returns `None` for anything else.
+/// One whitespace-separated token and what follows it.
+fn token(s: &str) -> Option<(&str, &str)> {
+    let s = s.trim_start();
+    let end = s.find(char::is_whitespace).unwrap_or(s.len());
+    (end > 0).then(|| (&s[..end], &s[end..]))
+}
+
+/// Parse `<unix_ts> <HookEventName> [<session_id> [<config dir>]]`; the
+/// config dir is the rest of the line (it may hold spaces). Fractional
+/// timestamps are accepted (truncated). Returns `None` for anything else.
 pub fn parse_line(line: &str) -> Option<HookEvent> {
-    let mut it = line.split_whitespace();
-    let ts_raw = it.next()?;
+    let (ts_raw, rest) = token(line)?;
     let ts = match ts_raw.split_once('.') {
         Some((s, frac)) if frac.bytes().all(|b| b.is_ascii_digit()) => s.parse().ok()?,
         Some(_) => return None,
         None => ts_raw.parse().ok()?,
     };
-    let kind = HookKind::parse(it.next()?);
+    let (kind, rest) = token(rest)?;
+    let kind = HookKind::parse(kind);
+    let (session, rest) = token(rest).unwrap_or(("", ""));
     // The hook writes "-" when a payload has no session id.
-    let session = it.next().filter(|s| *s != "-").unwrap_or("").to_owned();
-    Some(HookEvent { ts, kind, session })
+    let session = if session == "-" { "" } else { session }.to_owned();
+    let account = Some(rest.trim()).filter(|a| !a.is_empty()).map(PathBuf::from);
+    Some(HookEvent { ts, kind, session, account })
 }
 
 /// How much history to read at start-up for seeding the tracker.
@@ -368,7 +387,7 @@ mod tests {
     use std::io::Write;
 
     fn ev(ts: i64, kind: &str, sid: &str) -> HookEvent {
-        HookEvent { ts, kind: HookKind::parse(kind), session: sid.into() }
+        HookEvent { ts, kind: HookKind::parse(kind), session: sid.into(), account: None }
     }
 
     #[test]
@@ -381,6 +400,12 @@ mod tests {
         assert_eq!(parse_line("abc Stop x"), None);
         assert_eq!(parse_line("1760000000"), None);
         assert_eq!(parse_line("12.x Stop"), None);
+        // The account is the rest of the line, spaces and all.
+        let e = parse_line("1760000000 Stop abc /home/me/My Claude").unwrap();
+        assert_eq!(e.account.as_deref(), Some(std::path::Path::new("/home/me/My Claude")));
+        assert_eq!(e.session, "abc");
+        assert_eq!(parse_line("1760000000 Stop - /home/me/.claude").unwrap().session, "");
+        assert_eq!(parse_line("1760000000 Stop abc  ").unwrap().account, None);
     }
 
     #[test]

@@ -113,13 +113,29 @@ fn as_jq_object(v: &Value) -> Option<std::borrow::Cow<'_, Map<String, Value>>> {
     }
 }
 
-/// `<ts> <event> <session>`, both fields reduced to `[A-Za-z0-9_.-]`.
+/// The Claude Code config dir (account) a hook input comes from: the
+/// directory holding `projects/` in its `transcript_path`
+/// (`<config dir>/projects/<project>/<session>.jsonl`).
+pub fn account_of(v: &Value) -> Option<String> {
+    let path = Path::new(v.get("transcript_path")?.as_str()?);
+    let dir = path.ancestors().find(|a| a.file_name().is_some_and(|n| n == "projects"))?.parent()?;
+    let s = dir.to_str()?;
+    (!s.is_empty() && !s.chars().any(char::is_control)).then(|| s.to_owned())
+}
+
+/// `<ts> <event> <session> [<config dir>]`: event and session reduced to
+/// `[A-Za-z0-9_.-]`, the config dir ([`account_of`]) as the rest of the line
+/// when the input has a transcript path.
 pub fn event_line(v: &Value, now_unix: u64) -> Option<String> {
     // `.hook_event_name` on a non-object is a jq error: no line.
     let obj = as_jq_object(v)?;
     let name = present(obj.get("hook_event_name")).map_or_else(|| "unknown".to_owned(), jq_tostring);
     let sid = present(obj.get("session_id")).map_or_else(|| "-".to_owned(), jq_tostring);
-    Some(format!("{now_unix} {} {}\n", sanitize(&name), sanitize(&sid)))
+    let (name, sid) = (sanitize(&name), sanitize(&sid));
+    Some(match account_of(v) {
+        Some(acct) => format!("{now_unix} {name} {} {acct}\n", if sid.is_empty() { "-" } else { &sid }),
+        None => format!("{now_unix} {name} {sid}\n"),
+    })
 }
 
 fn log_event(v: &Value, dir: &Path, now_unix: u64) -> io::Result<()> {
@@ -260,6 +276,16 @@ mod tests {
         assert_eq!(event_line(&json!({"session_id": {"a": [1, "b"]}}), 7).unwrap(), "7 unknown a1b\n");
         assert!(event_line(&json!([1]), 7).is_none());
         assert_eq!(event_line(&Value::Null, 7).unwrap(), "7 unknown -\n");
+        // The account comes from the transcript path.
+        let v = json!({"hook_event_name": "UserPromptSubmit", "session_id": "s",
+            "transcript_path": "/home/me/My Claude/projects/-home-me-code/s.jsonl"});
+        assert_eq!(event_line(&v, 7).unwrap(), "7 UserPromptSubmit s /home/me/My Claude\n");
+        let parsed = clawdmeter_core::events::parse_line(event_line(&v, 7).unwrap().trim_end()).unwrap();
+        assert_eq!(parsed.account.as_deref(), Some(Path::new("/home/me/My Claude")));
+        let v = json!({"session_id": "", "transcript_path": "/h/.claude/projects/p/x.jsonl"});
+        assert_eq!(event_line(&v, 7).unwrap(), "7 unknown - /h/.claude\n");
+        assert_eq!(account_of(&json!({"transcript_path": "/tmp/x.jsonl"})), None);
+        assert_eq!(account_of(&json!({"transcript_path": "/h/pro\njects/projects/p/x.jsonl"})), None);
     }
 
     #[test]

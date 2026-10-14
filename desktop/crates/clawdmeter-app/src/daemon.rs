@@ -13,7 +13,9 @@ use clawdmeter_ble::{
     MAX_WRITE,
 };
 use clawdmeter_core::attention::AttentionInbox;
+use clawdmeter_core::engine::PollPlan;
 use clawdmeter_core::events::EventTail;
+use clawdmeter_core::probe;
 use clawdmeter_core::usage::{self, UsageError, UsageReading};
 use clawdmeter_core::{unix_now, Engine, EngineStatus, HostClock, Paths, Settings, WriteKind};
 use tokio::sync::{mpsc, watch};
@@ -112,13 +114,18 @@ pub fn spawn(paths: Paths) -> DaemonHandle {
 type PollResults = Vec<(PathBuf, Result<UsageReading, UsageError>)>;
 type ConnectResult = Result<(DeviceLink, DeviceEvents), LinkError>;
 
-fn poll_all(claude: Option<PathBuf>, dirs: Vec<PathBuf>, home: PathBuf) -> PollResults {
+/// Read each account of a poll plan: the probe, `/usage`, or a reading known
+/// without a call. The probe runs from `cwd` (the state dir).
+fn poll_all(claude: Option<PathBuf>, plan: PollPlan, home: PathBuf, cwd: PathBuf) -> PollResults {
     let now = chrono::Utc::now();
-    dirs.into_iter()
-        .map(|d| {
-            let r = match &claude {
-                Some(c) => usage::poll_account(c, &d, &home, now),
-                None => Err(UsageError::Spawn("claude CLI not found (set claude_path in the config)".into())),
+    plan.accounts
+        .into_iter()
+        .zip(plan.plans)
+        .map(|(d, p)| {
+            let r = match (&claude, &p) {
+                (_, probe::Plan::Known(r)) => Ok(r.clone()),
+                (Some(c), _) => probe::poll(c, &d, &home, &cwd, &p, now),
+                (None, _) => Err(UsageError::Spawn("claude CLI not found (set claude_path in the config)".into())),
             };
             (d, r)
         })
@@ -263,9 +270,13 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
         }
         if polling.is_none() {
             if let Some(plan) = engine.begin_poll(now) {
-                log::debug!("polling /usage ({:?}): {} account(s)", plan.reason, plan.accounts.len());
-                let (c, dirs, home) = (claude.clone(), plan.accounts, paths.home.clone());
-                polling = Some(tokio::task::spawn_blocking(move || poll_all(c, dirs, home)));
+                log::debug!(
+                    "polling ({:?}): {:?}",
+                    plan.reason,
+                    plan.accounts.iter().zip(&plan.plans).collect::<Vec<_>>()
+                );
+                let (c, home, cwd) = (claude.clone(), paths.home.clone(), paths.state_dir.clone());
+                polling = Some(tokio::task::spawn_blocking(move || poll_all(c, plan, home, cwd)));
             }
         }
 
@@ -384,7 +395,13 @@ pub fn once(paths: &Paths) -> i32 {
         }
     };
     let claude = usage::find_claude(settings.claude_path.as_deref(), &paths.home);
-    let results = poll_all(claude, settings.config_dirs.clone(), paths.home.clone());
+    // Nothing is known yet, so /usage for every account (it starts no window).
+    let plan = PollPlan {
+        reason: clawdmeter_core::cadence::PollReason::Startup,
+        accounts: settings.config_dirs.clone(),
+        plans: vec![probe::Plan::Usage; settings.config_dirs.len()],
+    };
+    let results = poll_all(claude, plan, paths.home.clone(), paths.state_dir.clone());
     let mut ok = false;
     for (d, r) in &results {
         match r {

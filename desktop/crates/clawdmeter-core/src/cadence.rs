@@ -21,6 +21,13 @@
 //! no request bypasses that. A failure that doesn't back off (CLI missing,
 //! logged out) retries after the 2-minute gap.
 //!
+//! That cadence applies while the account's 5-hour window is known to be
+//! running, when the reading comes from the probe ([`crate::probe`]). With
+//! no window known to be running, or before the first reading, `/usage` is
+//! the source and runs every 12 min ([`Cadence::no_window`]); prompts and
+//! Stops don't speed it up. A known reset time wakes the account once, so the
+//! device shows the window ending on time.
+//!
 //! An explicit `poll_interval` in the config replaces the 3- and 5-minute
 //! cadences (never below the 2-minute gap), so a user who tuned the old
 //! daemon keeps roughly what they had.
@@ -44,6 +51,8 @@ pub struct Cadence {
     pub other: i64,
     /// Shortest time between two polls of one account, whatever asked.
     pub min_gap: i64,
+    /// `/usage` cadence while no window is known to be running.
+    pub no_window: i64,
 }
 
 impl Default for Cadence {
@@ -56,6 +65,7 @@ impl Default for Cadence {
             no_hooks: 300,
             other: 600,
             min_gap: 120,
+            no_window: 720,
         }
     }
 }
@@ -88,6 +98,8 @@ pub enum PollReason {
     Interval,
     /// Retrying a failed poll (after its backoff, if it has one).
     Retry,
+    /// The account's known 5-hour window just ended.
+    WindowEnd,
 }
 
 /// What the scheduler needs to know about one account.
@@ -101,6 +113,11 @@ pub struct AccountClock {
     pub last_failed: bool,
     /// Backing off until then.
     pub blocked_until: Option<i64>,
+    /// No window is known to be running: `/usage` on [`Cadence::no_window`],
+    /// not sped up by prompts or Stops.
+    pub usage_only: bool,
+    /// The known window's reset: poll once when it passes.
+    pub wake_at: Option<i64>,
 }
 
 /// Decides when each account's next `/usage` poll is due. Times are unix
@@ -169,7 +186,13 @@ impl Scheduler {
     ) -> (i64, PollReason) {
         let blocked = acct.blocked_until.unwrap_or(i64::MIN);
         let Some(last) = acct.last_attempt else { return (now.max(blocked), PollReason::Startup) };
-        let interval = if acct.shown { self.interval(activity, hooks_installed, now) } else { self.cadence.other };
+        let interval = if acct.usage_only {
+            self.cadence.no_window
+        } else if acct.shown {
+            self.interval(activity, hooks_installed, now)
+        } else {
+            self.cadence.other
+        };
         let mut best =
             if acct.last_failed { (last, PollReason::Retry) } else { (last + interval, PollReason::Interval) };
         let mut consider = |t: i64, why: PollReason| {
@@ -180,7 +203,10 @@ impl Scheduler {
         if let Some(t) = self.requested_at.filter(|t| *t > last) {
             consider(t, PollReason::Requested);
         }
-        if acct.shown {
+        if let Some(t) = acct.wake_at.filter(|t| *t > last) {
+            consider(t, PollReason::WindowEnd);
+        }
+        if acct.shown && !acct.usage_only {
             if let Some(t) = self.prompt_at.filter(|t| *t > last) {
                 consider(t, PollReason::Prompt);
             }
@@ -204,7 +230,7 @@ mod tests {
     use crate::events::{HookEvent, HookKind};
 
     fn ev(ts: i64, kind: &str) -> HookEvent {
-        HookEvent { ts, kind: HookKind::parse(kind), session: "s".into() }
+        HookEvent { ts, kind: HookKind::parse(kind), session: "s".into(), account: None }
     }
 
     fn shown(last: i64) -> AccountClock {
@@ -284,7 +310,13 @@ mod tests {
     fn backoff_blocks_everything() {
         let mut a = Activity::default();
         let mut s = Scheduler::new(Cadence::default());
-        let parked = AccountClock { shown: true, last_attempt: Some(0), last_failed: true, blocked_until: Some(600) };
+        let parked = AccountClock {
+            shown: true,
+            last_attempt: Some(0),
+            last_failed: true,
+            blocked_until: Some(600),
+            ..Default::default()
+        };
         s.request(10);
         a.ingest(&ev(20, "UserPromptSubmit"));
         s.on_prompt(20);
@@ -329,5 +361,35 @@ mod tests {
         assert!(!heartbeat_due(None, 60, 1000));
         assert!(!heartbeat_due(Some(1000), 60, 1059));
         assert!(heartbeat_due(Some(1000), 60, 1060));
+    }
+
+    #[test]
+    fn no_known_window_polls_usage_every_12_minutes() {
+        let mut s = Scheduler::new(Cadence::default());
+        let a = Activity::default();
+        let quiet = AccountClock { usage_only: true, ..shown(0) };
+        assert_eq!(s.account_due(&quiet, &a, true, 10), (720, PollReason::Interval));
+        // Prompts and Stops don't speed it up; a request still does.
+        s.on_prompt(30);
+        s.on_stop(40);
+        assert_eq!(s.account_due(&quiet, &a, true, 50).0, 720);
+        s.request(200);
+        assert_eq!(s.account_due(&quiet, &a, true, 210), (200, PollReason::Requested));
+        // Other accounts too.
+        let other = AccountClock { shown: false, ..quiet };
+        assert_eq!(Scheduler::new(Cadence::default()).account_due(&other, &a, true, 10).0, 720);
+    }
+
+    #[test]
+    fn a_known_reset_wakes_the_account() {
+        let s = Scheduler::new(Cadence::default());
+        let a = Activity::default();
+        let c = AccountClock { wake_at: Some(400), ..shown(300) };
+        assert_eq!(s.account_due(&c, &a, false, 310), (420, PollReason::WindowEnd), "still after the 2-min gap");
+        let c = AccountClock { wake_at: Some(250), ..shown(0) };
+        assert_eq!(s.account_due(&c, &a, false, 10), (250, PollReason::WindowEnd));
+        // Passed before the last poll: done.
+        let c = AccountClock { wake_at: Some(250), ..shown(260) };
+        assert_eq!(s.account_due(&c, &a, false, 270).1, PollReason::Interval);
     }
 }
