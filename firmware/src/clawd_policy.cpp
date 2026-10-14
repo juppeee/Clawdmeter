@@ -151,6 +151,10 @@ bool attention_resumes_screensaver(AttnFrom from, AttnEnd how, bool engaged) {
     return !engaged;
 }
 
+bool attention_end_tells_host(AttnEnd how) {
+    return how != ATTN_END_CLEAR;
+}
+
 bool reaction_still_due(uint32_t queued_at, uint32_t now, const ClawdTuning* t) {
     return (uint32_t)(now - queued_at) <= t->react_pending_ms;
 }

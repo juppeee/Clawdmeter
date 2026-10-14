@@ -347,6 +347,7 @@ void loop() {
     splash_tick();
     mascot_tick();
     director_tick();
+    if (director_take_dismissed()) ble_send_dismiss();
     // Rotation transition (blank + ramp) would fight the idle fade — skip
     // ticks while the panel is dark. A rotation that happens during sleep
     // is detected by the next tick after wake and ramped in then.

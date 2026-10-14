@@ -432,6 +432,14 @@ void ble_send_nack(void) {
     }
 }
 
+void ble_send_dismiss(void) {
+    if (state == BLE_STATE_CONNECTED && tx_char) {
+        tx_char->setValue("{\"dismiss\":true}");
+        tx_char->notify();
+        Serial.println("BLE: alert dismissed on the device");
+    }
+}
+
 void ble_set_battery_level(int pct) {
     if (!hid_dev || pct < 0) return;
     if (pct > 100) pct = 100;

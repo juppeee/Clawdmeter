@@ -173,6 +173,13 @@ static void test_attention_ends_home_when_you_showed_up(void) {
     TEST_ASSERT_FALSE(attention_resumes_screensaver(ATTN_FROM_HOME, ATTN_END_CLEAR, false));
 }
 
+static void test_only_device_ended_alerts_reach_the_app(void) {
+    TEST_ASSERT_TRUE(attention_end_tells_host(ATTN_END_TAP));
+    TEST_ASSERT_TRUE(attention_end_tells_host(ATTN_END_TIMEOUT));
+    // The app sent the clear; it already knows.
+    TEST_ASSERT_FALSE(attention_end_tells_host(ATTN_END_CLEAR));
+}
+
 static void test_reaction_waits_for_him_to_hurry_home(void) {
     TEST_ASSERT_TRUE(reaction_still_due(1000, 1000, &T));
     TEST_ASSERT_TRUE(reaction_still_due(1000, 1000 + T.react_pending_ms, &T));
@@ -309,5 +316,6 @@ int main(int, char**) {
     RUN_TEST(test_curiosity_runs_out_before_the_screensaver_could_start);
     RUN_TEST(test_curious_glances_keep_going_back_to_the_tap);
     RUN_TEST(test_attention_over_a_peek_ends_on_the_meters);
+    RUN_TEST(test_only_device_ended_alerts_reach_the_app);
     return UNITY_END();
 }

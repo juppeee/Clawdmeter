@@ -42,6 +42,7 @@ static bool     notice_wake = false;  // B_FACE_HOME: blink first (he noticed yo
 
 // Attention
 static bool     attention_on = false;
+static bool     attention_dismissed = false;  // ended here; the app hasn't heard
 static bool     pairing_touch = false;        // director_set_pairing_touch
 static uint32_t attention_since = 0;
 static AttnFrom attn_from = ATTN_FROM_HOME;   // what it interrupted
@@ -160,6 +161,7 @@ static void to_meters(bool noticed) {
 static void end_attention(AttnEnd how) {
     if (!attention_on) return;
     attention_on = false;
+    if (attention_end_tells_host(how)) attention_dismissed = true;
     const bool engaged = attn_engaged || (int32_t)(last_engagement - attn_mark) > 0;
     resume_screensaver = attention_resumes_screensaver(attn_from, how, engaged);
     ui_set_alert_text(NULL);
@@ -204,6 +206,12 @@ void director_alert(const char* message) {
 }
 
 void director_alert_clear(void) { end_attention(ATTN_END_CLEAR); }
+
+bool director_take_dismissed(void) {
+    const bool d = attention_dismissed;
+    attention_dismissed = false;
+    return d;
+}
 
 // ─── Inputs ──────────────────────────────────────────────────────────────────
 // Peek speeds: the hop and the duck-out are the acknowledgement, not the

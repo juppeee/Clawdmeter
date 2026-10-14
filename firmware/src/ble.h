@@ -19,6 +19,7 @@ bool ble_has_data(void);
 const char* ble_get_data(void);
 void ble_send_ack(void);
 void ble_send_nack(void);
+void ble_send_dismiss(void);   // TX {"dismiss":true}: the user ended the alert on the device
 void ble_request_refresh(void);
 
 void ble_set_battery_level(int pct);

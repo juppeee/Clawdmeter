@@ -112,6 +112,9 @@ int clawd_show_group(int base_group);
 enum AttnFrom { ATTN_FROM_HOME, ATTN_FROM_SHOW, ATTN_FROM_SCREENSAVER };
 enum AttnEnd  { ATTN_END_TAP, ATTN_END_CLEAR, ATTN_END_TIMEOUT };
 bool attention_resumes_screensaver(AttnFrom from, AttnEnd how, bool engaged_since_alert);
+// The device ended the alert on its own (a tap, the timeout): tell the app,
+// so its tray and Overview stop showing it. A clear came from the app.
+bool attention_end_tells_host(AttnEnd how);
 
 // ─── Reactions while he's out ────────────────────────────────────────────────
 // A notice or wave that arrives while he's away from his seat (a lurk trip)
