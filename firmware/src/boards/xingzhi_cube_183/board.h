@@ -2,7 +2,8 @@
 
 // Xingzhi Cube 1.83" TFT WiFi (2-mic variant) - ESP32-S3 (16 MB flash, 8 MB
 // octal PSRAM), 284x240 landscape SPI TFT, three user buttons. No touch, no
-// PMU, no IMU, no IO expander.
+// PMU, no IMU, no IO expander. Battery is a bare Li-Po with a charge-status pin
+// and a voltage divider into an ADC pin; GPIO21 latches the power-hold circuit.
 //
 // The panel is sold as ST7789 but needs a vendor init table (the same one the
 // board's ESPHome config uses: NV3023-style registers 0xFD..0xF6, colour order
@@ -28,9 +29,20 @@
 #define BTN_FWD_GPIO         40    // VOL    - secondary, Shift+Tab (mode toggle)
 #define BTN_PWR_GPIO         39    // MID    - PWR role: brightness, next scene, hold-to-pair
 
+// ---- Battery / power latch (pins and ADC calibration from PR #31) ----
+// Standalone charger IC: CHRG goes HIGH while charging. Battery voltage comes
+// through a divider into GPIO17 (ADC2_CH6; Clawdmeter uses BLE only, so ADC2
+// stays usable). Drive PWR_LATCH_GPIO HIGH in board_init() to keep the board on
+// when USB is removed.
+#define BAT_ADC_GPIO         17
+#define BAT_CHRG_GPIO        38
+#define BAT_ADC_RAW_EMPTY    1970
+#define BAT_ADC_RAW_FULL     2430
+#define PWR_LATCH_GPIO       21
+
 // ---- Capability flags ----
 #define BOARD_HAS_SECONDARY_BUTTON 1
 #define BOARD_HAS_ROTATION         0
 #define BOARD_HAS_IMU              0
-#define BOARD_HAS_BATTERY          0
+#define BOARD_HAS_BATTERY          1
 #define BOARD_HAS_IO_EXPANDER      0
