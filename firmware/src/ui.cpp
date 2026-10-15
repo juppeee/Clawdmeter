@@ -14,6 +14,7 @@
 #include "hal/board_caps.h"
 #include "layout.h"
 #include "ui_text.h"
+#include "pace.h"
 
 // Where everything goes, from the panel's shape (layout.h). Computed once in
 // ui_init() and treated as const for the rest of the program; a new panel
@@ -160,6 +161,60 @@ static lv_color_t pct_color(float pct) {
     if (pct >= 80.0f) return COL_RED;
     if (pct >= 50.0f) return COL_AMBER;
     return COL_GREEN;
+}
+
+// ---- Pace marker (device setting `pm`, pace.h). Off: the bars use
+// pct_color(). On: each Pro/Max bar gets a thin ivory line at the elapsed
+// share of its window and the fill follows pace_level(). A bar with no reset
+// time hides its line and keeps pct_color(). Spend-capped accounts are
+// untouched: their Period bar already is the elapsed share.
+static bool pace_marker = false;
+static lv_obj_t* tick_session = nullptr;
+static lv_obj_t* tick_weekly  = nullptr;
+static UsageData last_data;                 // recoloured when the setting changes
+static bool have_last_data = false;
+
+static lv_color_t bar_color(float used_pct, int reset_mins, int window_mins) {
+    if (pace_marker) {
+        switch (pace_level(used_pct, pace_elapsed_pct(reset_mins, window_mins))) {
+        case PACE_LIMIT: return COL_RED;
+        case PACE_AHEAD: return COL_AMBER;
+        case PACE_ON:    return COL_GREEN;
+        case PACE_UNKNOWN: break;
+        }
+    }
+    return pct_color(used_pct);
+}
+
+// A line inside the bar, exactly its height, drawn over the fill.
+static lv_obj_t* make_pace_tick(lv_obj_t* bar) {
+    lv_obj_t* tick = lv_obj_create(bar);
+    lv_obj_remove_style_all(tick);
+    lv_obj_set_size(tick, L.bar_h >= 20 ? 3 : 2, L.bar_h);
+    lv_obj_set_style_bg_color(tick, COL_TEXT, 0);
+    lv_obj_set_style_bg_opa(tick, LV_OPA_COVER, 0);
+    lv_obj_set_style_radius(tick, 1, 0);
+    lv_obj_clear_flag(tick, LV_OBJ_FLAG_CLICKABLE);
+    lv_obj_add_flag(tick, LV_OBJ_FLAG_HIDDEN);
+    return tick;
+}
+
+// Centre the line on elapsed_pct, kept clear of the bar's rounded ends;
+// hidden while the setting is off or the elapsed share is unknown.
+static void place_pace_tick(lv_obj_t* tick, float elapsed_pct) {
+    if (!pace_marker || elapsed_pct < 0) {
+        lv_obj_add_flag(tick, LV_OBJ_FLAG_HIDDEN);
+        return;
+    }
+    lv_obj_t* bar = lv_obj_get_parent(tick);
+    const int bar_w = lv_obj_get_width(bar);
+    const int w = lv_obj_get_width(tick);
+    const int inset = lv_obj_get_style_radius(bar, LV_PART_MAIN) / 2;
+    int x = (int)(elapsed_pct * bar_w / 100.0f + 0.5f) - w / 2;
+    if (x < inset) x = inset;
+    if (x > bar_w - inset - w) x = bar_w - inset - w;
+    lv_obj_set_x(tick, x);
+    lv_obj_clear_flag(tick, LV_OBJ_FLAG_HIDDEN);
 }
 
 // `none`: what a missing reset time means (-1 in the payload): the session
@@ -406,6 +461,9 @@ static void init_usage_screen(lv_obj_t* scr) {
     // Recolor enabled so enterprise period box can color pace and reset separately
     lv_label_set_recolor(lbl_weekly_reset, true);
 
+    tick_session = make_pace_tick(bar_session);
+    tick_weekly  = make_pace_tick(bar_weekly);
+
     build_pair_group(usage_container);
 
     // Status line — always visible on the usage view. Driven by ui_tick_anim().
@@ -489,10 +547,36 @@ void ui_init(void) {
     anim_verb_idx = fitting_verb(0);
 }
 
+// The Pro/Max bars' fill colours and pace markers.
+static void apply_bar_colors(const UsageData* data) {
+    if (data->enterprise) {
+        // Spending has no 5-hour window, and the Period bar (coloured in
+        // ui_update) already is the elapsed share: no markers.
+        lv_obj_set_style_bg_color(bar_session, pct_color(data->session_pct), LV_PART_INDICATOR);
+        place_pace_tick(tick_session, -1.0f);
+        place_pace_tick(tick_weekly, -1.0f);
+        return;
+    }
+    lv_obj_set_style_bg_color(bar_session,
+        bar_color(data->session_pct, data->session_reset_mins, PACE_SESSION_MINS), LV_PART_INDICATOR);
+    place_pace_tick(tick_session, pace_elapsed_pct(data->session_reset_mins, PACE_SESSION_MINS));
+    lv_obj_set_style_bg_color(bar_weekly,
+        bar_color(data->weekly_pct, data->weekly_reset_mins, PACE_WEEK_MINS), LV_PART_INDICATOR);
+    place_pace_tick(tick_weekly, pace_elapsed_pct(data->weekly_reset_mins, PACE_WEEK_MINS));
+}
+
+void ui_set_pace_marker(bool on) {
+    if (on == pace_marker) return;
+    pace_marker = on;
+    if (have_last_data) apply_bar_colors(&last_data);
+}
+
 void ui_update(const UsageData* data) {
     if (!data->valid) return;
     data_ok = data->ok;
     if (!data->ok) return;          // a {"ok":false} "no data" beat → fall through to idle, keep last numbers
+    last_data = *data;
+    have_last_data = true;
     last_data_ms = lv_tick_get();   // a real usage update just landed
     data_received = true;
 
@@ -553,7 +637,6 @@ void ui_update(const UsageData* data) {
     }
 
     lv_bar_set_value(bar_session, s_pct, LV_ANIM_ON);
-    lv_obj_set_style_bg_color(bar_session, pct_color(data->session_pct), LV_PART_INDICATOR);
 
     if (data->enterprise) {
         // Period box: time % + dynamic pace color + "Resets <date>" label
@@ -576,11 +659,11 @@ void ui_update(const UsageData* data) {
         lv_label_set_text(lbl_weekly_label, L.pills[1]);
         lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", w_pct);
         lv_bar_set_value(bar_weekly, w_pct, LV_ANIM_ON);
-        lv_obj_set_style_bg_color(bar_weekly, pct_color(data->weekly_pct), LV_PART_INDICATOR);
         format_reset_time(data->weekly_reset_mins, buf, sizeof(buf), "---");
         lv_obj_set_style_text_font(lbl_weekly_reset, L.reset_font, 0);
         lv_label_set_text(lbl_weekly_reset, buf);
     }
+    apply_bar_colors(data);
 }
 
 // Pick the usage-view sub-screen: pairing hint (BLE down), stale meters

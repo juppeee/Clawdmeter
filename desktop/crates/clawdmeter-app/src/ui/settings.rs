@@ -621,6 +621,19 @@ impl SettingsView {
                 },
             ),
         ));
+        let me = cx.entity().downgrade();
+        let pace = self.settings.pace_marker;
+        pane = pane.child(field(
+            t,
+            "Pace marker",
+            "Marks how far into the session and the week you are. Bars turn amber when usage is ahead of it.",
+            toggle(t, "pace-marker", pace, true, move |_, _, cx| {
+                let _ = me.update(cx, |v, cx| {
+                    v.save(|s, _| s.pace_marker = !pace);
+                    cx.notify();
+                });
+            }),
+        ));
         let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
         let (alert, reset) = (self.settings.alert_chime, self.settings.reset_chime);
         pane = pane
@@ -1403,6 +1416,8 @@ mod tests {
         assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("attention_anim = off"));
         click(cx, "attention-anim-2"); // 30 s
         assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("attention_anim = 30s"));
+        click(cx, "pace-marker");
+        assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("pace_marker = on"));
 
         view.update(cx, |v, cx| v.show(Page::Settings, false, cx));
         click(cx, "poll-2"); // While working: 5 min

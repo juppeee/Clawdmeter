@@ -74,6 +74,9 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
         d.attn_anim_s = (int16_t)(v < 0 ? 0 : v > 120 ? 120 : v);
     }
 
+    JsonVariant pm = doc["pm"];
+    d.pace_marker = pm.isNull() ? -1 : (int8_t)((pm | 0) ? 1 : 0);
+
     d.ok = doc["ok"] | false;
     d.valid = true;
     *out = d;
