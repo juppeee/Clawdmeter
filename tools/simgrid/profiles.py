@@ -57,6 +57,8 @@ PROFILES = (
     Profile("154s", 240, 240, ("SpotPear S3 LCD-1.54",), pwr=False, on_main=False),
     Profile("round", 466, 466, ("AMOLED-1.32", "AMOLED-1.43"), round=True, on_main=False),
     Profile("t4s3", 450, 600, ("LilyGO T4-S3",), pwr=False, on_main=False),
+    Profile("cyd", 320, 240, ("ESP32-2432S028R", "ESP32-2432S024C"), on_main=False),
+    Profile("fire", 320, 240, ("M5Stack FIRE",), buttons=2, touch=False, on_main=False),
     Profile("cyd", 320, 240, ("ESP32-2432S028R", "ESP32-2432S024C", "M5Stack FIRE"), on_main=False),
     Profile("cydp", 240, 320, ("CYD portrait", "Freenove S3"), on_main=False),
     Profile("lcd2", 240, 320, ("Waveshare LCD-2",), pwr=False, buttons=0, on_main=False),
