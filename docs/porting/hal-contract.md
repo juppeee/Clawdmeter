@@ -19,7 +19,6 @@ sync with the compile-time `BOARD_HAS_*` flags in `board.h`.
 | `display_hal_init`          | Construct the display bus and driver (QSPI, SPI, or RGB). Must run AFTER `board_init()` so any IO expander has released the LCD reset line. |
 | `display_hal_begin`         | `gfx->begin()`, clear screen, set default brightness. Allocate any rotation buffers needed by `display_hal_draw_bitmap`. |
 | `display_hal_set_brightness`| Pass-through to the driver. Driver-defined scale (typically 0..255). |
-| `display_hal_fill_screen`   | Used by tests / boot screen — `gfx->fillScreen(color)`. |
 | `display_hal_draw_bitmap`   | Push a w×h RGB565 strip at (x, y). If the panel can't rotate natively, apply CPU rotation here before pushing — `imu_hal_rotation_quadrant()` returns the current orientation. **Must complete inside LVGL's render budget** (a few ms at typical strip sizes). |
 | `display_hal_tick`          | Per-loop housekeeping — used by rotation-aware boards to blank the panel + ramp brightness during a rotation transition. No-op on boards without rotation. |
 | `display_hal_round_area`    | LVGL invalidate-area hook. Most QSPI AMOLED drivers expect even-aligned flush regions; apply `& ~1` / `| 1` to coordinates. |
@@ -102,6 +101,7 @@ function in your board folder only when it has something to report.
 | `unpair`                  | clears every BLE bond and re-advertises. Replies `{"unpair":true}`. |
 | `ble`                     | `BLE status:` lines: state, bond count, owner, then each connected peer's address, identity address, encryption and bond flags. |
 | `disconnect`              | drops every BLE connection (no reply); the board re-advertises. |
+| `perf`                    | prints the redraw cost (refreshes, time, pixels sent, longest gap) of the last face rise, settle, drop and streak. |
 | `info`                    | one JSON line: `{"env":"waveshare_amoled_18","ver":"v1.9.0","rev":"co5300_cst816","link":"ble"}`. `env` comes from `-DCLAWD_ENV` (set per env in `platformio.ini` from `${this.__env__}`), `ver` from `-DCLAWD_VERSION` (defaults to `dev`; CI sets `PLATFORMIO_BUILD_FLAGS='-DCLAWD_VERSION=\"vX.Y.Z\"'`), `rev` from `board_hal_rev()`. |
 | `clawd <beat>`            | starts a Clawd beat now, for `screenshot` QA without waiting for the situation: `show`, `screensaver`, `attention`, `joy`, `lurk` (a lurk trip, PSRAM boards), `peek [x]` (curious face), `home` (return home). Replies `{"clawd":"show","ok":true}`. See `docs/clawd-director.md`. |
 
