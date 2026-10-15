@@ -72,40 +72,6 @@ pub fn button(
     }
 }
 
-/// A full-width row in a menu-style list: label on the left, an optional
-/// quiet hint on the right.
-pub fn menu_row(
-    t: &Theme,
-    id: impl Into<ElementId>,
-    label: impl Into<SharedString>,
-    hint: Option<SharedString>,
-    enabled: bool,
-    on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-) -> impl IntoElement {
-    let id: ElementId = id.into();
-    let selector = id.to_string();
-    let el = div()
-        .id(id)
-        .debug_selector(|| selector)
-        .flex()
-        .items_center()
-        .justify_between()
-        .gap(px(12.))
-        .h(px(34.))
-        .px(px(10.))
-        .rounded(px(R_ITEM))
-        .text_size(px(14.))
-        .text_color(if enabled { t.text } else { t.mute })
-        .child(label.into())
-        .when_some(hint, |d, h| d.child(div().text_size(px(12.5)).text_color(t.mute).child(h)));
-    if enabled {
-        let handler: Handler = Box::new(on_click);
-        el.cursor_pointer().hover(|s| s.bg(t.hover)).on_click(move |e, w, cx| handler(e, w, cx))
-    } else {
-        el
-    }
-}
-
 /// A bundled monochrome icon (`assets/icons/<name>.svg`, Lucide) at `size`
 /// px in `color`. GPUI paints an `svg()` only in its own text colour (it
 /// doesn't inherit one), so hover changes go through `group_hover`.

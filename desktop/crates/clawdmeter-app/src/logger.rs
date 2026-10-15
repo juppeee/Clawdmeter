@@ -1,4 +1,4 @@
-//! A tiny stderr logger (`[HH:MM:SS] message`, like the old daemons), so the
+//! A tiny stderr logger (`[HH:MM:SS] message`), so the
 //! binary doesn't carry env_logger's regex engine. Level from `CLAWDMETER_LOG`
 //! (`error|warn|info|debug|trace`, default `info`).
 

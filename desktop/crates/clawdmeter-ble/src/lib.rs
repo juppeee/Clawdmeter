@@ -1,6 +1,6 @@
 //! BLE link to a Clawdmeter (btleplug).
 //!
-//! Finding the device follows the old daemons: only a device the OS already
+//! Finding the device: only a device the OS already
 //! knows is used (paired on Linux, OS-connected on macOS/Windows, where the
 //! bonded HID keyboard link keeps it connected), matched by the custom data
 //! service or, failing that, by the exact name `Clawdmeter`. There is no
@@ -11,10 +11,10 @@
 //! (`~/.config/clawdmeter`); a failed connect drops the cache so the next
 //! attempt re-derives it.
 //!
-//! Per-OS recovery carried over from the legacy daemons:
+//! Per-OS recovery:
 //!
-//! * Linux: the device is marked trusted in BlueZ on connect (the bash
-//!   daemon's `bluetoothctl trust`), so BlueZ reconnects it by itself.
+//! * Linux: the device is marked trusted in BlueZ on connect (like
+//!   `bluetoothctl trust`), so BlueZ reconnects it by itself.
 //! * macOS: a connect that fails to encrypt (CoreBluetooth error 15, a bond
 //!   left over from before a reflash or the on-device bond clear) unpairs
 //!   the stale bond with `blueutil` when it is installed, so the next attempt
@@ -22,8 +22,7 @@
 //! * Windows: a bonded device the OS isn't currently connected to is reached
 //!   by address: `CLAWDMETER_BLE_ADDRESS`, the cached address, or the
 //!   address in the Bluetooth PnP table.
-//! * `CLAWDMETER_BLE_ADDRESS` (every OS) names the device to try first,
-//!   like the bash daemon's `DEVICE_MAC`.
+//! * `CLAWDMETER_BLE_ADDRESS` (every OS) names the device to try first.
 //! * Everywhere: writes that keep failing on a link that still reports
 //!   itself connected (a half-open "zombie" link) make
 //!   [`DeviceLink::is_connected`] report false, so the caller reconnects.
@@ -110,7 +109,7 @@ impl From<btleplug::Error> for LinkError {
     }
 }
 
-/// The one-line address cache shared with the old daemons.
+/// The one-line address cache.
 #[derive(Debug, Clone)]
 pub struct AddressCache {
     path: PathBuf,
@@ -129,7 +128,7 @@ impl AddressCache {
         if key.is_empty() {
             return None;
         }
-        // The bash daemon only ever wrote MACs; reject garbage the same way.
+        // Only MACs (or btleplug ids) are ever written; reject garbage.
         if key.contains(':') && !is_mac(&key) {
             let _ = fs::remove_file(&self.path);
             return None;
@@ -261,7 +260,7 @@ pub async fn known_devices(adapter: &Adapter) -> Vec<Candidate> {
         .unwrap_or_default();
     if cfg!(target_os = "linux") {
         // BlueZ also lists paired-but-disconnected devices; connecting to
-        // them is how the bash daemon reconnected.
+        // them reconnects without a scan.
         for p in adapter.peripherals().await.unwrap_or_default() {
             if !list.iter().any(|q| q.id() == p.id()) {
                 list.push(p);
@@ -513,7 +512,7 @@ impl DeviceLink {
         }
         #[cfg(target_os = "linux")]
         {
-            // `bluetoothctl trust`, as the bash daemon did: BlueZ then
+            // `bluetoothctl trust`: BlueZ then
             // reconnects the device on its own after it drops.
             let id = p.id().to_string();
             if let Ok(Err(e)) = tokio::task::spawn_blocking(move || bluez::trust(&id)).await {
@@ -692,10 +691,9 @@ fn spawn_event_forwarder(
     });
 }
 
-/// Forget a device in BlueZ (unpair). Not called by the daemon loop: the old
-/// bash daemon stopped doing this on connect failures because it strands a
-/// device that is only ever found among paired devices. Exposed for an
-/// explicit "Forget device" action.
+/// Forget a device in BlueZ (unpair). Not called by the daemon loop: doing it
+/// on connect failures would strand a device that is only ever found among
+/// paired devices. Exposed for an explicit "Forget device" action.
 #[cfg(target_os = "linux")]
 pub async fn forget_device(link_id: String) -> Result<(), String> {
     tokio::task::spawn_blocking(move || bluez::remove_device(&link_id)).await.map_err(|e| e.to_string())?
@@ -813,7 +811,6 @@ mod tests {
         let _ = fs::remove_dir_all(&dir);
     }
 
-    // Ported from the legacy daemon test test_windows_bonded.py.
     #[test]
     fn pnp_instance_ids() {
         assert_eq!(

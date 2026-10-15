@@ -1,4 +1,4 @@
-//! The slow-clock mood (spec §08 "New rate math"), for the tray and for
+//! The slow-clock mood, for the tray and for
 //! anyone who wants to mirror what the firmware computes.
 //!
 //! * 15-minute window over real polls only (replays are ignored).

@@ -69,10 +69,10 @@ keeping comments and unknown keys.
 | `config_dirs` | L, M | Yes | |
 | `poll_interval` | L only (min 10, re-read every tick); M, W fixed at 60 s | Yes (min 10; the scheduler never polls an account more than every 120 s) | When set, it replaces both the 3-minute working cadence and the 5-minute no-hooks cadence. Unset, polling follows the hooks (see below). |
 | `heartbeat_interval` | L only (default 60, min 10; off when ≥ `poll_interval`) | Yes (default 60, min 10) | Always on: with 15-minute idle polls the heartbeat is what keeps the device's 90 s freshness window open. |
-| `chime` | L, M, W | Yes (`c:1`) | |
-| `beep` | L, M | Yes (`b:1` with an alert) | |
+| `reset_chime` | L, M, W (as `chime`) | Yes (`c:1`; `chime` is read when `reset_chime` is absent) | |
+| `alert_chime` | L, M (as `beep`) | Yes (`b:1` with an alert; `beep` is read when `alert_chime` is absent) | |
 | `clock` (`off`/`auto`/`12`/`24`) | L, M, W | Yes (`t`, `tf`) | `auto`: macOS `AppleICUForce24HourTime`/`12HourTime`, else `locale -k LC_TIME`; Windows `iTime` (`clawdmeter-core/src/platform.rs`). |
-| `release_repo`, `claude_path`, `update_check` | — | New | Flasher source, CLI location override, daily firmware check. |
+| `desktop_chime`, `alert_on`, `release_repo`, `claude_path`, `update_check`, `onboarding_done` | — | New | The ding on this computer, which alert kinds get through, flasher source, CLI location override, daily firmware check, setup-wizard completion. |
 
 ## Environment
 
@@ -100,7 +100,7 @@ keeping comments and unknown keys.
 |---|---|---|---|
 | Hook command | `daemon/attention-hook.sh alert\|clear\|event` (needs `jq`) | `clawdmeter hook alert\|clear\|event [event]` (`clawdmeter-app/src/hooks/mod.rs`) | Same files byte for byte; no bash or jq, so it runs on Windows. One deliberate difference: an empty stdin or a session id containing `/`, `\` or `..` writes nothing (the script wrote an empty `attention`, or touched a file outside the state dir). |
 | Hook installation | Hand-edited `settings.json` (README) | Hooks: per-account preview, `.bak`, updates `attention-hook.sh` entries (`clawdmeter-app/src/hooks/install.rs`) | |
-| Alert file (`attention`, `{"m","s"}`) | L, M; W: — | `clawdmeter-core/src/attention.rs` | Older than 60 s when first seen: dropped. Bare `touch`: alert without a message. |
+| Alert file (`attention`, `{"m","s","k"}`; `k` is the alert kind) | L, M; W: — | `clawdmeter-core/src/attention.rs` | Older than 60 s when first seen: dropped. Bare `touch`: alert without a message. |
 | Repeat alert from the waiting session | L, M: ignored | Ignored | AskUserQuestion notifies twice. |
 | `clear-<sid>` | Ends the alert only for the alerting session and only when newer (ns mtimes) | Same | |
 | Message to ASCII, 120 chars | L, M | Same (`to_ascii`) | The device gets a fixed line per alert kind instead (`AlertKind::device_text`); only the test alert sends its own text. |
@@ -124,7 +124,7 @@ keeping comments and unknown keys.
 | Windows: bonded device not connected right now | PnP `BTHLE\DEV_<mac>` lookup, connect by address | `CLAWDMETER_BLE_ADDRESS`, cache, then the same PnP lookup → `add_peripheral` (`bonded_by_address`) | |
 | Windows: uncached GATT discovery | `use_cached_services=False` | btleplug's WinRT discovery is uncached | |
 | Half-open "zombie" link | W: drop after 1 failed write | Drop after 2 failed writes in a row (`WriteHealth`) | |
-| Reconnect backoff | L: 1→60 s · W: 1→60 s searching, 1→8 s after a drop | 1→60 s, reset on every connect; a drop retries after 2 s | |
+| Reconnect backoff | L: 1→60 s · W: 1→60 s searching, 1→8 s after a drop | 1→15 s, reset on every connect; a drop retries after 2 s; the OS reporting the device (connected or advertising) makes the next attempt due at once (`clawdmeter-ble/src/reconnect.rs`) | |
 | Clean GATT disconnect on quit | W | Yes (`daemon.rs` on shutdown) | |
 | Write type | M, W: without response, at most the MTU-derived size | With response, at most 500 bytes | |
 
@@ -135,7 +135,7 @@ keeping comments and unknown keys.
 | Linux | `install.sh`: dependency check, systemd user unit `claude-usage-daemon.service` | Settings: XDG autostart entry for the tray, or `clawdmeter.service` for `--daemon` (`clawdmeter-core/src/autostart.rs`) | |
 | macOS | `install-mac.sh`: venv, LaunchAgent `com.user.claude-usage-daemon`, Bluetooth prompt priming, blueutil | LaunchAgent `com.clawdmeter.app` (same KeepAlive / ThrottleInterval). The release ships `Clawdmeter.app` with `NSBluetoothAlwaysUsageDescription` so the prompt appears and the agent isn't killed | |
 | Windows | `install-windows.ps1`: venv, `HKCU\…\Run\Clawdmeter` → `pythonw tray_windows.py`; refused `\\wsl$` paths | Same Run value name pointing at `clawdmeter.exe`; `is_enabled` only counts it when it's ours | No Python, so no WSL path issue. |
-| Old daemon still installed | — | Logged at start-up; Settings › "Turn it off" stops it and removes its unit / plist / Run value (`autostart::disable_legacy`) | A running Python tray keeps running until quit or logout. |
+| Old daemon still installed | — | Logged at start-up; Settings › "Disable legacy service" stops it and removes its unit / plist / Run value (`autostart::disable_legacy`) | A running Python tray keeps running until quit or logout. |
 | Single instance | W: named mutex | Lock file on every OS (`clawdmeter-app/src/ipc.rs`) | |
 | Installer config prompts (accounts, clock, chime, beep) | `install.sh`, `install-mac.sh` | Accounts / Device | The old installers auto-detected `~/.claude*` dirs; the app asks the user to add folders. |
 
@@ -143,7 +143,7 @@ keeping comments and unknown keys.
 
 | Behaviour | Old daemons | Rust | Notes |
 |---|---|---|---|
-| Tray | W only: green/amber/red bubble, "Connected · last update HH:MM", Start at login, Quit | Every OS: status, account and both meters, Refresh now, Mute attention beep, Update firmware, Flash a new device, Settings, Quit (`clawdmeter-app/src/tray/`) | |
+| Tray | W only: green/amber/red bubble, "Connected · last update HH:MM", Start at login, Quit | Every OS: status, account and both meters, Refresh usage, Mute chimes, Open Clawdmeter, Flash firmware (Update firmware when a newer release exists), Settings, Quit (`clawdmeter-app/src/tray/`) | |
 | Error notification | W: toast when entering the error state | None; the tray state and status window show it | |
 | Daemon thread crash | W: supervised, restarted with backoff | Release builds abort on panic; the LaunchAgent and `clawdmeter.service` restart it, the XDG entry and Run value don't | |
 | Log file | L: journal · M: `~/Library/Logs/claude-usage-daemon.{out,err}.log` · W: `%LOCALAPPDATA%\Clawdmeter\daemon.log`, 512 KB × 3 | Tray: `~/.config/clawdmeter/daemon.log` (previous run kept as `.log.1`) · `--daemon`: stderr (journal) · LaunchAgent: `~/Library/Logs/clawdmeter.log` | No size cap within one run. |

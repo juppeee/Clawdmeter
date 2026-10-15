@@ -221,7 +221,7 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             }
         }
 
-        // ---- config (re-read like the old daemons) ----
+        // ---- config (re-read every SETTINGS_EVERY) ----
         if now - last_settings >= SETTINGS_EVERY {
             last_settings = now;
             if let Ok(mut s) = Settings::load(&paths) {

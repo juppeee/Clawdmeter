@@ -97,13 +97,6 @@ void field_clear(Field* f) {
     field_set_shape(f, &s);
 }
 
-bool field_empty(const Field* f) {
-    if (!area_empty(&f->shape.body)) return false;
-    for (int i = 0; i < FIELD_EXTRAS; i++)
-        if (!area_empty(&f->shape.extra[i])) return false;
-    return true;
-}
-
 void field_quietly(lv_obj_t* any, void (*fn)(void* ctx), void* ctx) {
     lv_obj_update_layout(any);               // others' pending changes keep their redraw
     lv_display_t* d = lv_obj_get_display(any);

@@ -46,7 +46,6 @@ void field_set_shape(Field* f, const FieldShape* s);
 void field_invalidate_change(lv_obj_t* obj, const lv_area_t* o, const lv_area_t* n);
 void field_shape_init(FieldShape* s);      // empty body, no extras
 void field_clear(Field* f);                 // draw nothing (invalidates what it drew)
-bool field_empty(const Field* f);          // nothing drawn
 
 void field_show(Field* f);                  // un-hide, no redraw (rect must be empty)
 void field_hide(Field* f);                  // hide, no redraw (clears the rect first)
