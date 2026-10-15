@@ -6,7 +6,7 @@
 
 // No IO expander on this board, so PWR comes from the AXP2101 PKEY IRQs (same
 // scheme as the AMOLED-2.16):
-//   SHORT    — quick tap (cycle screens / splash animations)
+//   SHORT    — quick tap (cycle brightness)
 //   LONG     — ~1.5s mark, starts the hold-to-pair countdown
 //   POSITIVE — release edge, completes/cancels the gesture
 
