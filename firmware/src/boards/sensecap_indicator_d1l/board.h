@@ -51,7 +51,7 @@
 
 // Physical button
 // GPIO 38 user button is the PWR-role input (power.cpp): short press =
-// brightness / next scene, hold and release = pair. There is no primary
+// brightness, hold and release = pair. There is no primary
 // (Space / voice mode) button, so input_hal_is_held() always reports false.
 #define BTN_BACK_GPIO  38
 
