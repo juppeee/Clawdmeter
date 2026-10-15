@@ -107,10 +107,9 @@ function in your board folder only when it has something to report.
 
 ## Layout and visual checks
 
-`ui.cpp::compute_layout()` uses the board dimensions. It includes a small
-layout for 240-pixel panels, a compact portrait layout, and a large layout
-for heights of at least 460 pixels. Inspect the function when adding a
-size; sharing a breakpoint does not guarantee that every label fits.
+The meters layout comes from `BoardCaps.width`, `height` and `round_panel`
+(`layout.cpp`, described in [Add a board](adding-a-board.md#the-meters-layout)).
+Add the panel's size to `test_layout` to check that every label fits.
 
 Clawd's full-size performances use a 60×60-cell coordinate system, with cell size derived from
 `min(width, height) / 60`. Corner Clawd has a separate seat and scale.
