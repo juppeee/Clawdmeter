@@ -9,6 +9,8 @@ static const BoardCaps caps = {
     .has_rotation = false,
     .has_battery  = false,
     .has_imu      = false,
+    .minimal_ui   = false,   // full animated UI; true for e-ink / slow panels
+    .has_pwr_button = false, // no PWR or user button: pair from the computer / touch hold
 };
 
 const BoardCaps& board_caps(void) { return caps; }
