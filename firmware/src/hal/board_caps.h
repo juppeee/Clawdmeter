@@ -13,6 +13,9 @@ struct BoardCaps {
 
     int16_t width;           // active display width in pixels
     int16_t height;          // active display height in pixels
+    bool    round_panel;     // the visible panel is a circle inscribed in
+                             // width x height (round AMOLEDs); the meters
+                             // keep inside it (layout.h)
 
     uint8_t button_count;    // 1 = primary (BOOT) only; 2 = primary + secondary
     bool    has_rotation;    // IMU-driven CPU rotation in the flush callback

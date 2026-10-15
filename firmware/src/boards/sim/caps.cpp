@@ -5,12 +5,14 @@
 
 // SIM_NO_PWR=1 plays a board without a PWR button (LCD-4): the p key does
 // nothing and the pairing hint offers the touch hold instead. SIM_MINIMAL=1
-// plays a minimal-mode board.
+// plays a minimal-mode board. SIM_CIRCLE=1 plays a round panel (the
+// corners outside the circle are drawn as a grey bezel).
 static BoardCaps make_caps(void) {
     BoardCaps caps = {
     .name = BOARD_NAME,
     .width = LCD_WIDTH,
     .height = LCD_HEIGHT,
+    .round_panel = false,    // SIM_CIRCLE=1 below
     .button_count = 2,      // B and N keys stand in for BOOT + GPIO18
     .has_rotation = false,
     .has_battery = true,    // fake battery, adjustable with -/=
@@ -22,6 +24,8 @@ static BoardCaps make_caps(void) {
     if (no_pwr && *no_pwr && *no_pwr != '0') caps.has_pwr_button = false;
     const char* minimal = getenv("SIM_MINIMAL");
     if (minimal && *minimal && *minimal != '0') caps.minimal_ui = true;
+    const char* circle = getenv("SIM_CIRCLE");
+    if (circle && *circle && *circle != '0') caps.round_panel = true;
     return caps;
 }
 

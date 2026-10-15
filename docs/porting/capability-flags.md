@@ -34,6 +34,7 @@ is compiled differently for them; set them directly in `caps.cpp`.
 
 | Field          | Conventional value when absent | Purpose |
 |----------------|---------|---------------|
+| `round_panel` | `false` | The glass is a circle inscribed in `width` × `height` (round AMOLEDs). The meters layout keeps everything inside the circle (`layout.cpp`). `SIM_CIRCLE=1` sets the simulator capability and draws the corners as a bezel. |
 | `minimal_ui` | `false` | Board-only minimal display: meters and a still corner Clawd, without performances, face, or lurk trips. Set `true` for e-ink or slow panels. `minimal_mode()` returns `board_caps().minimal_ui`; there is no NVS override, desktop setting, or serial toggle. Attention uses a held pointing frame and a non-scrolling message; a tap or the 2-minute device timeout dismisses it and notifies the app. `SIM_MINIMAL=1` sets the simulator capability. |
 | `has_pwr_button` | `false` | A PWR-role button reaches the firmware (AXP PKEY, IO-expander pin or GPIO): brightness, hold ~3 s and release to pair. `false` when there is none (LCD-4, whose KEY/PWR is a hardware reset): the pairing hint then says to pair from the computer, and a 5 s touch hold on it clears the bonds (`pair_hold.h`). The `unpair` serial command clears them on every board. |
 

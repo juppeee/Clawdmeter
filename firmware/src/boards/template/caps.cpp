@@ -5,6 +5,7 @@ static const BoardCaps caps = {
     .name = BOARD_NAME,
     .width = LCD_WIDTH,
     .height = LCD_HEIGHT,
+    .round_panel = false,    // true for a round panel; the layout keeps inside the circle
     .button_count = (uint8_t)(1 + BOARD_HAS_SECONDARY_BUTTON),
     .has_rotation = (bool)BOARD_HAS_ROTATION,
     .has_battery  = (bool)BOARD_HAS_BATTERY,
