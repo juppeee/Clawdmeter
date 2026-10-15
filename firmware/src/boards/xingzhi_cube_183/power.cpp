@@ -4,7 +4,7 @@
 
 // No PMU. Battery percentage comes from the ADC divider on BAT_ADC_GPIO and
 // charging from the CHRG pin (HIGH = charging). The MID button (GPIO39, active LOW) is
-// the PWR-role input: brightness, next scene on the stage, hold ~1.5 s and
+// the PWR-role input: brightness, hold ~1.5 s and
 // release to pair. The edges are synthesized in software:
 //   short    - fired on release if the hold was shorter than PWR_LONG_MS
 //   long     - fired once when a hold crosses PWR_LONG_MS

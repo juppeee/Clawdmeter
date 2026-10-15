@@ -27,7 +27,7 @@
 // ---- Buttons (active LOW, internal pull-ups) ----
 #define BTN_BACK_GPIO        0     // BOOT   - primary, Space (PTT)
 #define BTN_FWD_GPIO         40    // VOL    - secondary, Shift+Tab (mode toggle)
-#define BTN_PWR_GPIO         39    // MID    - PWR role: brightness, next scene, hold-to-pair
+#define BTN_PWR_GPIO         39    // MID    - PWR role: brightness, hold-to-pair
 
 // ---- Battery / power latch (pins and ADC calibration from PR #31) ----
 // Standalone charger IC: CHRG goes HIGH while charging. Battery voltage comes
