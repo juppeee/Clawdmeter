@@ -376,8 +376,8 @@ ends the show; the one-Clawd fuzz at every level). In the sim:
 
 ## Attention animation
 
-The app's **Attention animation** (config `attention_anim` = `2m`, `30s`,
-`10s` or `off`; payload `aa` in seconds, 120 / 30 / 10 / 0) sets how long
+The app's **Attention animation** (config `attention_anim` = `off`, `10s`,
+`30s` or `2m`; payload `aa` in seconds, 0 / 10 / 30 / 120) sets how long
 Clawd points and waves for an alert. It's stored in NVS (`clawd_prefs.cpp`,
 key `attn_anim`) and liveliness doesn't touch it. Only his animation stops:
 the message, the dismissing tap, `x`, the 2-minute alert timeout and the

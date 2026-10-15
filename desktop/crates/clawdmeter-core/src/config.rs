@@ -197,7 +197,7 @@ pub enum AttentionAnim {
 impl AttentionAnim {
     /// Every option, in the order the Device page shows them.
     pub const ALL: [AttentionAnim; 4] =
-        [AttentionAnim::Min2, AttentionAnim::S30, AttentionAnim::S10, AttentionAnim::Off];
+        [AttentionAnim::Off, AttentionAnim::S10, AttentionAnim::S30, AttentionAnim::Min2];
 
     /// Parse a config value; anything unknown is the default.
     pub fn parse(v: &str) -> Self {
@@ -635,7 +635,7 @@ mod tests {
         assert_eq!(settings("attention_anim = off\n").attention_anim, AttentionAnim::Off);
         assert_eq!(settings("attention_anim = forever\n").attention_anim, AttentionAnim::Min2);
         let secs: Vec<u16> = AttentionAnim::ALL.iter().map(|a| a.seconds()).collect();
-        assert_eq!(secs, [120, 30, 10, 0]);
+        assert_eq!(secs, [0, 10, 30, 120]);
         for a in AttentionAnim::ALL {
             assert_eq!(AttentionAnim::parse(a.as_str()), a, "round trip");
         }

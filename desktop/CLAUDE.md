@@ -62,7 +62,7 @@ is faked behind `FlashHardware`.
   keys are read when these are absent), `desktop_chime` (the same ding on
   this computer via rodio, ALSA on Linux), `clock`, `liveliness` (1–5,
   default 3: the Device page's Animation silliness slider, sent as `lv`),
-  `attention_anim` (`2m`/`30s`/`10s`/`off`, default `2m`, sent as `aa`
+  `attention_anim` (`off`/`10s`/`30s`/`2m`, default `2m`, sent as `aa`
   seconds), `claude_path`,
   `release_repo`, `update_check`, `onboarding_done`, `alert_on` (alert kinds
   the daemon lets through: the hook records `k` from `hook_event_name` /

@@ -39,6 +39,7 @@ frames.
 | `--refresh wait\|checking` | Overview refresh button waiting out the gap / mid-check |
 | `--session idle` | Session not started |
 | `--hooks-preview`, `--shop`, `--advanced` | Hooks file preview, board shop links, advanced settings |
+| `--height PX` | A taller window (default 640) so a long page fits one capture |
 
 `demo.rs`'s header comment is the source of truth if these drift.
 
@@ -46,7 +47,8 @@ frames.
 
 `desktop/docs/screenshots/` is made with this script. File names map to the
 flags (`setup-2-board-shop.png` = `--setup board --shop`,
-`overview-refresh-wait.png` = `--refresh wait`, …).
+`overview-refresh-wait.png` = `--refresh wait`, …). `device.png` is taken
+with `--height 1160` so the whole settings list shows.
 `overview-gnome-header.png` is the client-drawn Adwaita header bar: run with
 `CLAWDMETER_DECORATIONS=client` in the environment.
 

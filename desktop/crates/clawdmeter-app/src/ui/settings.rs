@@ -1399,9 +1399,9 @@ mod tests {
         assert!(cx.debug_bounds("liveliness-info-1").is_some(), "the line follows the slider");
         click(cx, "liveliness-3"); // Back to the default: the key stays, the value follows.
         assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("liveliness = 3"));
-        click(cx, "attention-anim-3"); // Off
+        click(cx, "attention-anim-0"); // Off
         assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("attention_anim = off"));
-        click(cx, "attention-anim-1"); // 30 s
+        click(cx, "attention-anim-2"); // 30 s
         assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("attention_anim = 30s"));
 
         view.update(cx, |v, cx| v.show(Page::Settings, false, cx));
