@@ -17,8 +17,8 @@ writes them to the device over BLE.
 - `tools/`: asset converters, `ci/` (release and manifest scripts, with
   unittests), `packaging/`. `research/clawd-official/`: the official Clawd
   animation archive.
-- `SIM-USAGE.md`: simulator manual; `docs/sim-grid.md`: every panel at once
-  (`tools/simgrid/`). `screenshot.sh`: device screenshot over serial.
+- `docs/simulator.md`: simulator manual; `docs/sim-grid.md`: every panel at
+  once (`tools/simgrid/`).
 
 Nested `CLAUDE.md` files load when you read or edit a file in their folder.
 
@@ -132,7 +132,7 @@ change for the first time.
   session history, abandoned approaches and checks CI already gates. Keep it
   proportional to the change.
 - Add screenshots or photos when UI or device output changes (device output:
-  `./screenshot.sh` captures or photos). Label simulator captures as such.
+  device screenshots from the `flashing-and-probing-boards` skill, or photos). Label simulator captures as such.
   Add a Mermaid diagram when it clarifies flow, state or architecture.
 - **Hardware testing**: the exact boards and revisions tested on real
   hardware and what was verified, or "not tested on hardware".

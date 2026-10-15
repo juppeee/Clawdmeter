@@ -69,7 +69,7 @@ Write captures outside the repo (a scratch dir), convert BMP → PNG if needed
 | `SIM_AUTOSHOT_MS`, `SIM_AUTOSHOT_PATH` | One headless shot (what CI captures) |
 
 Full key map, scenario format and the rest of the variables:
-[SIM-USAGE.md](../../../SIM-USAGE.md).
+[docs/simulator.md](../../../docs/simulator.md).
 
 **Other panel sizes** are compile-time defines, so each size needs its own
 build dir (never the scratchpad root):
@@ -117,7 +117,8 @@ each UI iteration:
 
 1. Force the state: `clawd <show|screensaver|attention|joy|lurk|home>` or
    `clawd peek <x>` over serial.
-2. Capture it: `./screenshot.sh /tmp/out.png [port]` (PNG sized to the panel).
+2. Capture it: `python3 .claude/skills/flashing-and-probing-boards/scripts/screenshot.py out.png`
+   (PNG sized to the panel; `--port` when several boards are attached).
 3. Read the PNG.
 
 There's no need to edit the boot screen in `main.cpp` to reach a state.
