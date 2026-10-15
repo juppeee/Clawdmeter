@@ -75,8 +75,9 @@ Port progress:
 - `tools/ci/make_manifest.py` `DISPLAY_NAMES`: without it the release ships the
   board under its env name and prints a warning.
 - Buy links: Waveshare links carry `?aff_id=149786` (`&aff_id=149786` when the
-  URL already has a query); other vendors use a plain product link. Same link
-  in the app and the README.
+  URL already has a query); other vendors use a plain product link to the
+  maker's own store, or a marketplace listing (Amazon, AliExpress) when the
+  maker has none. Same link in the app and the README.
 
 ## Verifying
 
