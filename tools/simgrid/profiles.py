@@ -66,7 +66,7 @@ PROFILES = (
     Profile("lcd183", 240, 284, ("Waveshare LCD-1.83",), on_main=False),
     Profile("tdisplay", 170, 320, ("LilyGO T-Display S3",), on_main=False),
     Profile("stick", 135, 240, ("M5StickS3",), on_main=False),
-    Profile("epaper", 200, 200, ("ePaper 1.54",), minimal=True, on_main=False),
+    Profile("epaper", 200, 200, ("ePaper 1.54",), minimal=True, touch=False, on_main=False),
 )
 
 

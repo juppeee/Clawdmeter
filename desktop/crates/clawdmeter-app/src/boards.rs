@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 14] = [
+pub const BOARDS: [BoardInfo; 15] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -180,6 +180,17 @@ pub const BOARDS: [BoardInfo; 14] = [
         height: 240,
         buy_url: "https://www.aliexpress.com/item/1005010442374066.html",
         summary: "284×240 · SPI TFT",
+        chip: "ESP32-S3",
+        pwr_button: true,
+    },
+    BoardInfo {
+        env: "waveshare_epaper_154",
+        name: "ePaper 1.54",
+        product: "Waveshare ESP32-S3-ePaper-1.54",
+        width: 200,
+        height: 200,
+        buy_url: "https://www.waveshare.com/esp32-s3-epaper-1.54.htm?&aff_id=149786",
+        summary: "200×200 · e-paper",
         chip: "ESP32-S3",
         pwr_button: true,
     },
