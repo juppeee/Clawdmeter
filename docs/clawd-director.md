@@ -290,6 +290,19 @@ timing only, never new frames: the scene releases to the idle pose and holds
 a beat (anticipation), then the walk-off ramps from 1.5× to 3× over its first
 400 ms (ease-in) instead of starting at full speed.
 
+## Round panels
+
+With `BoardCaps.round_panel` the glass is the circle inscribed in the
+panel, so Clawd walks on and off along it. `panel_row_span()` in
+`splash_geometry.h` gives the visible span of a row (the whole width on a
+rectangular panel, the circle's chord on a round one) and every entrance
+uses it at the row he walks on: the corner Clawd leaving and coming back
+(`mascot.cpp`: `off_left_x` / `off_right_x`), the full-size attention walk-on
+and walk-off, the lurk peek, and the performer's walks (`performer.cpp`: the
+grid cells on the glass at his floor row). None of them spends time walking
+where there is no glass, and nobody starts at the bounding box's edge.
+Rectangular panels are unchanged. Unit-tested in `test/test_splash_geometry`.
+
 ## Alert dismissal and expiry
 
 A tap or the device's 2-minute attention timeout ends the local alert and
@@ -297,12 +310,14 @@ sends `{"dismiss":true}` on BLE TX (`…-0003`). The app clears the alert it
 sent, including its tray state, without echoing a clear back. A host `x`
 clear ends the device alert without a dismissal notification.
 
-On a board without a touchscreen (`BoardCaps.has_touch` false) the BOOT
-press is the dismiss gesture: `director_button(true)` ends an active alert
+On a board without a touchscreen (`BoardCaps.has_touch` false) the main
+button is the dismiss gesture: BOOT, or the PWR key when it is the board's
+only button (`button_count` 0). `director_button(true)` ends an active alert
 the same way a tap does and reports the press as consumed, so `main.cpp`
-doesn't send push to talk for it. With no alert up, BOOT keeps its normal
-role. A board with neither touch nor a button lets the alert time out.
-`SIM_NO_TOUCH=1` plays such a board in the simulator.
+doesn't send push to talk (or cycle brightness) for it. With no alert up
+the button keeps its normal role. A board with neither touch nor a button
+lets the alert time out. `SIM_NO_TOUCH=1` plays such a board in the
+simulator.
 
 The app also expires uncleared alerts after 2 minutes; Hooks test alerts
 expire after 30 seconds. If the alert was sent, app expiry queues a clear

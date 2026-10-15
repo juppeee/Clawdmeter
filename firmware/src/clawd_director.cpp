@@ -269,9 +269,9 @@ void director_tap(int x) {
 
 void director_set_pairing_touch(bool on) { pairing_touch = on; }
 
-bool director_button(bool primary) {
+bool director_button(bool main_button) {
     engage();
-    if (primary && attention_on && !board_caps().has_touch) {
+    if (main_button && attention_on && !board_caps().has_touch) {
         end_attention(ATTN_END_TAP);          // nothing to tap: BOOT dismisses it
         return true;
     }

@@ -424,9 +424,10 @@ void loop() {
 
         if (power_hal_pwr_pressed()) {
             if (!idle_consume_wake_press()) {
-                // Cycles brightness, and counts as you being here.
-                brightness_cycle();
-                director_button(false);
+                // Counts as you being here. On a touchless board whose only
+                // button this is, it dismisses an active alert first; else it
+                // cycles brightness.
+                if (!director_button(board_caps().button_count == 0)) brightness_cycle();
             }
         }
 

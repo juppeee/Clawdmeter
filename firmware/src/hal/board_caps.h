@@ -17,7 +17,9 @@ struct BoardCaps {
                              // width x height (round AMOLEDs); the meters
                              // keep inside it (layout.h)
 
-    uint8_t button_count;    // 1 = primary (BOOT) only; 2 = primary + secondary
+    uint8_t button_count;    // 0 = no primary/secondary: the PWR-role key is the
+                             // only button (or there is none); 1 = primary
+                             // (BOOT) only; 2 = primary + secondary
     bool    has_rotation;    // IMU-driven CPU rotation in the flush callback
     bool    has_battery;     // AXP2101 battery measurement is meaningful
     bool    has_imu;         // QMI8658 (or compatible) is populated
@@ -29,7 +31,8 @@ struct BoardCaps {
                              // hold-to-pair. Without one (LCD-4: KEY/PWR is a
                              // hardware reset) a 5 s touch hold on the pairing
                              // hint clears the bonds instead (pair_hold.h).
-    bool    has_touch;       // a touchscreen. Without one BOOT dismisses an
+    bool    has_touch;       // a touchscreen. Without one BOOT (the only
+                             // button when button_count is 0) dismisses an
                              // active alert before it does anything else
                              // (director_button).
 };

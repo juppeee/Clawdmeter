@@ -45,7 +45,9 @@ class ProfilesTest(unittest.TestCase):
 
     def test_select(self):
         self.assertEqual([p.id for p in select("154,round")], ["154", "round"])
-        self.assertEqual([p.id for p in select("240x240")], ["154"])
+        by_size = select("240x240")           # every cell of that size
+        self.assertIn("154", [p.id for p in by_size])
+        self.assertTrue(all(p.size == "240x240" for p in by_size))
         self.assertTrue(all(p.on_main for p in select("main")))
         with self.assertRaises(ValueError):
             select("nope")
