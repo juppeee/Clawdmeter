@@ -1,16 +1,16 @@
 #pragma once
 #include <stdint.h>
 
-// Pure geometry for the 60x60 splash stage. Deliberately free of LVGL/Arduino
-// dependencies so it can be unit-tested on the host (see
-// test/test_splash_geometry/). Decides the in-buffer pixel size of each grid
-// cell and the LVGL image scale needed to fill the panel.
+// Pure geometry for the 60x60 grid Clawd performs on at full size
+// (performer.cpp; mascot.cpp sizes the lurk and attention sprites from it).
+// Deliberately free of LVGL/Arduino dependencies so it can be unit-tested on
+// the host (see test/test_splash_geometry/). Decides the in-buffer pixel size
+// of each grid cell and the LVGL image scale needed to fill the panel.
 //
-// PSRAM boards render the canvas at full panel size (scale = 1.0x).
-// PSRAM-less boards (e.g. the ESP32-C6 sibling) cannot hold a 480x480 RGB565
-// framebuffer (460 KB) in internal SRAM, so they render a tiny 60x60 buffer
-// (~7 KB) and let LVGL upscale it with nearest-neighbour. A full-screen
-// splash then costs ~7 KB instead of 460 KB, with no cropping.
+// With PSRAM the buffer is rendered at full panel size (scale = 1.0x).
+// Without it, the geometry is a tiny 60x60 buffer (~7 KB) for LVGL to upscale
+// with nearest-neighbour; the performer doesn't use that path (it needs
+// per-pixel alpha at full size), so PSRAM-less boards play corner acts.
 
 #define SPLASH_GRID         60
 #define SPLASH_SCALE_UNITY  256   // LVGL image-scale denominator (256 == 1.0x)
