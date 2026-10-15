@@ -31,7 +31,7 @@ the tray, GPUI window, and hook integration (`clawdmeter-app`).
 
 ## Simulator and releases
 
-Use the [firmware simulator](../SIM-USAGE.md) to review layouts and Clawd's
+Use the [firmware simulator](simulator.md) to review layouts and Clawd's
 behavior without hardware. See [font generation](fonts.md) for font builds.
 Desktop reference images are in
 [desktop/docs/screenshots](../desktop/docs/screenshots/).

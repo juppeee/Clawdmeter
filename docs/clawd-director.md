@@ -419,7 +419,7 @@ at Off / 10 s / 30 s (`test_director`). In the sim:
   actors: one Clawd on screen at every tick of a seeded fuzz, every beat
   reached, and nothing left hanging once the input stops).
 - Sim: `SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl`, plus `SIM_SHOTS` /
-  `SIM_TAPS` for headless capture (see `SIM-USAGE.md`) and `SIM_TRACE=1` for
+  `SIM_TAPS` for headless capture (see `docs/simulator.md`) and `SIM_TRACE=1` for
   the per-step trace. The interruptions (lurk cut short, attention resuming
   the screensaver, PWR during a calm dip, wake) have their own scenario, driven by
   `SIM_CMDS` (scripted serial commands; `pwr`, `prompt`, `stop` and `alert`
@@ -466,7 +466,7 @@ and Off, 35-peek-* a tap on the meters: crouch, hop, ducks
 - Hardware: send `clawd show`, `clawd screensaver`, `clawd attention`,
   `clawd joy`, `clawd lurk`, `clawd peek [x]` (the peek now, as a tap at x)
   or `clawd home` on the serial console, then `screenshot`
-  (`./screenshot.sh`). This replaces swapping the boot screen in `main.cpp`.
+  (`.claude/skills/capturing-device-screenshots/scripts/screenshot.py`). This replaces swapping the boot screen in `main.cpp`.
   The device boots to the meters. `perf` prints the redraw cost of the last
   face rise, face drop and performance (below).
 

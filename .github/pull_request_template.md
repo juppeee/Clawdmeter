@@ -6,7 +6,7 @@ Skip the development story and checks already covered by CI. -->
 ## Screenshots or diagrams
 
 <!-- Required when UI or device output changes. Use desktop screenshots,
-serial screenshot.sh captures, or photos. Label simulator output.
+device screenshots (`.claude/skills/capturing-device-screenshots/scripts/screenshot.py`), or photos. Label simulator output.
 Add a Mermaid diagram when it clarifies flow, state, or architecture.
 Remove this section if it does not apply. -->
 

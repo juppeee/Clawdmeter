@@ -17,8 +17,8 @@ writes them to the device over BLE.
 - `tools/`: asset converters, `ci/` (release and manifest scripts, with
   unittests), `packaging/`. `research/clawd-official/`: the official Clawd
   animation archive.
-- `SIM-USAGE.md`: simulator manual; `docs/sim-grid.md`: every panel at once
-  (`tools/simgrid/`). `screenshot.sh`: device screenshot over serial.
+- `docs/simulator.md`: simulator manual; `docs/sim-grid.md`: every panel at
+  once (`tools/simgrid/`).
 
 Nested `CLAUDE.md` files load when you read or edit a file in their folder.
 
@@ -132,7 +132,7 @@ change for the first time.
   session history, abandoned approaches and checks CI already gates. Keep it
   proportional to the change.
 - Add screenshots or photos when UI or device output changes (device output:
-  `./screenshot.sh` captures or photos). Label simulator captures as such.
+  the `capturing-device-screenshots` skill, or photos). Label simulator captures as such.
   Add a Mermaid diagram when it clarifies flow, state or architecture.
 - **Hardware testing**: the exact boards and revisions tested on real
   hardware and what was verified, or "not tested on hardware".
@@ -160,7 +160,8 @@ Workflows in `.github/workflows/`:
 Project skills in `.claude/skills/`:
 
 - `porting-a-board`: add a board end to end, including app, README, manifest and PR requirements.
-- `verifying-firmware-ui`: simulator screenshots and on-device `clawd <beat>` + `screenshot` QA.
+- `verifying-firmware-ui`: simulator screenshots and on-device `clawd <beat>` QA.
+- `capturing-device-screenshots`: a connected board's screen as a PNG (bundled `screenshot.py`).
 - `flashing-and-probing-boards`: flash a board and run serial commands (bundled `serial_cmd.py`).
 - `capturing-desktop-screenshots`: demo window screenshots under X11 (bundled `capture.sh`).
 - `cutting-a-release`: tags, what the release builds, pre-tag and packaging checks.
