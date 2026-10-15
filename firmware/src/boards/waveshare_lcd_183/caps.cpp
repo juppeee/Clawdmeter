@@ -9,6 +9,8 @@ static const BoardCaps caps = {
     .has_rotation = false,
     .has_battery = true,
     .has_imu = true,
+    .minimal_ui = false,     // full animated UI
+    .has_pwr_button = true,  // AXP2101 PKEY, see power.cpp
 };
 
 const BoardCaps& board_caps(void) { return caps; }
