@@ -1,19 +1,36 @@
 #!/bin/bash
 # Take a screenshot from the Waveshare AMOLED display via LVGL snapshot.
 # Usage: ./screenshot.sh [output.png] [port]
+# Default port: /dev/cu.usbmodem101 on macOS, /dev/ttyACM0 on Linux.
 
 OUTPUT="${1:-screenshot.png}"
-PORT="${2:-/dev/ttyACM0}"
+if [ -z "$2" ]; then
+    case "$(uname -s)" in
+        Darwin) PORT="/dev/cu.usbmodem101" ;;
+        *)      PORT="/dev/ttyACM0" ;;
+    esac
+else
+    PORT="$2"
+fi
+
+# Use pio's bundled python if pyserial isn't on the system python.
+PY="python3"
+if ! python3 -c "import serial" 2>/dev/null; then
+    if [ -x "$HOME/.platformio/penv/bin/python" ]; then
+        PY="$HOME/.platformio/penv/bin/python"
+    fi
+fi
 
 TMPRAW=$(mktemp /tmp/screenshot_XXXXXX.raw)
-trap "rm -f '$TMPRAW'" EXIT
+TMPDIMS=$(mktemp /tmp/screenshot_XXXXXX.dims)
+trap "rm -f '$TMPRAW' '$TMPDIMS'" EXIT
 
 echo "Taking screenshot from $PORT..."
 
-python3 - "$PORT" "$TMPRAW" << 'PYEOF'
+"$PY" - "$PORT" "$TMPRAW" "$TMPDIMS" << 'PYEOF'
 import serial, sys
 
-port_path, raw_path = sys.argv[1], sys.argv[2]
+port_path, raw_path, dims_path = sys.argv[1], sys.argv[2], sys.argv[3]
 
 port = serial.Serial(port_path, 115200, timeout=10)
 port.reset_input_buffer()
@@ -40,6 +57,8 @@ while len(data) < raw_size:
 
 with open(raw_path, "wb") as f:
     f.write(data)
+with open(dims_path, "w") as f:
+    f.write(f"{w}x{h}\n")
 
 for _ in range(10):
     line = port.readline().decode("utf-8", errors="replace").strip()
@@ -55,12 +74,13 @@ if [ $? -ne 0 ]; then
     exit 1
 fi
 
-ffmpeg -y -f rawvideo -pixel_format rgb565le -video_size 480x480 \
+DIMS=$(cat "$TMPDIMS")
+ffmpeg -y -f rawvideo -pixel_format rgb565le -video_size "$DIMS" \
     -i "$TMPRAW" -update 1 -frames:v 1 "$OUTPUT" 2>/dev/null || true
 
 
 if [ -f "$OUTPUT" ]; then
-    echo "Saved: $OUTPUT"
+    echo "Saved: $OUTPUT ($DIMS)"
 else
     echo "Error: conversion failed"
     exit 1
