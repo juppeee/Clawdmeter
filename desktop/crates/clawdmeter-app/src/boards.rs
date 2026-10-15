@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 24] = [
+pub const BOARDS: [BoardInfo; 25] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -292,6 +292,17 @@ pub const BOARDS: [BoardInfo; 24] = [
         summary: "466×466 · round",
         chip: "ESP32-S3",
         pwr_button: true,
+    },
+    BoardInfo {
+        env: "waveshare_amoled_143",
+        name: "AMOLED 1.43",
+        product: "Waveshare ESP32-S3-Touch-AMOLED-1.43",
+        width: 466,
+        height: 466,
+        buy_url: "https://www.waveshare.com/esp32-s3-touch-amoled-1.43.htm?&aff_id=149786",
+        summary: "466×466 · round",
+        chip: "ESP32-S3",
+        pwr_button: false,
     },
 ];
 
