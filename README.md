@@ -39,6 +39,7 @@ Stable.
 |                                                                                                        | Board                                                                                                           |                                                                                               |
 | :----------------------------------------------------------------------------------------------------: | --------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------- |
 | <img src="desktop/crates/clawdmeter-app/assets/boards/lilygo_t4s3.svg" height="90" alt=""> | [LILYGO T4-S3](https://lilygo.cc/products/t4-s3) | 450×600 AMOLED, one button (BOOT; long-hold cycles brightness / scene). |
+| <img src="desktop/crates/clawdmeter-app/assets/boards/waveshare_lcd_183.svg" height="90" alt=""> | [Waveshare ESP32-S3-Touch-LCD-1.83](https://www.waveshare.com/esp32-s3-touch-lcd-1.83.htm?&aff_id=149786) | 240×284 IPS SPI TFT, BOOT + PWR buttons, rounded watch-style case. |
 | <img src="desktop/crates/clawdmeter-app/assets/boards/xingzhi_cube_183.svg" height="90" alt=""> | [Xingzhi Cube 1.83 inch TFT WiFi (2-mic)](https://www.aliexpress.com/item/1005010442374066.html) | 284×240 landscape TFT, no touch, 3 buttons. Vendor init table on the ST7789 driver. |
 
 ## Install

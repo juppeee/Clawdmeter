@@ -41,6 +41,7 @@ DISPLAY_NAMES = {
     "waveshare_lcd_154": "Waveshare ESP32-S3 LCD 1.54\"",
     "waveshare_lcd_4": "Waveshare ESP32-S3 LCD 4\"",
     "lilygo_t4s3": "LILYGO T4-S3 AMOLED 2.41\"",
+    "waveshare_lcd_183": "Waveshare ESP32-S3 LCD 1.83\"",
     "xingzhi_cube_183": "Xingzhi Cube 1.83 inch TFT WiFi",
 }
 
