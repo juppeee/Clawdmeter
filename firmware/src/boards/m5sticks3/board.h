@@ -32,7 +32,7 @@
 // The PMIC's own PEK button handles hard power in hardware (click = on,
 // double-click = off) and is not an ESP32 GPIO.
 #define BTN_A_GPIO           11    // front — PRIMARY, HID Space (PTT)
-#define BTN_B_GPIO           12    // side — PWR-role: toggle screens / hold to pair
+#define BTN_B_GPIO           12    // side — PWR-role: brightness / hold to pair
 
 // ---- Audio (ES8311 mono codec + AW8737 amp, I2S) ----
 // The amp enable is PM1 GPIO3 over I2C, not an ESP32 GPIO — see sound.cpp.
