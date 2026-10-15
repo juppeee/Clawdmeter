@@ -42,6 +42,7 @@ DISPLAY_NAMES = {
     "waveshare_lcd_4": "Waveshare ESP32-S3 LCD 4\"",
     "lilygo_t4s3": "LILYGO T4-S3 AMOLED 2.41\"",
     "waveshare_lcd_183": "Waveshare ESP32-S3 LCD 1.83\"",
+    "esp32_s3_4848s040": "Guition ESP32-S3 4848S040 (4\")",
     "freenove_s3_display_nontouch": "Freenove ESP32-S3 Display 2.8 inch (non-touch)",
 }
 
