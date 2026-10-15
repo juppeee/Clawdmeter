@@ -21,7 +21,7 @@
 //   esc / window close   quit
 //
 // Scenario: sim/scenario.jsonl (relative to the firmware/ dir), overridable
-// with SIM_SCENARIO=<path>. One JSON object per line — the daemon payload
+// with SIM_SCENARIO=<path>. One JSON object per line — the device payload
 // plus optional "name" and "hold_ms" (default 3000). Lines starting with #
 // are comments. Missing file → a small built-in state list.
 //
