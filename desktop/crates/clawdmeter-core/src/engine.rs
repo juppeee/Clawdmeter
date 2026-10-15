@@ -143,6 +143,8 @@ pub struct Engine {
     sent_lv: Option<u8>,
     /// The attention animation the device last got (`aa`).
     sent_aa: Option<u16>,
+    /// The pace marker the device last got (`pm`).
+    sent_pm: Option<u8>,
     last_event_ts: Option<i64>,
     /// Latest prompt or tool activity that names no configured account.
     unattributed_activity: Option<i64>,
@@ -180,6 +182,7 @@ impl Engine {
             sent_n: None,
             sent_lv: None,
             sent_aa: None,
+            sent_pm: None,
             last_event_ts: None,
             unattributed_activity: None,
             claude_found: true,
@@ -276,6 +279,7 @@ impl Engine {
         self.sent_n = None;
         self.sent_lv = None;
         self.sent_aa = None;
+        self.sent_pm = None;
         if self.active.is_some() || self.logged_out {
             self.fresh_poll = true;
         }
@@ -458,9 +462,11 @@ impl Engine {
         let new_event = event_fresh && self.activity.seq != self.sent_seq;
         let a_changed = hooks && self.sent_a != Some(level) && now - self.sent_a_at >= ACTIVITY_MIN_INTERVAL;
         let n_changed = hooks && self.sent_n != Some(sessions);
-        // A new liveliness or attention animation goes out right away, like an event.
+        // A changed device setting goes out right away, like an event.
         let aa = self.settings.attention_anim.seconds();
-        let prefs_changed = self.sent_lv != Some(self.settings.liveliness) || self.sent_aa != Some(aa);
+        let pm = u8::from(self.settings.pace_marker);
+        let prefs_changed =
+            self.sent_lv != Some(self.settings.liveliness) || self.sent_aa != Some(aa) || self.sent_pm != Some(pm);
 
         let (mut payload, kind) = if self.logged_out {
             if !(self.fresh_poll || self.attention.pending()) {
@@ -497,6 +503,7 @@ impl Engine {
             }
             p.lv = Some(self.settings.liveliness);
             p.aa = Some(aa);
+            p.pm = Some(pm);
             (p, kind)
         };
 
@@ -545,6 +552,9 @@ impl Engine {
         }
         if let Some(aa) = w.payload.aa {
             self.sent_aa = Some(aa);
+        }
+        if let Some(pm) = w.payload.pm {
+            self.sent_pm = Some(pm);
         }
     }
 
@@ -639,7 +649,7 @@ mod tests {
         assert_eq!(w.kind, WriteKind::Poll);
         assert_eq!(
             w.payload.to_json(),
-            r#"{"s":15,"sr":60,"w":10,"wr":1440,"st":"allowed","acct":"pro","ok":true,"lv":3,"aa":120}"#
+            r#"{"s":15,"sr":60,"w":10,"wr":1440,"st":"allowed","acct":"pro","ok":true,"lv":3,"aa":120,"pm":0}"#
         );
         assert!(write(&mut e, T0 + 1).is_none());
     }
@@ -656,7 +666,7 @@ mod tests {
         assert_eq!(hb.kind, WriteKind::Heartbeat);
         assert_eq!(
             hb.payload.to_json(),
-            r#"{"s":15,"sr":55,"w":10,"wr":1435,"st":"allowed","acct":"pro","c":1,"ok":true,"rp":1,"lv":3,"aa":120}"#
+            r#"{"s":15,"sr":55,"w":10,"wr":1435,"st":"allowed","acct":"pro","c":1,"ok":true,"rp":1,"lv":3,"aa":120,"pm":0}"#
         );
         // Three misses: stale, heartbeats stop so the device's freshness lapses.
         for i in 1..=3 {
@@ -1140,6 +1150,20 @@ mod tests {
         assert!(write(&mut e, T0 + 3).is_none());
         e.on_connected();
         assert_eq!(write(&mut e, T0 + 4).unwrap().payload.aa, Some(0), "resent on a reconnect");
+    }
+
+    #[test]
+    fn pace_marker_goes_out_with_the_data_and_when_it_changes() {
+        let mut e = Engine::new(settings(""));
+        e.on_poll_results(T0, vec![(PathBuf::from("/h/.claude"), Ok(reading(15)))]);
+        assert_eq!(write(&mut e, T0).unwrap().payload.pm, Some(0), "every data payload carries it");
+        assert!(write(&mut e, T0 + 1).is_none(), "nothing new");
+        e.update_settings(settings("pace_marker = on\n"));
+        let w = write(&mut e, T0 + 2).expect("a new setting is sent right away");
+        assert_eq!((w.kind, w.payload.pm, w.payload.rp), (WriteKind::Event, Some(1), Some(1)));
+        assert!(write(&mut e, T0 + 3).is_none());
+        e.on_connected();
+        assert_eq!(write(&mut e, T0 + 4).unwrap().payload.pm, Some(1), "resent on a reconnect");
     }
 
     #[test]

@@ -109,6 +109,18 @@ static void test_liveliness(void) {
     TEST_ASSERT_EQUAL_INT(1, d.liveliness);
 }
 
+static void test_pace_marker(void) {
+    UsageData d;
+    TEST_ASSERT_TRUE(payload_parse("{\"ok\":true}", &d, nullptr));
+    TEST_ASSERT_EQUAL_INT(-1, d.pace_marker);      // absent: keep the saved setting
+    TEST_ASSERT_TRUE(payload_parse("{\"pm\":1}", &d, nullptr));
+    TEST_ASSERT_EQUAL_INT(1, d.pace_marker);
+    TEST_ASSERT_TRUE(payload_parse("{\"pm\":0}", &d, nullptr));
+    TEST_ASSERT_EQUAL_INT(0, d.pace_marker);
+    TEST_ASSERT_TRUE(payload_parse("{\"pm\":7}", &d, nullptr));
+    TEST_ASSERT_EQUAL_INT(1, d.pace_marker);
+}
+
 static void test_long_strings_truncate(void) {
     UsageData d;
     TEST_ASSERT_TRUE(payload_parse("{\"st\":\"abcdefghijklmnopqrstuvwxyz\"}", &d, nullptr));
@@ -124,6 +136,7 @@ int main(void) {
     RUN_TEST(test_fast_clock_clamps);
     RUN_TEST(test_liveliness);
     RUN_TEST(test_attention_animation);
+    RUN_TEST(test_pace_marker);
     RUN_TEST(test_long_strings_truncate);
     return UNITY_END();
 }

@@ -123,7 +123,14 @@ sooner, on lighter work, and has him act up far more often. A line under
 the slider says what the chosen level does. **Attention animation** sets how
 long he points and waves when Claude needs you (off, 10 or 30 seconds, or 2
 minutes, the default); the alert itself stays up until you tap it either
-way. The device remembers both settings across restarts.
+way. The device remembers these settings across restarts.
+
+**Pace marker** puts a thin line on the session and weekly bars at how far
+into each window you are: 3 hours before the session resets, 40% of it has
+gone, so the line sits at 40%. The bar is green while usage is at or behind
+the line, amber when it's ahead, and red at the limit. Off (the default),
+the bars go amber at 50% and red at 80%. A bar with no reset time yet keeps
+those colours, and spend-capped accounts are unchanged.
 
 The device boots to the meters. Clawd performs his shows right on them,
 in front of the panels. Tap a show or the screensaver to send him back to
@@ -182,6 +189,7 @@ seconds and preserves comments and unknown keys when saving.
 | `clock` | `off` | `auto`, `12`, or `24` replaces the device's Usage title with a clock. |
 | `liveliness` | `3` | How lively Clawd is, `1` (No-nonsense) to `5` (All-nonsense). Set with **Animation silliness** on the Device page. |
 | `attention_anim` | `2m` | How long Clawd points and waves for an alert: `off`, `10s`, `30s` or `2m`. The alert itself is unchanged. Set with **Attention animation** on the Device page. |
+| `pace_marker` | `off` | `on` marks the elapsed share of each usage window on the device's bars and colours them by pace. Set with **Pace marker** on the Device page. |
 | `poll_interval` | automatic | Override working and no-hooks polling intervals, in seconds. The scheduler enforces at least 120 seconds per account. Quiet and other-account schedules still apply. |
 | `heartbeat_interval` | `60` | Resend cached readings between usage checks. This does not fetch usage. Keep the default unless diagnosing the connection. |
 | `claude_path` | found on `PATH` | Full path to the Claude Code executable, if detection fails. |

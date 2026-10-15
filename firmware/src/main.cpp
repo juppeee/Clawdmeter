@@ -219,6 +219,11 @@ static void check_serial_cmd() {
                 if (cmd_buf[14] == ' ') attn_anim_set(atoi(cmd_buf + 15));
                 Serial.printf("{\"attention_anim\":%d}\n", attn_anim_get());
             }
+            else if (strcmp(cmd_buf, "pace_marker") == 0 || strncmp(cmd_buf, "pace_marker ", 12) == 0) {
+                // QA: `pace_marker [0|1]` (until the app sends its own).
+                if (cmd_buf[11] == ' ') pace_marker_set(atoi(cmd_buf + 12) != 0);
+                Serial.printf("{\"pace_marker\":%s}\n", pace_marker_get() ? "true" : "false");
+            }
             else if (strncmp(cmd_buf, "clawd ", 6) == 0) {
                 const bool ok = director_debug(cmd_buf + 6);
                 Serial.printf("{\"clawd\":\"%s\",\"ok\":%s}\n", cmd_buf + 6, ok ? "true" : "false");
@@ -282,7 +287,7 @@ void setup() {
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
     director_init();    // rooms + beats; boots on the meters (home)
-    clawd_prefs_init();  // the saved liveliness and attention animation, before the app says otherwise
+    clawd_prefs_init();  // the saved device settings, before the app says otherwise
 
     Serial.printf("Dashboard ready (%s, %dx%d) %lu ms after boot, waiting for data on BLE...\n",
         board_caps().name, W, H, (unsigned long)millis());
@@ -482,6 +487,7 @@ void loop() {
                 Serial.println("attention — chime");
                 sound_hal_chime();
             }
+            if (usage.pace_marker >= 0) pace_marker_set(usage.pace_marker != 0);
             ui_update(&usage);
             // A prompt (or you're back after a gap): you're at the computer,
             // so a dimmed or dark panel wakes before Clawd notices you. A

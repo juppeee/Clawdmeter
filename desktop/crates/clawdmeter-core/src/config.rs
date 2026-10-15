@@ -264,6 +264,8 @@ pub struct Settings {
     pub liveliness: u8,
     /// How long Clawd points and waves for an alert (`aa`, default 2m).
     pub attention_anim: AttentionAnim,
+    /// Pace marker on the device's usage bars (`pm`, default off).
+    pub pace_marker: bool,
 }
 
 /// `alert_on`: the alert kinds that show, as a comma list of `permission`,
@@ -391,6 +393,7 @@ impl Settings {
             alert_on: cfg.get("alert_on").map(AlertOn::parse).unwrap_or_default(),
             liveliness: cfg.get("liveliness").map(parse_liveliness).unwrap_or(DEFAULT_LIVELINESS),
             attention_anim: cfg.get("attention_anim").map(AttentionAnim::parse).unwrap_or_default(),
+            pace_marker: on_off(cfg.get("pace_marker"), false),
         }
     }
 
@@ -444,10 +447,12 @@ impl Settings {
         }
         let oo = |b: bool| if b { "on" } else { "off" };
         // A changed chime is written under its new name; the old one goes.
+        // The pace marker rides along (it has no old name).
         for (key, old, now, was) in [
             ("reset_chime", "chime", self.reset_chime, current.reset_chime),
             ("alert_chime", "beep", self.alert_chime, current.alert_chime),
             ("desktop_chime", "", self.desktop_chime, current.desktop_chime),
+            ("pace_marker", "", self.pace_marker, current.pace_marker),
         ] {
             if now != was {
                 cfg.set(key, oo(now));
@@ -648,6 +653,20 @@ mod tests {
         s.apply_to(&mut cfg, &paths());
         assert_eq!(cfg.get("attention_anim"), Some("off"));
         assert_eq!(Settings::from_config(&cfg, &paths(), None).attention_anim, AttentionAnim::Off);
+    }
+
+    #[test]
+    fn pace_marker() {
+        assert!(!settings("").pace_marker, "off by default");
+        assert!(settings("pace_marker = on\n").pace_marker);
+
+        let mut cfg = ConfigFile::parse("");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("pace_marker").is_none(), "the default stays out of the file");
+        s.pace_marker = true;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("pace_marker"), Some("on"));
     }
 
     #[test]
