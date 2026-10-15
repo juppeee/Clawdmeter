@@ -109,6 +109,8 @@ SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
 | `SIM_CMDS` | `ms:command;ms:command`; serial commands, including `clawd peek <x>`. `pwr`, `prompt`, `stop`, `alert`, and `link` inject their corresponding input. |
 | `SIM_MINIMAL=1` | Set the simulator's `BoardCaps.minimal_ui` at startup to preview a minimal-display board. |
 | `SIM_TRACE=1` | Log director transitions and steps. |
+| `SIM_NO_PWR=1` | Play a board without a PWR button (like the LCD-4): `P` does nothing and the pairing hint offers the touch-hold gesture. |
+| `SIM_NO_BATTERY=1` | Start on USB power with no battery fitted (same as pressing `U`). |
 | `SIM_EDGE_WATCH=1` | Log non-black pixel counts in the bottom 16 rows and right 16 columns to expose stray edge rendering. |
 | `SIM_ROUND_EVEN=1` | Apply CO5300-style even-aligned flush rounding. |
 

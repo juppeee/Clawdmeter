@@ -54,8 +54,8 @@ pub enum SpendPeriod {
     Daily,
     /// `this week`.
     Weekly,
-    /// `this month` (also assumed when the line names no period, like the
-    /// old daemons: the enterprise spend-limit period is monthly today).
+    /// `this month` (also assumed when the line names no period: the
+    /// enterprise spend-limit period is monthly today).
     Monthly,
 }
 
@@ -108,7 +108,7 @@ impl UsageReading {
     }
 
     /// A window (or the spend cap) is used up and extra usage isn't covering
-    /// it: the old daemons' `rejected` status.
+    /// it.
     pub fn limited(&self) -> bool {
         if self.overage {
             return false;
@@ -1036,8 +1036,7 @@ mod tests {
         assert_eq!(parse_reset("Jan 2, 27, 1am (UTC)", now), None);
     }
 
-    // The enterprise path of the old daemons read the overage-utilization
-    // header; /usage reports a spend cap as a "Spend limit:" line.
+    // /usage reports a spend cap as a "Spend limit:" line.
     #[test]
     fn spend_limit_lines() {
         let now = at("2026-10-13T05:40:00Z");

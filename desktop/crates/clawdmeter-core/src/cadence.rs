@@ -1,4 +1,4 @@
-//! When to poll `/usage` (spec §08 "Polling cadence"), per account.
+//! When to poll `/usage`, per account.
 //!
 //! Every `/usage` run makes Claude Code fetch `GET /api/oauth/usage`, which
 //! is rate-limited per account (see [`crate::backoff`]), and Claude Code's
@@ -355,7 +355,6 @@ mod tests {
         assert_eq!((c.working, c.no_hooks), (120, 120), "never below the gap");
     }
 
-    // Ported from the legacy daemon test test_bash_heartbeat.sh: heartbeat timing.
     #[test]
     fn heartbeat_timing() {
         assert!(!heartbeat_due(None, 60, 1000));
