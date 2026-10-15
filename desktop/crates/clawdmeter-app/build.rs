@@ -12,7 +12,7 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-/// The idle body on the shared 55x37 art stage (spec §01: 24x16 cells).
+/// The idle body on the shared 55x37 art stage (24x16 cells).
 const BODY_L: usize = 15;
 const BODY_T: usize = 21;
 const BODY_W: usize = 24;

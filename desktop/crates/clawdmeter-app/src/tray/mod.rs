@@ -1,4 +1,4 @@
-//! The tray process: the daemon, the tray icon and menu (spec §04), the daily
+//! The tray process: the daemon, the tray icon and menu, the daily
 //! firmware update check, and the app window process it launches.
 //!
 //! The tray icon needs a platform event loop on the main thread (a Win32

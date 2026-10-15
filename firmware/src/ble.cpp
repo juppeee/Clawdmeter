@@ -164,7 +164,7 @@ static void start_advertising() {
     adv->addServiceUUID(NimBLEUUID((uint16_t)0x1812));  // BLE HID Service
     adv->setName(DEVICE_NAME);
     // Scan response carries the 128-bit custom data-service UUID for active
-    // scanners (the host daemon scans actively).
+    // scanners (the host app scans actively).
     NimBLEAdvertisementData scanResp;
     scanResp.setCompleteServices(NimBLEUUID(SERVICE_UUID));
     adv->setScanResponseData(scanResp);
@@ -196,7 +196,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             info.getConnInterval(), info.getConnInterval() * 1.25f,
             info.getConnLatency(), info.getConnTimeout(), info.getConnTimeout() * 10);
         // Keep advertising while a connection slot is still free so a second
-        // central (e.g. the host daemon alongside an OS-held HID link) can
+        // central (e.g. the host app alongside an OS-held HID link) can
         // discover and connect. NimBLE auto-stops advertising on each accept.
         if (s->getConnectedCount() < CONFIG_BT_NIMBLE_MAX_CONNECTIONS) {
             need_advertise = true;
@@ -229,8 +229,8 @@ class ServerCallbacks : public NimBLEServerCallbacks {
     // clamps the supervision timeout to 2s once an app GATT session goes
     // active (captured on hardware; it honors 9.6s while only its HID driver
     // holds the link) — and a 2s window is tight enough that ordinary radio
-    // gaps kill the link (HCI 0x208 → reason=520), which was the constant
-    // daemon reconnect churn. Push back ONCE per connection: schedule a
+    // gaps kill the link (HCI 0x208 → reason=520), which caused constant
+    // reconnect churn. Push back ONCE per connection: schedule a
     // deferred LL connection-parameter request for the same interval range but
     // a 6s timeout (the mechanism Microsoft's accessory guidelines prescribe).
     // Deferred ~2s so it can't race the central's own in-flight update
@@ -277,7 +277,7 @@ class ServerCallbacks : public NimBLEServerCallbacks {
 class RxCallbacks : public NimBLECharacteristicCallbacks {
     void onWrite(NimBLECharacteristic* chr, NimBLEConnInfo& info) override {
         // Only accept usage data over a bonded+encrypted link, and only from the
-        // owner machine. Another machine's daemon in range is ignored so the
+        // owner machine. Another machine's app in range is ignored so the
         // display never rotates to a foreign account. The first encrypted writer
         // claims ownership when none is set yet (e.g. a fresh pairing).
         std::string id = info.getIdAddress().toString();
@@ -303,9 +303,9 @@ class RxCallbacks : public NimBLECharacteristicCallbacks {
     }
 };
 
-// When the daemon enables notifications on the refresh char, ask for data
+// When the app enables notifications on the refresh char, ask for data
 // if we have none yet. Firing on subscribe (not on connect) ensures the
-// notification isn't dropped before the daemon's CCCD write completes.
+// notification isn't dropped before the app's CCCD write completes.
 class ReqCallbacks : public NimBLECharacteristicCallbacks {
     void onSubscribe(NimBLECharacteristic* chr, NimBLEConnInfo& info, uint16_t subValue) override {
         Serial.printf("BLE: req_char onSubscribe subValue=%u has_data=%d\n", subValue, has_received_data ? 1 : 0);
@@ -340,10 +340,10 @@ void ble_init(void) {
     hid_dev->setReportMap((uint8_t*)HID_REPORT_MAP, sizeof(HID_REPORT_MAP));
     hid_dev->setManufacturer("Clawdmeter");
     // PnP ID: (vendorIdSource, vendorId, productId, version).
-    // Source 1 = Bluetooth SIG, vendor 0x02E5 = Espressif. Originally claimed
-    // Apple's USB vendor 0x05AC + Magic Keyboard product 0x820A — macOS
-    // validates Apple-claimed HIDs against known device IDs and silently
-    // refuses to surface a Connect button for spoofers.
+    // Source 1 = Bluetooth SIG, vendor 0x02E5 = Espressif. Don't claim
+    // Apple's IDs (USB vendor 0x05AC): macOS validates Apple-claimed HIDs
+    // against known devices and silently refuses to surface a Connect button
+    // for spoofers.
     hid_dev->setPnp(0x01, 0x02E5, 0x0001, 0x0100);
     // country=33 (US ANSI). Setting this to 0 ("not supported") causes macOS
     // to launch the Keyboard Setup Assistant on first pair asking the user

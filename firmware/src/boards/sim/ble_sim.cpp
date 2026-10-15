@@ -1,5 +1,5 @@
 // BLE stub + scenario playback. Implements ble.h without any transport: a
-// JSONL scenario file stands in for the daemon, delivered through the same
+// JSONL scenario file stands in for the app, delivered through the same
 // ble_has_data()/ble_get_data() path main.cpp uses on hardware — so JSON
 // parsing, usage-rate tracking, and the chime trigger all run for real.
 #include "../../ble.h"

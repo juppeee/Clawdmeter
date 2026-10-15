@@ -14,7 +14,7 @@ pub const FONT_MONO: &str = "DejaVu Sans Mono";
 
 /// Radius for inputs.
 pub const R_S: f32 = 6.0;
-/// Radius for buttons and list rows (sidebar items, menu rows).
+/// Radius for buttons and list rows (sidebar items).
 pub const R_ITEM: f32 = 8.0;
 /// Radius for panels (the device's zone radius).
 pub const R_M: f32 = 12.0;

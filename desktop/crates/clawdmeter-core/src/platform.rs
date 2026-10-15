@@ -12,7 +12,7 @@ pub fn format_is_12h(fmt: &str) -> bool {
     fmt.contains("%p") || fmt.contains("%r") || fmt.contains("%I") || fmt.contains("tt")
 }
 
-/// Best-effort 12h/24h for `clock = auto`, like the old daemons
+/// Best-effort 12h/24h for `clock = auto`
 /// (macOS defaults toggles, then `locale -k LC_TIME`; Windows `iTime`).
 /// Defaults to 24h.
 pub fn prefers_12h() -> bool {

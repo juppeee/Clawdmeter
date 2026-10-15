@@ -1,5 +1,4 @@
-//! Attention alerts from the hook (`clawdmeter hook alert|clear`), consumed
-//! the way the legacy bash and macOS daemons did.
+//! Attention alerts from the hook (`clawdmeter hook alert|clear`).
 //!
 //! The hook writes `<state>/attention` (`{"m": message, "s": session id,
 //! "k": kind}`, see [`AlertKind`])
@@ -128,7 +127,7 @@ impl Alert {
 }
 
 /// Fold to ASCII (drop accents), collapse whitespace, cap at `limit` chars
-/// with a `...` suffix. Mirrors `to_ascii()` in the Python daemon.
+/// with a `...` suffix.
 pub fn to_ascii(text: &str, limit: usize) -> String {
     let folded: String = text.nfkd().filter(char::is_ascii).collect();
     let collapsed = folded.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -196,7 +195,7 @@ impl AttentionInbox {
         out
     }
 
-    /// Drop leftovers (on connect, like the old daemons).
+    /// Drop leftovers (on connect).
     pub fn reset(&self) {
         let _ = fs::remove_file(self.flag());
         let _ = fs::remove_file(self.dir.join("attention.taking"));
@@ -331,7 +330,6 @@ mod tests {
         File::options().write(true).open(p).unwrap().set_modified(t).unwrap();
     }
 
-    // Ported from the legacy daemon test test_attention.py::test_attention_flag.
     #[test]
     fn attention_flag() {
         let d = tmpdir("flag");
@@ -433,7 +431,6 @@ mod tests {
         Alert { message: msg.into(), session: sid.into(), kind: AlertKind::Permission, at }
     }
 
-    // Ported from the legacy daemon test test_bash_attention.sh.
     #[test]
     fn session_matching_like_bash() {
         let t0 = SystemTime::now();
