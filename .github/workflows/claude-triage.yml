@@ -60,5 +60,5 @@ jobs:
           claude_args: |
             --model sonnet
             --effort medium
-            --max-turns 8
+            --max-turns 20
             --allowedTools "Bash(gh issue view:*),Bash(gh issue list:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh pr view:*),Bash(gh pr edit:*),Bash(gh pr comment:*),Bash(gh label list:*),Bash(gh search:*),Bash(gh api repos/*/discussions*:*)"
