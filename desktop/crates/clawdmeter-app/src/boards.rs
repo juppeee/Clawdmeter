@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 8] = [
+pub const BOARDS: [BoardInfo; 10] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -104,6 +104,28 @@ pub const BOARDS: [BoardInfo; 8] = [
         buy_url: "https://www.waveshare.com/esp32-c6-touch-amoled-1.8.htm?&aff_id=149786",
         summary: "368×448 · ESP32-C6",
         chip: "ESP32-C6",
+        pwr_button: true,
+    },
+    BoardInfo {
+        env: "lilygo_t4s3",
+        name: "T4-S3",
+        product: "LILYGO T4-S3",
+        width: 450,
+        height: 600,
+        buy_url: "https://lilygo.cc/products/t4-s3",
+        summary: "450×600 · AMOLED",
+        chip: "ESP32-S3",
+        pwr_button: false,
+    },
+    BoardInfo {
+        env: "waveshare_lcd_183",
+        name: "LCD 1.83",
+        product: "Waveshare ESP32-S3-Touch-LCD-1.83",
+        width: 240,
+        height: 284,
+        buy_url: "https://www.waveshare.com/esp32-s3-touch-lcd-1.83.htm?&aff_id=149786",
+        summary: "240×284 · SPI TFT",
+        chip: "ESP32-S3",
         pwr_button: true,
     },
     BoardInfo {
