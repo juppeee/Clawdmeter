@@ -122,7 +122,7 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_device_font   = &font_styrene_28;
         L.bt_credit_1_font = &font_styrene_24;
         L.bt_credit_2_font = &font_styrene_20;
-    } else if (c.height >= 300) {
+    } else if (c.height >= 300 && c.width > 240) {
         // Compact layout — tuned for 368x448 (AMOLED-1.8). The panels start
         // low enough that the corner Clawd's jump (30 cells x 3 px) clears
         // the top edge from a seat that still sits above the first panel.
@@ -139,7 +139,8 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_credit_1_font = &font_styrene_16;
         L.bt_credit_2_font = &font_styrene_14;
     } else {
-        // Small layout — tuned for 240x240 (LCD-1.54 and similar square TFTs).
+        // Small layout — tuned for 240x240 (LCD-1.54 and similar square TFTs);
+        // also used by 240-wide portrait panels (240x320 CYD).
         // Everything shrinks: fonts two steps down, panels ~half height, and
         // the corner logo/battery switch to the 40px/24px small assets.
         L.margin = 8;
