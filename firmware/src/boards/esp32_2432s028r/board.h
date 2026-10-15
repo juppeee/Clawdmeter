@@ -6,7 +6,7 @@
 //
 // Resistive touch, classic ESP32 (not S3/C6).
 // Everything the no-PSRAM C6 ports already handle applies here too: shrunk
-// LVGL strips, direct-draw splash, static corner mascot, no screenshot path.
+// LVGL strips, a corner mascot without the full-size sprite, no screenshot path.
 //
 // Pin map from the board's published schematic and the community reference
 // (Random Nerd Tutorials' ESP32-2432S028R pinout, which matches the

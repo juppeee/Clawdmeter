@@ -5,6 +5,7 @@ static const BoardCaps caps = {
     .name = BOARD_NAME,
     .width = LCD_WIDTH,
     .height = LCD_HEIGHT,
+    .round_panel = false,
     // Zero HID buttons: the one physical button (BOOT) is claimed by the PWR
     // role in power.cpp, so input_hal never reports a press. See board.h.
     .button_count = 0,
@@ -13,6 +14,7 @@ static const BoardCaps caps = {
     .has_imu      = (bool)BOARD_HAS_IMU,
     .minimal_ui   = false,   // full animated UI
     .has_pwr_button = true,  // BOOT (GPIO 0), PWR role: see power.cpp
+    .has_touch = true,
 };
 
 const BoardCaps& board_caps(void) { return caps; }
