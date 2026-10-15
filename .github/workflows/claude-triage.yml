@@ -1,5 +1,4 @@
-# Automatic triage of new issues and PRs, plus a manual re-run via the
-# `claude-triage` label. Runs for anyone's issue or PR, so it uses the
+# Automatic triage of new issues and PRs. Runs for anyone's issue or PR, so it uses the
 # action's `allowed_non_write_users` bypass. That is acceptable here because:
 #   - nothing from a fork is checked out or executed (pull_request_target is
 #     used only to label/comment, reading the PR through the API);
@@ -10,9 +9,9 @@ name: Claude Triage
 
 on:
   issues:
-    types: [opened, labeled]
+    types: [opened]
   pull_request_target:
-    types: [opened, labeled]
+    types: [opened]
 
 concurrency:
   group: claude-triage
@@ -20,9 +19,6 @@ concurrency:
 
 jobs:
   triage:
-    if: |
-      github.event.action == 'opened' ||
-      github.event.label.name == 'claude-triage'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
