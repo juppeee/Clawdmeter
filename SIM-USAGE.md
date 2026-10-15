@@ -108,6 +108,7 @@ SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
 | `SIM_TAPS` | `ms@x,y;ms@x,y`; a 120 ms press at each time. |
 | `SIM_CMDS` | `ms:command;ms:command`; serial commands, including `clawd peek <x>`, `liveliness <1-5>` and `attention_anim <seconds>`. `pwr`, `prompt`, `stop`, `alert`, and `link` inject their corresponding input. |
 | `SIM_MINIMAL=1` | Set the simulator's `BoardCaps.minimal_ui` at startup to preview a minimal-display board. |
+| `SIM_CIRCLE=1` | Set `BoardCaps.round_panel` to preview a round panel; the corners outside the circle are drawn as a grey bezel. |
 | `SIM_TRACE=1` | Log director transitions and steps. |
 | `SIM_NO_PWR=1` | Play a board without a PWR button (like the LCD-4): `P` does nothing and the pairing hint offers the touch-hold gesture. |
 | `SIM_NO_BATTERY=1` | Start on USB power with no battery fitted (same as pressing `U`). |
@@ -130,6 +131,9 @@ pio run -d firmware -e sim
 cd firmware
 /tmp/clawdmeter-sim-240/sim/program
 ```
+
+For a round panel, build the square size and run with `SIM_CIRCLE=1`
+(for example 466×466 for the AMOLED-1.32 and 1.43).
 
 The simulator checks shared layout and behavior. It cannot validate a
 physical panel's column offsets, bus timing, touch mapping, or rotation.

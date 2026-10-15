@@ -7,6 +7,7 @@
 #include <stdlib.h>
 #include <Arduino.h>
 #include "../../clawd_director.h"
+#include "../../hal/board_caps.h"
 
 static SDL_Window*   win = NULL;
 static SDL_Renderer* ren = NULL;
@@ -83,6 +84,19 @@ void display_hal_set_brightness(uint8_t level) {
     present();
 }
 
+// A round panel (SIM_CIRCLE=1) shows only the inscribed circle: what LVGL
+// draws past it is replaced by a grey bezel, so the window and screenshots
+// show what the glass would.
+#define BEZEL 0x2945
+static bool off_glass(int32_t px, int32_t py) {
+    static int round = -1;
+    if (round < 0) round = board_caps().round_panel;
+    if (!round) return false;
+    const int32_t d = LCD_WIDTH < LCD_HEIGHT ? LCD_WIDTH : LCD_HEIGHT;
+    const int32_t dx = 2 * px + 1 - LCD_WIDTH, dy = 2 * py + 1 - LCD_HEIGHT;
+    return dx * dx + dy * dy > d * d;
+}
+
 void display_hal_draw_bitmap(int32_t x, int32_t y, int32_t w, int32_t h,
                              const uint16_t* pixels) {
     for (int32_t row = 0; row < h; row++) {
@@ -94,6 +108,8 @@ void display_hal_draw_bitmap(int32_t x, int32_t y, int32_t w, int32_t h,
         if (cw <= 0) continue;
         memcpy(&shadow[dy * LCD_WIDTH + x + sx], &pixels[(size_t)row * w + sx],
                (size_t)cw * 2);
+        for (int32_t px = x + sx; px < x + sx + cw; px++)
+            if (off_glass(px, dy)) shadow[dy * LCD_WIDTH + px] = BEZEL;
     }
     dirty = true;
 }

@@ -39,6 +39,7 @@ Write captures outside the repo (a scratch dir), convert BMP → PNG if needed
 | `SIM_TAPS="ms@x,y;…"` | Touches; `ms@x,y+hold_ms` for a touch hold |
 | `SIM_TRACE=1` | Director transitions with timestamps (find when a beat actually happens) |
 | `SIM_NO_PWR=1` / `SIM_MINIMAL=1` | A board without a PWR button / `BoardCaps.minimal_ui` |
+| `SIM_CIRCLE=1` | A round panel (`BoardCaps.round_panel`); the corners are drawn as a bezel |
 | `SIM_AUTOSHOT_MS`, `SIM_AUTOSHOT_PATH` | One headless shot (what CI captures) |
 
 Full key map, scenario format and the rest of the variables:
@@ -53,8 +54,18 @@ PLATFORMIO_BUILD_FLAGS="-DSIM_LCD_W=240 -DSIM_LCD_H=240" pio run -d firmware -e 
 (cd firmware && /tmp/clawdmeter-sim-240/sim/program)
 ```
 
-Check every size your change can affect: 480×480 (large layout), 368×448 and
-410×502 (portrait), 240×240 (compact).
+Check every size your change can affect: 480×480 and 410×502 (large
+design), 368×448 (compact), 240×240 (small), and for layout changes the port
+sizes in `firmware/test/test_layout` (466×466 with `SIM_CIRCLE=1`, 450×600,
+320×240, 240×320, 170×320, 135×240, 200×200, …).
+
+**Layout changes** (`layout.cpp`, `ui_text.h`, anything that moves or resizes
+meters text): run `pio test -d firmware -e native -f test_layout` first. It
+checks every supported panel shape with the real fonts and names what leaves
+the glass, overlaps or doesn't fit. Then diff before/after sim captures at
+the four sizes on main: they should be pixel-identical unless the change is
+meant to show there. Attention captures vary run to run (sprite and scroll
+timing), so compare those against several base runs.
 
 **Walkthroughs** (from `firmware/`):
 

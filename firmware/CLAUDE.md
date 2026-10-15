@@ -32,9 +32,12 @@ pins and hardware gotchas, which loads when you work in that folder.
   rather than checking the level elsewhere. The module map, every beat, the
   tunables and the C6 differences are in `docs/clawd-director.md`: read it
   before changing what Clawd does, and update it with the change.
-- **Meters**: `ui.cpp` draws only the meters. `compute_layout()` chooses the
-  large (H ≥ 460) or compact layout from `board_caps()`; keep display-size
-  decisions there and hardware differences in caps.
+- **Meters**: `ui.cpp` draws only the meters, where `layout.cpp` says.
+  `layout_compute()` derives every position and font from `BoardCaps`'
+  width, height and `round_panel`: the largest of three tuned designs that
+  fits, then shape rules (narrow, tall, short, round). Strings it sizes for
+  are in `ui_text.h`. Never branch on a board or exact size; add a shape rule
+  and a `test_layout` panel (`docs/porting/adding-a-board.md`).
 - **Sound**: `ding.cpp` synthesizes the one sound (a C#5 ding, mirrored by
   the desktop's `chime.rs`); `chime.cpp` streams it through the ES8311.
 - **Generated, never hand-edited**: `splash_animations.h` (only
