@@ -47,7 +47,7 @@
 // ---- Buttons ----
 #define BTN_BACK_GPIO        0        // BOOT — primary, Space (PTT)
 // No dedicated PWR button on this board (only RST, which hard-resets the MCU).
-// power.cpp synthesizes the hold-3s-to-pair gesture from a long-press of BOOT.
+// BOOT stays push-to-talk; pairing is cleared with the 5 s touch hold.
 
 // ---- Capability flags ----
 #define BOARD_HAS_SECONDARY_BUTTON 0  // no second HID button (no Shift+Tab)

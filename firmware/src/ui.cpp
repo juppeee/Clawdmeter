@@ -55,7 +55,9 @@ struct Layout {
     int16_t anim_y;                  // status line offset from bottom
     bool    small_icons;             // 40px logo + 24px battery (vs 80/48) on small screens
     int16_t title_nudge;             // title x-shift balancing the corner logo
+    int16_t logo_x;                  // logo left edge
     int16_t logo_y;                  // logo top edge
+    int16_t batt_x;                  // battery icon left edge
     int16_t batt_y;                  // battery icon top edge
     int16_t batt_w;                  // battery icon width, for position math
 
@@ -108,7 +110,34 @@ static void compute_layout(const BoardCaps& c) {
     L.pair_y3 = 160;
     L.pair_y4 = 230;
 
-    if (c.height >= 460) {
+    // Round 466x466 (AMOLED-1.32): compact type, cards inset and vertically
+    // centred inside the circle, header icons pulled in off the bezel.
+    const bool round = (c.width == 466 && c.height == 466);
+
+    if (round) {
+        L.margin = 50;
+        L.title_y = 34;
+        L.content_y = 97;
+        L.usage_panel_h = 130;
+        L.usage_panel_gap = 12;
+        L.usage_bar_y = 48;
+        L.usage_reset_y = 78;
+        L.title_font = &font_tiempos_34;
+        L.anim_font  = &font_mono_18;
+        L.anim_y = -34;
+        L.small_icons = true;
+        L.title_nudge = 0;
+        L.logo_y = 36;
+        L.batt_y = 46;
+        L.batt_w = ICON_BATTERY_SMALL_W;
+        L.bt_info_panel_h = 140;
+        L.bt_reset_zone_h = 90;
+        L.bt_title_font    = &font_tiempos_34;
+        L.bt_status_font   = &font_styrene_28;
+        L.bt_device_font   = &font_styrene_20;
+        L.bt_credit_1_font = &font_styrene_16;
+        L.bt_credit_2_font = &font_styrene_14;
+    } else if (c.height >= 460) {
         // Large layout — tuned for 480x480 (AMOLED-2.16).
         L.content_y = 100;
         L.usage_panel_h = 150;
@@ -183,6 +212,8 @@ static void compute_layout(const BoardCaps& c) {
     }
 
     L.content_w = L.scr_w - 2 * L.margin;
+    L.logo_x = round ? 112 : L.margin;
+    L.batt_x = round ? 330 : L.scr_w - L.batt_w - L.margin;
 }
 
 // Anthropic brand palette — design tokens live in theme.h
@@ -590,7 +621,7 @@ void ui_init(void) {
 
     battery_img = lv_image_create(scr);
     lv_image_set_src(battery_img, &battery_dscs[0]);
-    lv_obj_set_pos(battery_img, L.scr_w - L.batt_w - L.margin, L.batt_y);
+    lv_obj_set_pos(battery_img, L.batt_x, L.batt_y);
     // Boards without battery telemetry never show the indicator (per the HAL
     // contract).
     if (!board_caps().has_battery) {
@@ -616,10 +647,10 @@ void ui_init(void) {
         // Animated: idles, does acts, and takes walk-off/lurk trips (the
         // trips need PSRAM; without it he stays in his seat).
         // Created last so he walks over the battery and the stage.
-        if (!mascot_create(scr, L.margin, feet, cell)) {
+        if (!mascot_create(scr, L.logo_x, feet, cell)) {
             logo_img = lv_image_create(scr);
             lv_image_set_src(logo_img, &logo_dsc);
-            lv_obj_set_pos(logo_img, L.margin, top);
+            lv_obj_set_pos(logo_img, L.logo_x, top);
         }
     }
 

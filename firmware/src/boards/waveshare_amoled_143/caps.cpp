@@ -9,6 +9,8 @@ static const BoardCaps caps = {
     .has_rotation = (bool)BOARD_HAS_ROTATION,
     .has_battery  = (bool)BOARD_HAS_BATTERY,
     .has_imu      = (bool)BOARD_HAS_IMU,
+    .minimal_ui   = false,   // full animated UI
+    .has_pwr_button = false, // only BOOT (PTT) and a hardware RST: pair via the 5 s touch hold
 };
 
 const BoardCaps& board_caps(void) { return caps; }
