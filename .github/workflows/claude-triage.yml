@@ -49,22 +49,10 @@ jobs:
         with:
           fetch-depth: 1
 
-      # Optional: post as a repo-owned GitHub App (its own name and avatar) when
-      # the TRIAGE_APP_ID variable and TRIAGE_APP_PRIVATE_KEY secret are set.
-      # Otherwise comments come from github-actions[bot].
-      - name: App token
-        id: app
-        if: steps.cap.outputs.skip != 'true' && vars.TRIAGE_APP_ID != ''
-        uses: actions/create-github-app-token@v1
-        with:
-          app-id: ${{ vars.TRIAGE_APP_ID }}
-          private-key: ${{ secrets.TRIAGE_APP_PRIVATE_KEY }}
-
       - name: Write triage tools
         if: steps.cap.outputs.skip != 'true'
         env:
           TOOLS: ${{ runner.temp }}/triage
-          BOT_LOGIN: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
           NOUN: ${{ github.event_name == 'issues' && 'issue' || 'pull request' }}
         run: |
           mkdir -p "$TOOLS"
@@ -85,7 +73,7 @@ jobs:
             [[ "\$i" =~ ^#[0-9]+\ [^[:cntrl:]]{1,200}\$ ]] || { echo "bad item: \$i" >&2; exit 2; }
           done
           n=\$(gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" --paginate \
-                --jq '[.[] | select(.user.login == "$BOT_LOGIN")] | length')
+                --jq '[.[] | select(.user.login == "github-actions[bot]")] | length')
           [ "\$n" -eq 0 ] || { echo "already commented" >&2; exit 1; }
           body="Thanks for opening this $NOUN.
 
@@ -109,7 +97,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ steps.app.outputs.token || github.token }}
+          github_token: ${{ github.token }}
           allowed_non_write_users: '*'
           prompt: |
             Triage ${{ env.KIND == 'issue' && 'issue' || 'pull request' }} #${{ env.NUMBER }} in ${{ github.repository }}.
