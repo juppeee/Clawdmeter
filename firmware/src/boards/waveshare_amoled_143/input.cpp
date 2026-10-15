@@ -3,8 +3,8 @@
 #include <Arduino.h>
 
 // Only the BOOT button is a usable physical input on this board. There is no
-// secondary button (no HID Shift+Tab) and no PWR button — the pairing gesture
-// is synthesized from a BOOT long-press in power.cpp.
+// secondary button (no HID Shift+Tab) and no PWR button — pairing is the 5 s
+// touch hold on the pairing hint (BoardCaps.has_pwr_button = false).
 
 void input_hal_init(void) {
     pinMode(BTN_BACK_GPIO, INPUT_PULLUP);
