@@ -50,8 +50,9 @@
 #define SENSECAP_TP_RST_PIN    7
 
 // Physical button
-// GPIO 38 used as edge-detected PWR button (screen cycle / wake from sleep).
-// NOT wired as INPUT_BTN_PRIMARY — device has no microphone for PTT.
+// GPIO 38 user button is the PWR-role input (power.cpp): short press =
+// brightness / next scene, hold and release = pair. There is no primary
+// (Space / voice mode) button, so input_hal_is_held() always reports false.
 #define BTN_BACK_GPIO  38
 
 // Capability flags

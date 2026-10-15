@@ -2,15 +2,26 @@
 #include "board.h"
 #include <Arduino.h>
 
-#define PWR_POLL_MS 50
+// No PMU and no battery. The user button on GPIO38 (active LOW) is the
+// PWR-role input: brightness, next scene on the stage, hold ~1.5 s and release
+// to pair. The edges are synthesized in software:
+//   short    - fired on release if the hold was shorter than PWR_LONG_MS
+//   long     - fired once when a hold crosses PWR_LONG_MS
+//   release  - fired on every release edge
 
-static bool     pwr_pressed_flag = false;
-static bool     last_btn_high    = true;   // INPUT_PULLUP → HIGH when released
-static uint32_t last_pwr_ms      = 0;
+#define PWR_POLL_MS 50
+#define PWR_LONG_MS 1500
+
+static bool     pwr_pressed_flag  = false;
+static bool     pwr_long_flag     = false;
+static bool     pwr_released_flag = false;
+static bool     last_pwr_state    = false;
+static bool     pwr_long_fired    = false;
+static uint32_t pwr_press_started_ms = 0;
+static uint32_t last_pwr_ms       = 0;
 
 void power_hal_init(void) {
     pinMode(BTN_BACK_GPIO, INPUT_PULLUP);
-    last_btn_high = (digitalRead(BTN_BACK_GPIO) == HIGH);
 }
 
 void power_hal_tick(void) {
@@ -18,12 +29,20 @@ void power_hal_tick(void) {
     if (now - last_pwr_ms < PWR_POLL_MS) return;
     last_pwr_ms = now;
 
-    bool high_now = (digitalRead(BTN_BACK_GPIO) == HIGH);
-    if (!high_now && last_btn_high) {
-        // Falling edge = button pressed (active-LOW, INPUT_PULLUP)
-        pwr_pressed_flag = true;
+    bool pwr_now = (digitalRead(BTN_BACK_GPIO) == LOW);   // active LOW
+    if (pwr_now && !last_pwr_state) {                     // press edge
+        pwr_press_started_ms = now;
+        pwr_long_fired = false;
+    } else if (pwr_now && last_pwr_state) {               // held
+        if (!pwr_long_fired && (now - pwr_press_started_ms >= PWR_LONG_MS)) {
+            pwr_long_flag  = true;
+            pwr_long_fired = true;
+        }
+    } else if (!pwr_now && last_pwr_state) {              // release edge
+        pwr_released_flag = true;
+        if (!pwr_long_fired) pwr_pressed_flag = true;     // short press
     }
-    last_btn_high = high_now;
+    last_pwr_state = pwr_now;
 }
 
 int  power_hal_battery_pct(void) { return -1; }
@@ -31,9 +50,16 @@ bool power_hal_is_charging(void) { return false; }
 bool power_hal_is_vbus_in(void)  { return false; }
 
 bool power_hal_pwr_pressed(void) {
-    if (pwr_pressed_flag) {
-        pwr_pressed_flag = false;
-        return true;
-    }
+    if (pwr_pressed_flag) { pwr_pressed_flag = false; return true; }
+    return false;
+}
+
+bool power_hal_pwr_long_pressed(void) {
+    if (pwr_long_flag) { pwr_long_flag = false; return true; }
+    return false;
+}
+
+bool power_hal_pwr_released(void) {
+    if (pwr_released_flag) { pwr_released_flag = false; return true; }
     return false;
 }

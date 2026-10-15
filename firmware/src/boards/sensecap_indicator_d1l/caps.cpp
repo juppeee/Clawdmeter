@@ -9,6 +9,8 @@ static const BoardCaps caps = {
     .has_rotation = (bool)BOARD_HAS_ROTATION,
     .has_battery  = (bool)BOARD_HAS_BATTERY,
     .has_imu      = (bool)BOARD_HAS_IMU,
+    .minimal_ui   = false,   // full animated UI
+    .has_pwr_button = true,  // GPIO38 user button, PWR role (power.cpp)
 };
 
 const BoardCaps& board_caps(void) { return caps; }

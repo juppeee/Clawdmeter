@@ -8,17 +8,9 @@ firmware/.vscode/
 # Claude Code
 .claude/
 
-# Git worktrees
-.worktrees/
-
 # Node tooling deps (npm install --no-save)
 tools/node_modules/
 tools/package-lock.json
-
-# Python venvs
-daemon/.venv/
-firmware/.venv/
-firmware/.pio_home/
 
 # Python bytecode cache
 __pycache__/
