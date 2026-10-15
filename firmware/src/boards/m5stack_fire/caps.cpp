@@ -11,7 +11,8 @@ static const BoardCaps caps = {
     .has_rotation = (bool)BOARD_HAS_ROTATION,
     .has_battery  = (bool)BOARD_HAS_BATTERY,
     .has_imu      = (bool)BOARD_HAS_IMU,
-    .has_touch    = (bool)BOARD_HAS_TOUCH,
+    .minimal_ui   = false,   // full animated UI
+    .has_pwr_button = true,  // middle button B (GPIO 38), PWR role: see power.cpp
 };
 
 const BoardCaps& board_caps(void) { return caps; }

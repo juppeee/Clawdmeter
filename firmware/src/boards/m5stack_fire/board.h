@@ -1,7 +1,7 @@
 #pragma once
 
 // M5Stack FIRE — the first ESP32 *classic* port (all other boards are S3/C6)
-// and the first with no touch panel: a 320x240 ILI9342C TFT over 4-wire SPI,
+// and has no touch panel (touch_hal is a stub): a 320x240 ILI9342C TFT over 4-wire SPI,
 // three front push-buttons (A/B/C) in place of touch, an IP5306 power-bank PMU
 // for battery reporting, and an MPU6886 IMU (populated, unused). 16 MB flash +
 // PSRAM (WROVER module). USB is a CH9102 UART bridge — there is no native USB,
@@ -51,6 +51,5 @@
 #define BOARD_HAS_ROTATION         0    // fixed desk orientation
 #define BOARD_HAS_IMU              0    // MPU6886 populated but unused
 #define BOARD_HAS_BATTERY          1    // via IP5306
-#define BOARD_HAS_TOUCH            0    // no touch panel — PWR button navigates the splash
 #define BOARD_HAS_IO_EXPANDER      0
 #define BOARD_HAS_SOUND            0    // speaker is a DAC path, not the I2S chime engine

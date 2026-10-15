@@ -3,7 +3,8 @@
 // The M5Stack FIRE has no touch panel — navigation is the three front buttons
 // (see input.cpp for A/C and power.cpp for the middle button). The touch HAL
 // is a permanent no-op: read always reports "not pressed", so LVGL's pointer
-// indev stays idle and the shared my_touch_cb never registers a press.
+// indev stays idle and the shared my_touch_cb never registers a press. The director does not need
+// touch to move between rooms (buttons and situations drive it).
 
 void touch_hal_init(void) {}
 
