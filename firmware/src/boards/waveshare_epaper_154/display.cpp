@@ -100,13 +100,6 @@ void display_hal_set_brightness(uint8_t level) {
     (void)level;   // e-paper has no backlight.
 }
 
-void display_hal_fill_screen(uint16_t color565) {
-    if (!framebuf) return;
-    memset(framebuf, rgb565_is_white(color565) ? 0xFF : 0x00, FB_BYTES);
-    expand_dirty(0, 0, LCD_WIDTH, LCD_HEIGHT);
-    last_flush_ms = millis();
-}
-
 void display_hal_draw_bitmap(int32_t x, int32_t y, int32_t w, int32_t h,
                              const uint16_t* pixels) {
     if (!framebuf || !pixels) return;

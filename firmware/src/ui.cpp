@@ -180,6 +180,17 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_device_font   = &font_styrene_14;
         L.bt_credit_1_font = &font_styrene_12;
         L.bt_credit_2_font = &font_styrene_12;
+        if (c.height < 220) {
+            // 200x200 (e-paper): same fonts and icons, tighter vertical
+            // rhythm so both panels and the status line fit the 200 px height.
+            L.content_y = 40;
+            L.usage_panel_h = 64;
+            L.usage_panel_gap = 4;
+            L.usage_bar_y = 28;
+            L.usage_reset_y = 40;
+            L.bar_h = 10;
+            L.anim_y = -4;
+        }
     }
 
     L.content_w = L.scr_w - 2 * L.margin;

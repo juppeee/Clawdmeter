@@ -9,7 +9,8 @@ static const BoardCaps caps = {
     .has_rotation = false,
     .has_battery = true,
     .has_imu = false,
-    .has_touch = false,
+    .minimal_ui = true,        // e-paper: meters + a still corner Clawd, no animation
+    .has_pwr_button = true,    // PWR side-button, GPIO18
 };
 
 const BoardCaps& board_caps(void) { return caps; }

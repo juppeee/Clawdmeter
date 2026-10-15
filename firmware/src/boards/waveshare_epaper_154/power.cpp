@@ -19,19 +19,28 @@
 // we won't fabricate a charging state. vbus_in stays true on purpose — the
 // idle state machine gates display_hal_tick on it, and reporting false would
 // let the panel auto-sleep and freeze the bistable e-paper (see idle_cfg.h /
-// power_hal.h). PWR button is a direct GPIO, edge-detected with debounce.
+// power_hal.h). PWR button is a direct GPIO polled every PWR_POLL_MS, with the
+// same software edge synthesis as the LCD-1.54 port: short press on release
+// (hold shorter than PWR_LONG_MS), one long-press edge when a hold crosses
+// PWR_LONG_MS, and a release edge every time. The hold-to-pair gesture in
+// main.cpp uses the long + release edges.
 //
 // VBAT_PWR (GPIO17) is the active-HIGH soft-power latch driven in
 // board_init.cpp — a power ENABLE, not a sense line. Don't read level from it.
 
 #define PWR_POLL_MS      50
+#define PWR_LONG_MS      1500
 #define BATTERY_POLL_MS  2000
 #define ADC_SAMPLES      5       // median-of-N per poll to reject single-sample spikes
 #define HYST_PCT         3       // icon-boundary hysteresis, in percent
 
-static bool     pwr_pressed_flag = false;
-static bool     last_pwr_state   = false;
-static uint32_t last_pwr_ms      = 0;
+static bool     pwr_pressed_flag  = false;
+static bool     pwr_long_flag     = false;
+static bool     pwr_released_flag = false;
+static bool     last_pwr_state    = false;
+static bool     pwr_long_fired    = false;
+static uint32_t pwr_press_ms      = 0;
+static uint32_t last_pwr_ms       = 0;
 static uint32_t last_batt_ms     = 0;
 
 static float    ema_mv     = 0.0f;   // smoothed Vbat in millivolts
@@ -120,7 +129,18 @@ void power_hal_tick(void) {
     if (now - last_pwr_ms >= PWR_POLL_MS) {
         last_pwr_ms = now;
         bool pwr_now = (digitalRead(BTN_PWR_GPIO) == LOW);
-        if (pwr_now && !last_pwr_state) pwr_pressed_flag = true;
+        if (pwr_now && !last_pwr_state) {             // press edge, hold begins
+            pwr_press_ms = now;
+            pwr_long_fired = false;
+        } else if (pwr_now && last_pwr_state) {       // held
+            if (!pwr_long_fired && now - pwr_press_ms >= PWR_LONG_MS) {
+                pwr_long_flag = true;
+                pwr_long_fired = true;
+            }
+        } else if (!pwr_now && last_pwr_state) {      // release edge
+            pwr_released_flag = true;
+            if (!pwr_long_fired) pwr_pressed_flag = true;   // short press
+        }
         last_pwr_state = pwr_now;
     }
 
@@ -145,5 +165,12 @@ bool power_hal_pwr_pressed(void) {
     return false;
 }
 
-bool power_hal_pwr_long_pressed(void) { return false; }
-bool power_hal_pwr_released(void)     { return false; }
+bool power_hal_pwr_long_pressed(void) {
+    if (pwr_long_flag) { pwr_long_flag = false; return true; }
+    return false;
+}
+
+bool power_hal_pwr_released(void) {
+    if (pwr_released_flag) { pwr_released_flag = false; return true; }
+    return false;
+}
