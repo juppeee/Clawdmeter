@@ -7,8 +7,8 @@
 // nothing and the pairing hint offers the touch hold instead. SIM_MINIMAL=1
 // plays a minimal-mode board. SIM_NO_TOUCH=1 plays a board without a
 // touchscreen (BOOT dismisses an alert). SIM_CIRCLE=1 plays a round panel (the
-// corners outside the circle are drawn as a grey bezel). SIM_BUTTONS=1 plays
-// a board with BOOT only.
+// corners outside the circle are drawn as a grey bezel). SIM_BUTTONS=0|1|2 plays
+// a board with no buttons / BOOT only / BOOT + secondary.
 static BoardCaps make_caps(void) {
     BoardCaps caps = {
     .name = BOARD_NAME,
@@ -30,7 +30,7 @@ static BoardCaps make_caps(void) {
     const char* minimal = getenv("SIM_MINIMAL");
     if (minimal && *minimal && *minimal != '0') caps.minimal_ui = true;
     const char* buttons = getenv("SIM_BUTTONS");
-    if (buttons && (*buttons == '1' || *buttons == '2')) caps.button_count = (uint8_t)(*buttons - '0');
+    if (buttons && (*buttons >= '0' && *buttons <= '2')) caps.button_count = (uint8_t)(*buttons - '0');
     const char* circle = getenv("SIM_CIRCLE");
     if (circle && *circle && *circle != '0') caps.round_panel = true;
     return caps;

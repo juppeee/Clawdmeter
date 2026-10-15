@@ -297,12 +297,14 @@ sends `{"dismiss":true}` on BLE TX (`…-0003`). The app clears the alert it
 sent, including its tray state, without echoing a clear back. A host `x`
 clear ends the device alert without a dismissal notification.
 
-On a board without a touchscreen (`BoardCaps.has_touch` false) the BOOT
-press is the dismiss gesture: `director_button(true)` ends an active alert
+On a board without a touchscreen (`BoardCaps.has_touch` false) the main
+button is the dismiss gesture: BOOT, or the PWR key when it is the board's
+only button (`button_count` 0). `director_button(true)` ends an active alert
 the same way a tap does and reports the press as consumed, so `main.cpp`
-doesn't send push to talk for it. With no alert up, BOOT keeps its normal
-role. A board with neither touch nor a button lets the alert time out.
-`SIM_NO_TOUCH=1` plays such a board in the simulator.
+doesn't send push to talk (or cycle brightness) for it. With no alert up
+the button keeps its normal role. A board with neither touch nor a button
+lets the alert time out. `SIM_NO_TOUCH=1` plays such a board in the
+simulator.
 
 The app also expires uncleared alerts after 2 minutes; Hooks test alerts
 expire after 30 seconds. If the alert was sent, app expiry queues a clear
