@@ -25,7 +25,7 @@ use crate::ipc::{self, AppCommand, StatusSnapshot};
 use crate::Page;
 use theme::{Theme, FONT_BODY};
 
-/// The three faces the firmware fonts are generated from (spec §01).
+/// The three faces the firmware fonts are generated from.
 const FONTS: [&[u8]; 3] = [
     include_bytes!("../../../../../assets/TiemposText-400-Regular.otf"),
     include_bytes!("../../../../../assets/StyreneB-Regular.otf"),

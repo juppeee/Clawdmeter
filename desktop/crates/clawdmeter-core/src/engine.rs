@@ -457,8 +457,7 @@ impl Engine {
             }
             (Payload::no_data(), WriteKind::NoData)
         } else {
-            // Nothing to show until the first good poll (the old daemons
-            // also held attention until then).
+            // Nothing to show until the first good poll.
             let reading = self.active_reading()?.clone();
             let kind = if self.fresh_poll {
                 WriteKind::Poll

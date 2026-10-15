@@ -43,7 +43,7 @@ The desktop app reads usage with `claude -p /usage`, follows Claude Code hook ev
 - PMU: AXP2101 @ 0x34 (same chip as 2.16 — `XPowersLib` reused; battery is an optional kit add-on but PMU + charging circuitry are populated)
 - IMU: QMI8658 @ 0x6B (same chip — initialized for I2C bus health, rotation logic disabled)
 - IO expander: **XCA9554 / PCA9554** @ I2C 0x20. Gates LCD_RST, TP_RST, audio amp enable, and reads the PWR button. **`io_expander_init()` MUST run before `gfx->begin()` or `ft3168_init()`** — otherwise display/touch stay in reset and silently fail. PWR button is on EXIO4, active HIGH (verified empirically with the deleted `iox` serial debug command).
-- Orientation: **fixed at 0°**. IMU auto-rotation is disabled; `rotate_strip()` / `handle_rotation_change()` are excluded via `#ifndef BOARD_AMOLED_18`.
+- Orientation: **fixed at 0°**. IMU auto-rotation is off (`BOARD_HAS_ROTATION 0`).
 - Buttons: GPIO 0 (BOOT → Space/voice-mode), XCA9554 EXIO4 (PWR → brightness; on the stage → next scene; hold → pair). **No third button** (GPIO 18 button doesn't exist on this board).
 
 ### AMOLED-1.8 (C6) — `waveshare_amoled_18_c6`
@@ -209,7 +209,7 @@ hardware boards, not shared code).
 
 The firmware has serial commands: `screenshot` (dumps the LVGL framebuffer;
 `./screenshot.sh out.png [port]` turns it into a PNG sized to the panel),
-`info` (env/version/rev/link JSON), `chime` (plays the ding; `buzz` still works), `chime <gain> [volume]` (tune a board's speaker until reboot: gain 0..1, ES8311 volume 0..100; the 2.16 ships 0.7 / 77, tuned by ear; the 1.8 and LCD-1.54 ship 0.7 / 75, untested by ear), `unpair` (clear bonds, re-advertise), `ble` (link state, bonds, owner, peers), `disconnect` (drop every BLE link), and
+`info` (env/version/rev/link JSON), `perf` (redraw cost of the last face rise / settle / drop / streak), `chime` (plays the ding; `buzz` still works), `chime <gain> [volume]` (tune a board's speaker until reboot: gain 0..1, ES8311 volume 0..100; the 2.16 ships 0.7 / 77, tuned by ear; the 1.8 and LCD-1.54 ship 0.7 / 75, untested by ear), `unpair` (clear bonds, re-advertise), `ble` (link state, bonds, owner, peers), `disconnect` (drop every BLE link), and
 `clawd <show|screensaver|attention|joy|lurk|home>` to force a beat. **Use
 `clawd <beat>` + `screenshot` on every UI iteration** and Read the PNG; there
 is no need to edit the boot screen in `main.cpp` any more. C6 boards have no

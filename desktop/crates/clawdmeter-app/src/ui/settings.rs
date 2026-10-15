@@ -1,4 +1,4 @@
-//! The settings pages (spec §03): Device, Accounts, Hooks and Settings,
+//! The settings pages: Device, Accounts, Hooks and Settings,
 //! one view behind four sidebar entries. The setup wizard borrows the Hooks
 //! page.
 //!
