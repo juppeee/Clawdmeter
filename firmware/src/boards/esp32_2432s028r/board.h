@@ -4,7 +4,7 @@
 // (dual-core Xtensa, 4 MB flash, NO PSRAM), 2.8" 240x320 ILI9341 over 4-wire
 // SPI, XPT2046 *resistive* touch on a second SPI bus, CH340 USB-UART.
 //
-// First resistive-touch port in the tree, and the second classic-ESP32 target.
+// Resistive touch, classic ESP32 (not S3/C6).
 // Everything the no-PSRAM C6 ports already handle applies here too: shrunk
 // LVGL strips, direct-draw splash, static corner mascot, no screenshot path.
 //

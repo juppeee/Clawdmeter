@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 7] = [
+pub const BOARDS: [BoardInfo; 9] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -106,6 +106,28 @@ pub const BOARDS: [BoardInfo; 7] = [
         chip: "ESP32-C6",
         pwr_button: true,
     },
+    BoardInfo {
+        env: "esp32_2432s028r",
+        name: "CYD 2.8",
+        product: "ESP32-2432S028R Cheap Yellow Display (portrait)",
+        width: 240,
+        height: 320,
+        buy_url: "https://www.amazon.com/dp/B0BVFXR313",
+        summary: "240×320 · resistive touch · 1 button",
+        chip: "ESP32",
+        pwr_button: true,
+    },
+    BoardInfo {
+        env: "esp32_2432s028r_landscape",
+        name: "CYD 2.8 landscape",
+        product: "ESP32-2432S028R Cheap Yellow Display (landscape)",
+        width: 320,
+        height: 240,
+        buy_url: "https://www.amazon.com/dp/B0BVFXR313",
+        summary: "320×240 · resistive touch · 1 button",
+        chip: "ESP32",
+        pwr_button: true,
+    },
 ];
 
 /// Look up a board by env.
@@ -141,7 +163,7 @@ mod tests {
     fn every_board_has_art_and_a_shop() {
         for b in BOARDS {
             assert!(crate::ui::Assets::get(&b.illustration()).is_some(), "{} has no illustration", b.env);
-            assert!(b.buy_url.starts_with("https://www.waveshare.com/"), "{}", b.env);
+            assert!(b.buy_url.starts_with("https://"), "{}", b.env);
         }
     }
 }
