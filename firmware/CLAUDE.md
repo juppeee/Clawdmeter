@@ -53,7 +53,10 @@ C6) and allocates LVGL and animation buffers with `MALLOC_CAP_INTERNAL`. The
 `screenshot` serial command is compiled out (`LV_USE_SNAPSHOT=0`), so C6 UI
 changes must be eyeballed on hardware.
 
-UI changes: check them yourself with the `verifying-firmware-ui` skill.
+UI changes: check them yourself with the `verifying-firmware-ui` skill. The
+simulator grid (`tools/simgrid/`, `docs/sim-grid.md`) shows every panel at
+once from one script; the sim's controller mode behind it is
+`src/boards/sim/sim_ctrl.cpp`.
 
 ## Critical gotchas
 
