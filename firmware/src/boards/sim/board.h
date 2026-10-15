@@ -1,7 +1,7 @@
 #pragma once
 
 // Native desktop simulator "board" — an SDL2 window standing in for the
-// 480×480 AMOLED so shared code (main.cpp, ui.cpp, splash.cpp) can be
+// 480×480 AMOLED so shared code (main.cpp, ui.cpp, the director) can be
 // developed without hardware. No pins here, just geometry and the key map.
 //
 //   mouse / left-drag    touch (on the meters he reacts; elsewhere "show me the meters")

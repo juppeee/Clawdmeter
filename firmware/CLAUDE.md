@@ -24,7 +24,12 @@ pins and hardware gotchas, which loads when you work in that folder.
   are in `main.cpp` too.
 - **Clawd**: `clawd_director.cpp` owns the rooms and runs the beats;
   `clawd_policy.cpp` holds the pure rules and every timing (`ClawdTuning`,
-  `clawd_tuning_fast()` under `SIM_FAST`). The module map, every beat, the
+  `clawd_tuning_fast()` under `SIM_FAST`). There is no separate stage:
+  `performer.cpp` plays the full-size scenes on the meters, in front of the
+  panels (PSRAM boards; C6 plays corner acts instead). Liveliness (`lv`,
+  1 No-nonsense … 5 All-nonsense, kept in NVS by `clawd_prefs.cpp`) acts
+  only through `clawd_tuning_scaled()`; add new behaviour to the tuning
+  rather than checking the level elsewhere. The module map, every beat, the
   tunables and the C6 differences are in `docs/clawd-director.md`: read it
   before changing what Clawd does, and update it with the change.
 - **Meters**: `ui.cpp` draws only the meters. `compute_layout()` chooses the
@@ -51,10 +56,12 @@ UI changes: check them yourself with the `verifying-firmware-ui` skill.
 
 1. **No `#ifdef BOARD_*` in shared code.** Add a `BoardCaps` field, a HAL
    function or a per-board file instead (`docs/porting/capability-flags.md`).
-2. **One Clawd on screen, ever.** Corner sprite, full-size sprite and stage
-   performer are never visible together; beats wait for `mascot_away()` /
-   `splash_performer_visible()`. The stage only opens behind the face. Don't
-   add a second creature (stale data dims the meters instead).
+2. **One Clawd on screen, ever.** Corner sprite, full-size sprite, performer
+   and face are never visible together; beats wait for `mascot_away()` /
+   `performer_visible()` / the face's drop before the next appears.
+   `test/test_director` fuzzes the real director against fake actors and
+   fails on any tick with two. Don't add a second creature (stale data dims
+   the meters instead).
 3. **"No data" is not a 0 % sample.** `signals` feeds only `ok && !rp`
    payloads to the rate ring and the reset detector; anything else makes the
    reset chime fire falsely.

@@ -1,5 +1,5 @@
 #include "ui.h"
-#include "splash.h"
+#include "performer.h"
 #include "mascot.h"
 #include "clawd_anim.h"
 #include "clawd_policy.h"
@@ -257,7 +257,7 @@ static uint8_t anim_spinner_idx = 0;
 static uint8_t anim_phase = 0;
 static uint8_t anim_msg_idx = 0;
 static uint32_t anim_msg_start = 0;
-#define ANIM_MSG_MS     4000
+static const char* frozen_shown = nullptr;   // spinner held still: the word on screen
 
 static const char* const spinner_frames[] = {
     "\xC2\xB7", "\xE2\x9C\xBB", "\xE2\x9C\xBD",
@@ -586,7 +586,6 @@ void ui_init(void) {
     init_battery_icons();
 
     init_usage_screen(scr);
-    splash_init(scr);       // the stage room sits above the meters when open
 
     battery_img = lv_image_create(scr);
     lv_image_set_src(battery_img, &battery_dscs[0]);
@@ -615,13 +614,19 @@ void ui_init(void) {
                               : top + art_h;
         // Animated: idles, does acts, and takes walk-off/lurk trips (the
         // trips need PSRAM; without it he stays in his seat).
-        // Created last so he walks over the battery and the stage.
+        // Created after the panels so he walks over the battery.
         if (!mascot_create(scr, L.margin, feet, cell)) {
             logo_img = lv_image_create(scr);
             lv_image_set_src(logo_img, &logo_dsc);
             lv_obj_set_pos(logo_img, L.margin, top);
         }
     }
+
+    // Clawd performs in front of the meters, fully drawn, like the
+    // attention walk-on (a tap sends him off). Created last so he's on top
+    // of everything on the screen. His feet stand on the bottom edge of the
+    // last panel, clear of the (Clawd-orange) status line.
+    performer_init(scr, L.content_y + 2 * L.usage_panel_h + L.usage_panel_gap);
 
     lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
 }
@@ -785,16 +790,25 @@ void ui_tick_anim(void) {
         return;
     }
 
-    if (now - anim_msg_start >= ANIM_MSG_MS) {
+    // The verb changes every verb_ms; at No-nonsense that's once a minute
+    // and the spinner holds still, so the line only redraws when the word
+    // does (clawd_policy.h, liveliness).
+    const ClawdTuning& tune = clawd_tuning();
+    if (now - anim_msg_start >= tune.verb_ms) {
         anim_msg_idx = (anim_msg_idx + 1) % ANIM_MSG_COUNT;
         anim_msg_start = now;
     }
 
-    if (now - anim_last_ms < spinner_ms[anim_spinner_idx]) return;
-    anim_last_ms = now;
-    anim_phase = (anim_phase + 1) % SPINNER_PHASES;
-    anim_spinner_idx = (anim_phase < SPINNER_COUNT) ? anim_phase
-                                                    : (SPINNER_PHASES - anim_phase);
+    if (tune.spinner) {
+        if (now - anim_last_ms < spinner_ms[anim_spinner_idx]) return;
+        anim_last_ms = now;
+        anim_phase = (anim_phase + 1) % SPINNER_PHASES;
+        anim_spinner_idx = (anim_phase < SPINNER_COUNT) ? anim_phase
+                                                        : (SPINNER_PHASES - anim_phase);
+        frozen_shown = nullptr;
+    } else {
+        anim_spinner_idx = 1;
+    }
 
     // Status text by priority. Whimsical messages only when connected & settled.
     const char* text;
@@ -806,6 +820,11 @@ void ui_tick_anim(void) {
         text = "Connected";
     } else {
         text = anim_messages[anim_msg_idx];
+    }
+
+    if (!tune.spinner) {
+        if (text == frozen_shown) return;
+        frozen_shown = text;
     }
 
     // All states share the whimsical style: "<glyph> <Title-case word>…"
@@ -867,4 +886,5 @@ void ui_set_alert_text(const char* message) {
     lv_obj_set_width(lbl_anim, LV_SIZE_CONTENT);
     anim_last_ms = 0;          // whimsical line redraws on the next tick
     still_shown = nullptr;
+    frozen_shown = nullptr;
 }

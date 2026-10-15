@@ -13,5 +13,5 @@ Waveshare ESP32-S3-Touch-AMOLED-2.06 (CO5300, 410×502 watch form factor, FT3168
 - RTC: **PCF85063** on the same I2C bus, powered through AXP2101 for retention. Not used by Clawdmeter but present for future features.
 - Audio codec: **ES8311** + ES7210 ADC on the same I2C bus. The amp path is unverified on this board, so `sound.cpp` no-ops (same posture as the C6 1.8) — the shared `chime.cpp` engine is ready to wire up once it's tested on hardware.
 - **No IO expander** despite the Waveshare wiki FAQ implying one. The schematic shows Key3/PWR wired directly to AXP2101 PWRON; touch reset and display reset are direct GPIOs. `board_init()` pulses LCD_RESET (GPIO 8) and TP_RESET (GPIO 9) before display/touch HAL init.
-- Buttons: GPIO 0 (BOOT → Space/voice-mode), AXP PKEY (PWR → brightness; on the stage → next scene; hold-to-pair). **No third button**.
+- Buttons: GPIO 0 (BOOT → Space/voice-mode), AXP PKEY (PWR → brightness; hold-to-pair). **No third button**.
 - Flash: 32 MB. Uses `default_32MB.csv` partition table.

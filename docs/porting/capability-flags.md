@@ -34,12 +34,12 @@ is compiled differently for them; set them directly in `caps.cpp`.
 
 | Field          | Conventional value when absent | Purpose |
 |----------------|---------|---------------|
-| `minimal_ui` | `false` | Board-only minimal display: meters and a still corner Clawd, without stage, face, streak, or lurk trips. Set `true` for e-ink or slow panels. `minimal_mode()` returns `board_caps().minimal_ui`; there is no NVS override, desktop setting, or serial toggle. Attention uses a held pointing frame and a non-scrolling message; a tap or the 2-minute device timeout dismisses it and notifies the app. `SIM_MINIMAL=1` sets the simulator capability. |
-| `has_pwr_button` | `false` | A PWR-role button reaches the firmware (AXP PKEY, IO-expander pin or GPIO): brightness, next scene on the stage, hold ~3 s and release to pair. `false` when there is none (LCD-4, whose KEY/PWR is a hardware reset): the pairing hint then says to pair from the computer, and a 5 s touch hold on it clears the bonds (`pair_hold.h`). The `unpair` serial command clears them on every board. |
+| `minimal_ui` | `false` | Board-only minimal display: meters and a still corner Clawd, without performances, face, or lurk trips. Set `true` for e-ink or slow panels. `minimal_mode()` returns `board_caps().minimal_ui`; there is no NVS override, desktop setting, or serial toggle. Attention uses a held pointing frame and a non-scrolling message; a tap or the 2-minute device timeout dismisses it and notifies the app. `SIM_MINIMAL=1` sets the simulator capability. |
+| `has_pwr_button` | `false` | A PWR-role button reaches the firmware (AXP PKEY, IO-expander pin or GPIO): brightness, hold ~3 s and release to pair. `false` when there is none (LCD-4, whose KEY/PWR is a hardware reset): the pairing hint then says to pair from the computer, and a 5 s touch hold on it clears the bonds (`pair_hold.h`). The `unpair` serial command clears them on every board. |
 
 ## Build-flag macros
 
-`BOARD_HAS_PSRAM` is set as a `-D` build flag in `platformio.ini` (not in `board.h`) on chips with external PSRAM wired up. Shared code (`main.cpp`, `splash.cpp`) and per-board display drivers use it to choose between `MALLOC_CAP_SPIRAM` (large buffers) and `MALLOC_CAP_INTERNAL` (smaller buffers, partial-render LVGL, direct-to-panel stage rendering, screenshot capture disabled). New ESP32-C6 / ESP32-C3 ports must leave this undefined.
+`BOARD_HAS_PSRAM` is set as a `-D` build flag in `platformio.ini` (not in `board.h`) on chips with external PSRAM wired up. Shared code (`main.cpp`) and per-board display drivers use it to choose between `MALLOC_CAP_SPIRAM` (large buffers) and `MALLOC_CAP_INTERNAL` (smaller buffers, partial-render LVGL, screenshot capture disabled). The full-size sprites (`performer.cpp`, `mascot.cpp`) ask for PSRAM at run time and fall back to corner acts without it. New ESP32-C6 / ESP32-C3 ports must leave this undefined.
 
 ## Adding capabilities
 
