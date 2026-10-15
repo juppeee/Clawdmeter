@@ -4,9 +4,6 @@
 #include "usage_rate.h"
 #include "signals.h"
 
-bool usage_rate_sample(float session_pct, bool replay) {
-    return usage_rate_sample_at(millis(), session_pct, replay);
-}
 int usage_rate_group(void) { return usage_rate_group_at(millis()); }
 int usage_rate_base_group(void) { return usage_rate_base_group_at(millis()); }
 

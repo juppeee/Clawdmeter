@@ -227,7 +227,7 @@ impl StatusSnapshot {
     }
 }
 
-/// Spec §04: attention wins, then auth, then the link, then freshness.
+/// Attention wins, then auth, then the link, then freshness.
 pub fn tray_state(s: &Status, now: i64) -> TrayState {
     if s.engine.attention {
         return TrayState::Attention;

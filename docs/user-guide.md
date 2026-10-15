@@ -164,9 +164,6 @@ seconds and preserves comments and unknown keys when saving.
 | `reset_chime` | `off` | Chime on the device when the session usage resets (boards with a speaker). The older `chime` key still works. |
 | `alert_chime` | `off` | Chime on the device when Claude needs you (boards with a speaker). The older `beep` key still works. |
 | `desktop_chime` | `off` | Play the same chime on this computer when Claude needs you. Follows `alert_on`. |
-
-**Mute chimes** in the tray silences the alert chime and the desktop chime
-until the app restarts.
 | `clock` | `off` | `auto`, `12`, or `24` replaces the device's Usage title with a clock. |
 | `poll_interval` | automatic | Override working and no-hooks polling intervals, in seconds. The scheduler enforces at least 120 seconds per account. Quiet and other-account schedules still apply. |
 | `heartbeat_interval` | `60` | Resend cached readings between usage checks. This does not fetch usage. Keep the default unless diagnosing the connection. |
@@ -175,6 +172,9 @@ until the app restarts.
 | `alert_on` | `permission, question, elicitation` | Which waits alert on the device and tray: `permission`, `question`, `idle`, `elicitation` (MCP input), or `none`. Set on the Hooks page. Other notification types follow `permission`. |
 | `release_repo` | `HermannBjorgvin/Clawdmeter` | GitHub repository used for firmware releases. |
 | `onboarding_done` | unset | `true` after setup is finished or skipped. |
+
+**Mute chimes** in the tray silences the alert chime and the desktop chime
+until the app restarts.
 
 The tray app writes `daemon.log` in the state folder and keeps the previous
 run as `daemon.log.1`. **Settings** links to the log and config file.

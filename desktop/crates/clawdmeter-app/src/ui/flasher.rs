@@ -1,4 +1,4 @@
-//! The flasher (spec §02): plug in, confirm the board, flash. It is the
+//! The flasher: plug in, confirm the board, flash. It is the
 //! Flash page, and the setup wizard's board and flash steps.
 //!
 //! Steps: Connect → Identify → Firmware → Flash → Set up. Detection is the

@@ -2,8 +2,7 @@
 //! and the tray icon rasterizer.
 //!
 //! Everywhere in the app Clawd is drawn at whole cells with no smoothing; the
-//! tray icon is the one place he's point-sampled below one pixel per cell
-//! (spec §01, §04).
+//! tray icon is the one place he's point-sampled below one pixel per cell.
 
 include!(concat!(env!("OUT_DIR"), "/clawd_idle.rs"));
 
@@ -31,7 +30,7 @@ pub fn cell_rgb(index: u8) -> u32 {
 /// `--eye` in the design tokens.
 pub const EYE_INK: u32 = 0x141413;
 
-/// What the tray icon shows (spec §04).
+/// What the tray icon shows.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum TrayState {
     /// Fresh data reaching the device.

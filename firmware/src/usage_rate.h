@@ -2,10 +2,10 @@
 #include <stdint.h>
 
 // Usage rate → mood group ("slow clock"). Answers "how hard is Claude being
-// used right now?" from the session % the daemon reports, so Clawd's mood can
+// used right now?" from the session % the app reports, so Clawd's mood can
 // follow the last quarter hour instead of the bucket level.
 //
-// Model (design system §08 "New rate math"):
+// Model:
 //   * 15-minute window over REAL samples only. Heartbeat replays (`rp`) are
 //     dropped before they reach the ring.
 //   * Rate is %/h of the 5-hour session, read as a share of pace (using the
@@ -62,6 +62,5 @@ int   usage_rate_activity_at(uint32_t now_ms);
 int   usage_rate_group_at(uint32_t now_ms);
 
 // ---- millis() wrappers (usage_rate_clock.cpp) ----
-bool  usage_rate_sample(float session_pct, bool replay = false);
 int   usage_rate_group(void);
 int   usage_rate_base_group(void);    // rate only, no activity lift
