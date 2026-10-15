@@ -60,7 +60,8 @@ is faked behind `FlashHardware`.
 - Config keys: `config_dirs`, `poll_interval`, `heartbeat_interval`,
   `reset_chime` and `alert_chime` (device chimes; the old `chime` / `beep`
   keys are read when these are absent), `desktop_chime` (the same ding on
-  this computer via rodio, ALSA on Linux), `clock`, `claude_path`,
+  this computer via rodio, ALSA on Linux), `clock`, `liveliness` (1–5,
+  default 3: the Device page's Silliness slider, sent as `lv`), `claude_path`,
   `release_repo`, `update_check`, `onboarding_done`, `alert_on` (alert kinds
   the daemon lets through: the hook records `k` from `hook_event_name` /
   `notification_type` and `engine.on_attention` drops the rest; default all

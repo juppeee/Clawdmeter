@@ -22,6 +22,12 @@ pub const DEFAULT_HEARTBEAT_INTERVAL: u64 = 60;
 pub const MIN_INTERVAL: u64 = 10;
 /// GitHub repo the flasher reads releases from.
 pub const DEFAULT_RELEASE_REPO: &str = "HermannBjorgvin/Clawdmeter";
+/// How lively Clawd is on the device, 1 (No-nonsense) to 5 (All-nonsense).
+pub const LIVELINESS_MIN: u8 = 1;
+/// See [`LIVELINESS_MIN`].
+pub const LIVELINESS_MAX: u8 = 5;
+/// Some-nonsense: the director's own timings.
+pub const DEFAULT_LIVELINESS: u8 = 3;
 
 /// A config file held as its original lines.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -203,6 +209,8 @@ pub struct Settings {
     pub update_check: bool,
     /// Which kinds of "Claude needs you" alert reach the device and tray.
     pub alert_on: AlertOn,
+    /// How lively Clawd is on the device (`lv`, 1-5, default 3).
+    pub liveliness: u8,
 }
 
 /// `alert_on`: the alert kinds that show, as a comma list of `permission`,
@@ -272,6 +280,15 @@ impl AlertOn {
     }
 }
 
+/// Parse `liveliness`: a whole number, clamped to 1-5; anything else is the
+/// default.
+pub fn parse_liveliness(v: &str) -> u8 {
+    match v.trim().parse::<i64>() {
+        Ok(n) => n.clamp(LIVELINESS_MIN as i64, LIVELINESS_MAX as i64) as u8,
+        Err(_) => DEFAULT_LIVELINESS,
+    }
+}
+
 /// Parse an interval like the bash daemon: digits only, clamped to >= 10.
 pub fn parse_interval(v: &str) -> Option<u64> {
     let v = v.trim();
@@ -319,6 +336,7 @@ impl Settings {
             claude_path: cfg.get("claude_path").filter(|s| !s.is_empty()).map(|s| paths.expand_tilde(s)),
             update_check: on_off(cfg.get("update_check"), true),
             alert_on: cfg.get("alert_on").map(AlertOn::parse).unwrap_or_default(),
+            liveliness: cfg.get("liveliness").map(parse_liveliness).unwrap_or(DEFAULT_LIVELINESS),
         }
     }
 
@@ -401,6 +419,9 @@ impl Settings {
         }
         if current.alert_on != self.alert_on {
             cfg.set("alert_on", &self.alert_on.as_config());
+        }
+        if current.liveliness != self.liveliness {
+            cfg.set("liveliness", &self.liveliness.to_string());
         }
     }
 }
@@ -529,6 +550,24 @@ mod tests {
         assert_eq!(settings("").release_repo, DEFAULT_RELEASE_REPO);
         assert_eq!(settings("release_repo = me/fork").release_repo, "me/fork");
         assert_eq!(settings("release_repo = nonsense").release_repo, DEFAULT_RELEASE_REPO);
+    }
+
+    #[test]
+    fn liveliness() {
+        assert_eq!(settings("").liveliness, DEFAULT_LIVELINESS);
+        assert_eq!(settings("liveliness = 5\n").liveliness, 5);
+        assert_eq!(settings("liveliness = 0\n").liveliness, 1, "clamped");
+        assert_eq!(settings("liveliness = 9\n").liveliness, 5, "clamped");
+        assert_eq!(settings("liveliness = lots\n").liveliness, DEFAULT_LIVELINESS);
+
+        let mut cfg = ConfigFile::parse("");
+        let mut s = Settings::from_config(&cfg, &paths(), None);
+        s.apply_to(&mut cfg, &paths());
+        assert!(cfg.get("liveliness").is_none(), "the default stays out of the file");
+        s.liveliness = 1;
+        s.apply_to(&mut cfg, &paths());
+        assert_eq!(cfg.get("liveliness"), Some("1"));
+        assert_eq!(Settings::from_config(&cfg, &paths(), None).liveliness, 1);
     }
 
     #[test]

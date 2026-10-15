@@ -80,7 +80,7 @@ static void go(Beat b) {
     beat = b;
     step = 0;
     wait_until = now_ms();
-    mascot_autonomy(b == B_HOME && !minimal);
+    mascot_autonomy(b == B_HOME && !minimal && clawd_tuning().idle_acts);
 }
 
 void director_set_trace(bool on) { trace = on; }
@@ -124,6 +124,7 @@ static void arrive_meters(void) {
 // trip he cuts it short and hurries back, then reacts (anticipation: the
 // reaction is never just dropped). Only on the meters with nothing staged.
 static void react(const char* anim, uint8_t times) {
+    if (!clawd_tuning().reactions) return;
     if (beat != B_HOME && beat != B_CORNER) return;
     if (mascot_act(anim, times)) { react_anim = NULL; go(B_CORNER); return; }
     if (!mascot_hurry_home()) return;
@@ -263,6 +264,15 @@ void director_button(void) {
     if (beat == B_SCREENSAVER) to_meters(false);
 }
 
+void director_set_liveliness(int level) {
+    clawd_set_liveliness(level);
+    const ClawdTuning& t = clawd_tuning();
+    if (!t.reactions) { react_anim = NULL; joy_pending = false; }
+    if (!t.screensaver) resume_screensaver = false;
+    if ((beat == B_SHOW && !t.shows) || (beat == B_SCREENSAVER && !t.screensaver)) to_meters(false);
+    mascot_autonomy(beat == B_HOME && !minimal && t.idle_acts);
+}
+
 static void indev_cb(lv_event_t* e) {
     (void)e;
     lv_point_t p = { 0, 0 };
@@ -284,7 +294,7 @@ void director_on_payload(const UsageData* d, const SignalsUpdate* sig) {
         last_pct = d->session_pct;
     }
 
-    if (sig->session_reset && !minimal) {
+    if (sig->session_reset && !minimal && clawd_tuning().reactions) {
         // Fresh window: jumping happy twice, the same moment as the chime if
         // he's home, else when he gets back. Never on replays (signals only
         // reports real samples). It outranks the notice / wave below.
@@ -616,7 +626,7 @@ static void run_home(uint32_t now) {
 void director_tick(void) {
     const uint32_t now = now_ms();
     const int activity = signals_activity();
-    show_gate_update(&show_gate, now, activity);
+    show_gate_update(&show_gate, now, activity, &clawd_tuning());
     // Tool calls flowing (PostToolUse) are hook events too: you're working.
     if (activity > 0) last_engagement = now;
     face_tick();

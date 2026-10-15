@@ -145,7 +145,11 @@ static void seat(void) {
     seated_since = millis();
     int g = usage_rate_group();
     if (g < 0 || g > 3) g = 0;
-    idle_gap = clawd_jitter(STILL_MS_BY_RATE[g], &rng);
+    // Liveliness scales the still time; never under 1.5 s, so even
+    // All-nonsense lets him land between acts.
+    uint32_t still = (uint32_t)STILL_MS_BY_RATE[g] * clawd_tuning().idle_gap_pct / 100;
+    if (still < 1500) still = 1500;
+    idle_gap = clawd_jitter(still, &rng);
     show(img, true);
     draw_corner();
 }

@@ -337,7 +337,8 @@ a board capability, with no NVS override, desktop setting, or serial toggle.
 
 ## Tunables
 
-`ClawdTuning` in `clawd_policy.h` holds all the timings: show after 5 min,
+`ClawdTuning` in `clawd_policy.h` holds all the timings (the numbers here
+are Some-nonsense, liveliness 3; see "Liveliness" below): show after 5 min,
 cooldown 15 min, show scene loop 16 s, quiet 10 min, calm dip every 3–5 min,
 calm scene loop 10 s, alert timeout 2 min, long turn 2 min, joy wait 5 min,
 reaction wait 15 s, blinks every 2–6 s, peek look 1.6–2.4 s, peek
@@ -345,6 +346,32 @@ curiosity 5 min, double blink on a peek 30 %, curious glances back toward the
 tap 60 %. `clawd_tuning_fast()` compresses them for the sim (`SIM_FAST=1`;
 the peek's curiosity becomes 12 s, under the 15 s quiet time as in the
 defaults).
+
+## Liveliness
+
+The app's **Silliness** slider (config `liveliness`, payload `lv`, 1–5,
+default 3) sets how lively Clawd is. The device stores the last value in
+NVS (`liveliness.cpp`, key `lively`) so it applies from boot. One pure
+function, `clawd_tuning_scaled()`, turns the base tuning (the defaults, or
+`SIM_FAST`'s) into the effective one; the director, the corner and the
+status line read nothing else, and `director_set_liveliness()` applies a
+change at once (a show or screensaver the new level rules out goes home).
+
+| Level | What changes |
+|---|---|
+| 1 No-nonsense | No shows, screensaver, idle acts or lurk trips, and no reactions (noticing, long-turn wave, fresh-window joy). The status line's verb changes once a minute and the spinner holds still, so with no taps or alerts only the clock and that word redraw. A tap still gets the peek, an alert still gets the attention walk-on. |
+| 2 | Rate-like timings ÷ 0.6: show after ~8.3 min, cooldown 25 min, calm dips every 5–8.3 min, corner still time ×1.67, wave after a 3.3-min turn. |
+| 3 Some-nonsense | The base timings above. |
+| 4 | ÷ 1.8: show after ~2.8 min, cooldown ~8.3 min, calm dips every ~1.7–2.8 min, still time ×0.56, wave after ~67 s. |
+| 5 All-nonsense | ÷ 3: show after 100 s of activity **2** or more (not just 3), cooldown 5 min, calm dips every 1–1.7 min, still time ×0.33 (never under 1.5 s), wave after a 40-s turn. |
+
+The quiet time before the screensaver (10 min) doesn't scale: it measures
+you being away, not him. Levels 2 and 4 sit between their neighbours on a
+log scale (0.6 / 1 / 1.8 / 3). Native tests: `test_clawd_policy` (the
+scaling), `test_director` (No-nonsense sits still through activity, prompts,
+stops, usage and a reset but still peeks on a tap; turning it down mid-show
+ends the show; the one-Clawd fuzz at every level). In the sim:
+`SIM_CMDS="300:liveliness 1"`, or `"lv":1` in a scenario line.
 
 ## QA
 
@@ -369,7 +396,7 @@ defaults).
   output (01–25 the main walkthrough, 26 stale data, 27–29 a lurk cut short,
   30–31 attention handing back to the screensaver, 32 PWR during a calm dip,
   33–34 the jump at 368×448 and its 240×240 fallback, 37–38 a show at
-  368×448 and 240×240, 35-peek-* a tap on the meters: crouch, hop, ducks
+  368×448 and 240×240, 39 No-nonsense mid-walkthrough (he sits still), 35-peek-* a tap on the meters: crouch, hop, ducks
   out, face rises, looks toward the tap, blinks, still up seconds later (a
   glance back toward the tap, a blink), the tap on the face blinks and drops
   it, back in his seat; then a tap on stale meters (12–13) and while pairing

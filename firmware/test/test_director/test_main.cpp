@@ -101,7 +101,10 @@ static void fresh_director(void) {
     resume_screensaver = false;
     react_anim = NULL;
     joy_pending = false;
-    clawd_tuning_fast(&clawd_tuning());
+    ClawdTuning fast;
+    clawd_tuning_fast(&fast);
+    clawd_tuning_set_base(&fast);
+    clawd_set_liveliness(CLAWD_LIVELINESS_DEFAULT);
     director_init();
     // Hooks installed: one activity reading is enough for signals to know.
     signals_clear();
@@ -110,10 +113,13 @@ static void fresh_director(void) {
     signals_ingest_at(&d, fake_now_ms);
 }
 
+static int fuzz_level = CLAWD_LIVELINESS_DEFAULT;
+
 static void fuzz(uint32_t seed, uint32_t total_ms, bool has_big) {
     fz = seed;
     world.has_big = has_big;
     fresh_director();
+    director_set_liveliness(fuzz_level);
     float pct = 10;
     uint32_t es = 0;
     for (uint32_t t = 0; t < total_ms && !broke;) {
@@ -138,6 +144,7 @@ static void fuzz(uint32_t seed, uint32_t total_ms, bool has_big) {
             director_debug(BEATS[fz_next() % 6]);
             continue;
         }
+        case 14:         director_set_liveliness((int)fz_range(1, 5)); continue;
         default:         break;                   // a quiet stretch
         }
         d.session_pct = pct;
@@ -169,10 +176,63 @@ static void test_fuzz_one_clawd_without_full_size_sprite(void) {
     assert_every_beat_seen(false);
 }
 
+// No-nonsense: everything that isn't a tap or an alert leaves him sitting
+// still in his seat: busy stretches, prompts, stops, usage moving, a fresh
+// window, a long quiet.
+static void test_no_nonsense_sits_still_through_everything_but_taps(void) {
+    fresh_director();
+    director_set_liveliness(1);
+    float pct = 10;
+    uint32_t es = 0;
+    world.activity = 3;
+    bool moved = false;
+    for (int i = 0; i < 400 && !moved; i++) {
+        UsageData d = live_payload();
+        SignalsUpdate sig = no_signal();
+        if (i % 3 == 0) { sig.event_fired = true; sig.event = "psb"[(i / 3) % 3]; sig.event_seq = ++es; }
+        if (i % 7 == 0) pct += 1;
+        if (i == 200) { sig.session_reset = true; pct = 0; }
+        d.session_pct = pct;
+        send(d, sig);
+        for (int t = 0; t < 500; t += TICK_MS) {    // 200 s in all, past every fast timer
+            run_for(TICK_MS);
+            if (!fake_corner_seated_still() || strcmp(director_beat_name(), "home") != 0) moved = true;
+        }
+    }
+    TEST_ASSERT_FALSE_MESSAGE(moved, "he left his seat or a beat started");
+    director_tap(300);                               // a tap still gets the peek
+    run_for(3000);
+    TEST_ASSERT_EQUAL_STRING("peek", director_beat_name());
+    director_set_liveliness(CLAWD_LIVELINESS_DEFAULT);
+}
+
+// Turning the slider down mid-show ends the show gracefully.
+static void test_no_nonsense_ends_a_running_show(void) {
+    fresh_director();
+    TEST_ASSERT_TRUE(director_debug("show"));
+    run_for(6000);
+    director_set_liveliness(1);
+    run_for(30 * 1000);
+    assert_one_clawd();
+    TEST_ASSERT_EQUAL_STRING("home", director_beat_name());
+    TEST_ASSERT_TRUE(fake_corner_seated_still());
+    director_set_liveliness(CLAWD_LIVELINESS_DEFAULT);
+}
+
+static void test_fuzz_one_clawd_at_every_liveliness(void) {
+    for (fuzz_level = 1; fuzz_level <= 5 && !broke; fuzz_level++)
+        for (uint32_t seed = 1; seed <= 6 && !broke; seed++) fuzz(seed * 97u + fuzz_level, 20 * 60 * 1000, true);
+    fuzz_level = CLAWD_LIVELINESS_DEFAULT;
+    assert_one_clawd();
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_screensaver_calm_dip_keeps_one_clawd);
     RUN_TEST(test_fuzz_one_clawd_with_full_size_sprite);
     RUN_TEST(test_fuzz_one_clawd_without_full_size_sprite);
+    RUN_TEST(test_no_nonsense_sits_still_through_everything_but_taps);
+    RUN_TEST(test_no_nonsense_ends_a_running_show);
+    RUN_TEST(test_fuzz_one_clawd_at_every_liveliness);
     return UNITY_END();
 }

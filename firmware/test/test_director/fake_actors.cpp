@@ -236,6 +236,8 @@ OnScreen fake_on_screen(void) {
     return s;
 }
 
+bool fake_corner_seated_still(void) { return m_mode == M_SEATED; }
+
 int fake_clawds(const OnScreen& s) {
     return (int)s.corner + (int)s.big + (int)s.performer + (int)s.face;
 }

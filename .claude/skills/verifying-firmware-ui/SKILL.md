@@ -35,7 +35,7 @@ Write captures outside the repo (a scratch dir), convert BMP → PNG if needed
 | `SIM_FAST=1` | Director minutes → seconds (`clawd_tuning_fast()`) |
 | `SIM_SCENARIO=sim/<file>.jsonl` | Payload script; `director.jsonl` hits every beat, `director-resume.jsonl` interruptions |
 | `SIM_SHOTS="ms:path,…"` | Screenshots at ascending times; exits after the last |
-| `SIM_CMDS="ms:cmd;…"` | Serial commands, e.g. `clawd show`, `clawd peek <x>`; `pwr`, `prompt`, `stop`, `alert` press the button/keys |
+| `SIM_CMDS="ms:cmd;…"` | Serial commands, e.g. `clawd show`, `clawd peek <x>`, `liveliness 1`; `pwr`, `prompt`, `stop`, `alert` press the button/keys |
 | `SIM_TAPS="ms@x,y;…"` | Touches; `ms@x,y+hold_ms` for a touch hold |
 | `SIM_TRACE=1` | Director transitions with timestamps (find when a beat actually happens) |
 | `SIM_NO_PWR=1` / `SIM_MINIMAL=1` | A board without a PWR button / `BoardCaps.minimal_ui` |

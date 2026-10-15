@@ -30,11 +30,49 @@ struct ClawdTuning {
     uint32_t peek_curious_ms;    // the peek's face stays up this long, then goes back on its own
     uint8_t  peek_double_pct;    // chance the peek's blink is a double
     uint8_t  peek_toward_pct;    // chance a curious resting glance goes back toward the tap
+
+    // What he does on his own at all, and how often (set by liveliness,
+    // clawd_tuning_scaled). Taps and alerts always get their reaction.
+    bool     shows;              // earned shows happen
+    bool     screensaver;        // the face comes up when you're away
+    bool     idle_acts;          // corner autonomy: idle acts and lurk trips
+    bool     reactions;          // noticing a prompt, the long-turn wave, fresh-window joy
+    uint8_t  show_min_activity;  // activity level (0-3) whose stretch earns a show
+    uint16_t idle_gap_pct;       // the corner's still time between acts, % of the mood's base
+    uint32_t verb_ms;            // the status line's thinking verb changes this often
+    bool     spinner;            // the status line's spinner turns
 };
 
-ClawdTuning& clawd_tuning(void);           // mutable singleton, defaults below
+// The effective tuning: the base (defaults, or the sim's fast set) scaled
+// by the current liveliness. Mutable for tests; clawd_tuning_set_base and
+// clawd_set_liveliness rebuild it.
+ClawdTuning& clawd_tuning(void);
 void         clawd_tuning_defaults(ClawdTuning* t);
 void         clawd_tuning_fast(ClawdTuning* t);   // sim walkthrough timings
+
+// ─── Liveliness ──────────────────────────────────────────────────────────────
+// How lively Clawd is, 1 to 5 (the app's slider: 1 No-nonsense, 3
+// Some-nonsense, 5 All-nonsense; payload `lv`, kept in NVS).
+//   1  sits still in his corner: no shows, screensaver, idle acts or
+//      reactions; the status verb changes once a minute and the spinner
+//      holds still. Taps (the peek) and alerts (the attention walk-on) are
+//      unchanged.
+//   3  the base timings as they are.
+//   5  shows earned by a shorter, lighter stretch (activity 2 counts) with
+//      shorter cooldowns, calm dips and idle acts far more often, the wave
+//      for shorter turns.
+// 2 and 4 sit in between: the rate-like timings divide by 0.6 / 1 / 1.8 / 3
+// for levels 2..5 (so 4 is about halfway between 3 and 5 on a log scale).
+// The quiet time before the screensaver is about you being away, not about
+// him, so it doesn't scale.
+#define CLAWD_LIVELINESS_MIN     1
+#define CLAWD_LIVELINESS_MAX     5
+#define CLAWD_LIVELINESS_DEFAULT 3
+int  clawd_liveliness_clamp(int level);   // out of range → nearest end
+void clawd_tuning_scaled(const ClawdTuning* base, int level, ClawdTuning* out);
+void clawd_tuning_set_base(const ClawdTuning* base);
+void clawd_set_liveliness(int level);
+int  clawd_liveliness(void);
 
 // ─── Randomness ──────────────────────────────────────────────────────────────
 // Small xorshift so behaviour is reproducible in tests (seeded) and cheap on
@@ -55,9 +93,10 @@ int clawd_pick_no_repeat(const char* const* names, int count, const char* last, 
 uint32_t clawd_jitter(uint32_t base_ms, ClawdRng* r);
 
 // ─── Show gate ───────────────────────────────────────────────────────────────
-// A show is earned by `show_after_ms` of continuous activity level 3 and
-// limited to one per `show_cooldown_ms`. Activity < 3 (or unknown) restarts
-// the clock.
+// A show is earned by `show_after_ms` of continuous activity at
+// `show_min_activity` (3 unless liveliness lowers it) and limited to one per
+// `show_cooldown_ms`. Lower (or unknown) activity restarts the clock. Never
+// ready while shows are off.
 struct ShowGate {
     bool     busy;          // activity has been 3 since `busy_since`
     uint32_t busy_since;
@@ -65,7 +104,8 @@ struct ShowGate {
     uint32_t last_show;
 };
 void show_gate_clear(ShowGate* g);
-void show_gate_update(ShowGate* g, uint32_t now, int activity);
+// Activity at or above t->show_min_activity counts toward a show.
+void show_gate_update(ShowGate* g, uint32_t now, int activity, const ClawdTuning* t);
 bool show_gate_ready(const ShowGate* g, uint32_t now, const ClawdTuning* t);
 void show_gate_mark_shown(ShowGate* g, uint32_t now);   // also restarts the busy clock
 

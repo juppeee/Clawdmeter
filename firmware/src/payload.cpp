@@ -59,6 +59,13 @@ bool payload_parse(const char* json, UsageData* out, const char** err) {
         d.sessions = (int16_t)(v < 0 ? 0 : v > 999 ? 999 : v);
     }
     d.replay = doc["rp"].as<bool>();
+    JsonVariant lv = doc["lv"];
+    if (lv.isNull()) {
+        d.liveliness = -1;
+    } else {
+        int v = lv | 3;
+        d.liveliness = (int8_t)(v < 1 ? 1 : v > 5 ? 5 : v);
+    }
 
     d.ok = doc["ok"] | false;
     d.valid = true;

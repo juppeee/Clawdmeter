@@ -44,6 +44,10 @@ void director_tap(int x);
 // stays in view for the hold.
 void director_set_pairing_touch(bool on);
 void director_button(void);        // a physical button press: you're here
+// Apply a liveliness level (clawd_policy.h) now: the tuning changes, and
+// what the new level rules out (a show, the screensaver, idle acts, a
+// pending reaction) stops.
+void director_set_liveliness(int level);
 
 // Print every beat step with a timestamp (the sim turns it on with
 // SIM_TRACE=1 for walkthrough timings). Beat changes always print.

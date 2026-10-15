@@ -12,7 +12,7 @@
 //   s  sr  w  wr  st  c  b  m  x  acct  tp  pd  rd  t  tf  ok   (long-standing)
 //   a   activity level 0-3 (clamped)          e   latest event, first char used
 //   es  event sequence number (uint32)        n   active sessions (clamped 0..999)
-//   rp  1 on a heartbeat replay
+//   rp  1 on a heartbeat replay               lv  liveliness 1-5 (clamped), -1 absent
 //
 // Returns false on malformed JSON; `*err` (if non-null) then points at a
 // static description. `out` is fully overwritten on success, untouched on

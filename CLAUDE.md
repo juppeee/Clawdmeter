@@ -68,6 +68,8 @@ The app writes one complete JSON object per write to RX
 - Fast clock: `a` (activity 0–3), `e` + `es` (event `p`/`s`/`b` and its
   sequence), `n` (active sessions). `rp:1` marks a heartbeat replay, which the
   rate math skips.
+- Liveliness: `lv` (1–5, on every data payload); the device keeps the last
+  one in NVS (`liveliness.cpp`) so it applies from boot.
 - Device → app: `0x01` on REQ (`…-0004`) when it has no data yet;
   `{"dismiss":true}` on TX (`…-0003`) when a tap or the 2-minute timeout ends
   an alert. The app clears its own alert and doesn't echo a clear back. Alerts

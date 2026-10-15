@@ -18,6 +18,7 @@
 #include "idle.h"
 #include "idle_cfg.h"
 #include "brightness.h"
+#include "liveliness.h"
 #include "perf.h"
 #include "pair_hold.h"
 
@@ -208,6 +209,11 @@ static void check_serial_cmd() {
                 clear_pairing("serial");
                 Serial.println("{\"unpair\":true}");
             }
+            else if (strcmp(cmd_buf, "liveliness") == 0 || strncmp(cmd_buf, "liveliness ", 11) == 0) {
+                // QA: `liveliness [1-5]` (until the app sends its own).
+                if (cmd_buf[10] == ' ') liveliness_set(atoi(cmd_buf + 11));
+                Serial.printf("{\"liveliness\":%d}\n", liveliness_get());
+            }
             else if (strncmp(cmd_buf, "clawd ", 6) == 0) {
                 const bool ok = director_debug(cmd_buf + 6);
                 Serial.printf("{\"clawd\":\"%s\",\"ok\":%s}\n", cmd_buf + 6, ok ? "true" : "false");
@@ -271,6 +277,7 @@ void setup() {
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
     director_init();    // rooms + beats; boots on the meters (home)
+    liveliness_init();  // the saved liveliness, before the app says otherwise
 
     Serial.printf("Dashboard ready (%s, %dx%d) %lu ms after boot, waiting for data on BLE...\n",
         board_caps().name, W, H, (unsigned long)millis());
@@ -472,6 +479,7 @@ void loop() {
             // Stop or tool activity doesn't: Claude working alone isn't you.
             if (sig.event_fired && (sig.event == 'p' || sig.event == 'b'))
                 idle_note_activity();
+            if (usage.liveliness > 0) liveliness_set(usage.liveliness);
             director_on_payload(&usage, &sig);
             if (usage.alert_msg[0]) {
                 Serial.println("attention — mascot");

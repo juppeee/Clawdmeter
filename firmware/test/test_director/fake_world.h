@@ -25,4 +25,5 @@ struct OnScreen {
     bool face;             // the face, any part of it
 };
 OnScreen fake_on_screen(void);
+bool     fake_corner_seated_still(void);   // in his seat, not acting or walking
 int      fake_clawds(const OnScreen& s);

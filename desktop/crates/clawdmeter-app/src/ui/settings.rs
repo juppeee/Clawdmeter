@@ -11,15 +11,15 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clawdmeter_core::autostart::{self, LaunchMode};
-use clawdmeter_core::config::{AlertOn, ClockMode, ConfigFile};
+use clawdmeter_core::config::{AlertOn, ClockMode, ConfigFile, LIVELINESS_MAX};
 use clawdmeter_core::{Paths, Settings};
 use clawdmeter_flash::device::{self, FirmwareInfo};
 use gpui::{div, img, prelude::*, px, Context, EventEmitter, PathPromptOptions, SharedString, Window};
 
 use super::theme::{Theme, FONT_DISPLAY, FONT_MONO, R_M, R_S};
 use super::widgets::{
-    button, caption, card, checkbox, field, field_stacked, heading, icon, notice, para, pill, segmented, subheading,
-    toggle, ButtonKind, Tone,
+    button, caption, card, checkbox, field, field_stacked, heading, icon, notice, para, pill, segmented,
+    stepped_slider, subheading, toggle, ButtonKind, Tone,
 };
 use super::{command, live_status, not_running_text, run_blocking, Navigate, REFRESH};
 use crate::diff::{line_diff, with_context, DiffLine};
@@ -566,6 +566,27 @@ impl SettingsView {
                     });
                 },
             ),
+        ));
+        let me = cx.entity().downgrade();
+        pane = pane.child(field_stacked(
+            t,
+            "Silliness",
+            "How lively Clawd is. No-nonsense keeps him still in his corner, though taps and alerts still get a \
+             reaction; All-nonsense brings frequent shows and reactions.",
+            div().w_full().flex().justify_center().child(stepped_slider(
+                t,
+                "liveliness",
+                LIVELINESS_MAX,
+                self.settings.liveliness,
+                &[(1, "No-nonsense"), (3, "Some-nonsense"), (5, "All-nonsense")],
+                true,
+                move |level, _, cx| {
+                    let _ = me.update(cx, |v, cx| {
+                        v.save(|s, _| s.liveliness = level);
+                        cx.notify();
+                    });
+                },
+            )),
         ));
         let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
         let (alert, reset) = (self.settings.alert_chime, self.settings.reset_chime);
@@ -1319,6 +1340,10 @@ mod tests {
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(text.starts_with("# mine\n"), "comments kept: {text}");
         assert!(text.contains("reset_chime = on"), "{text}");
+        click(cx, "liveliness-1");
+        assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("liveliness = 1"));
+        click(cx, "liveliness-3"); // Back to the default: the key stays, the value follows.
+        assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("liveliness = 3"));
 
         view.update(cx, |v, cx| v.show(Page::Settings, false, cx));
         click(cx, "poll-2"); // While working: 5 min
