@@ -44,7 +44,7 @@
 // ---- Buttons (active-LOW GPIOs, internal pull-ups) ----
 // BOOT (GPIO 0) is a strap pin: do not hold it through power-up.
 #define BTN_BACK_GPIO        0     // BOOT -- primary, Space (PTT)
-#define BTN_PWR_GPIO         14    // PWR role: brightness, next scene, hold-to-pair
+#define BTN_PWR_GPIO         14    // PWR role: brightness, hold-to-pair
 
 // ---- Capability flags ----
 #define BOARD_HAS_SECONDARY_BUTTON 0
