@@ -36,6 +36,7 @@ Nested `CLAUDE.md` files load when you read or edit a file in their folder.
 | `lilygo_t4s3` | LILYGO T4-S3 | RM690B0 AMOLED 450×600, CST226SE touch, SY6970 charger |
 | `waveshare_lcd_183` | Waveshare ESP32-S3-Touch-LCD-1.83 | ST7789P SPI 240×284, CST816 touch, AXP2101 |
 | `esp32_s3_4848s040` | Guition-style ESP32-S3 4848S040 | ST7701S RGB 480×480, GT911 touch, no buttons readable |
+| `m5sticks3` | M5Stack M5StickS3 | ST7789P3 SPI 135×240, no touch, M5PM1 PMIC, ES8311 chime |
 | `m5stack_fire` | M5Stack FIRE | ESP32 (classic, no S3), ILI9342C SPI 320×240, no touch, 3 buttons, IP5306 |
 | `lilygo_t_display_s3` | LILYGO T-Display S3 (non-touch) | ST7789 i80 parallel 170×320, BOOT + a PWR-role key |
 | `waveshare_lcd_2` | Waveshare ESP32-S3-Touch-LCD-2 | ST7789T3 SPI 240×320, CST816D touch, no usable buttons |

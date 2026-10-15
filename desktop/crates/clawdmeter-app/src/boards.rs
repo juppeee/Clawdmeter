@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 18] = [
+pub const BOARDS: [BoardInfo; 19] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -225,6 +225,17 @@ pub const BOARDS: [BoardInfo; 18] = [
         buy_url: "https://shop.m5stack.com/products/m5stack-fire-iot-development-kit-psram-v2-7",
         summary: "320×240 · 3 buttons · no touch",
         chip: "ESP32",
+        pwr_button: true,
+    },
+    BoardInfo {
+        env: "m5sticks3",
+        name: "M5StickS3",
+        product: "M5Stack M5StickS3",
+        width: 135,
+        height: 240,
+        buy_url: "https://shop.m5stack.com/products/m5sticks3-esp32s3-mini-iot-dev-kit",
+        summary: "135×240 · no touch",
+        chip: "ESP32-S3",
         pwr_button: true,
     },
 ];
