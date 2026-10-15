@@ -9,6 +9,10 @@ static const BoardCaps caps = {
     .has_rotation = (bool)BOARD_HAS_ROTATION,
     .has_battery  = (bool)BOARD_HAS_BATTERY,
     .has_imu      = (bool)BOARD_HAS_IMU,
+    .minimal_ui   = false,   // full animated UI; true for e-ink / slow panels
+    // No dedicated PWR key: the BOOT long-hold (power.cpp) only cycles
+    // brightness / next scene, so pairing is the touch hold on the hint.
+    .has_pwr_button = false,
 };
 
 const BoardCaps& board_caps(void) { return caps; }

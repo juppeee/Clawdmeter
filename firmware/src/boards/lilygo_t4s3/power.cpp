@@ -10,11 +10,14 @@
 // single-cell LiPo: 4.20 V → 100 %, 3.30 V → 0 %.
 //
 // PWR-button synthesis: the board has no PMU push-button and no second
-// GPIO button, so screen cycling is mapped to a long press of GPIO 0
-// (the same button input.cpp reports as PRIMARY). The two HALs observe
-// the same GPIO independently — a brief press is just a Space PTT; a
-// hold past PWR_LONGPRESS_MS fires one PWR press event (edge on release)
-// without disturbing the in-flight HID press/release semantics.
+// GPIO button, so brightness / next-scene is mapped to a long press of
+// GPIO 0 (the same button input.cpp reports as PRIMARY). The two HALs
+// observe the same GPIO independently — a brief press is just a Space PTT;
+// a hold past PWR_LONGPRESS_MS fires one PWR press event without disturbing
+// the in-flight HID press/release semantics. Because BOOT is shared with
+// PTT there is no hold-to-pair gesture here (caps.has_pwr_button = false):
+// pwr_long_pressed / pwr_released never fire and pairing is cleared by the
+// 5 s touch hold on the pairing hint.
 
 #define BATTERY_POLL_MS  2000
 #define CHARGING_POLL_MS 500
@@ -100,3 +103,7 @@ bool power_hal_pwr_pressed(void) {
     }
     return false;
 }
+
+// Hold-to-pair is not offered on this board (see the note at the top).
+bool power_hal_pwr_long_pressed(void) { return false; }
+bool power_hal_pwr_released(void)     { return false; }

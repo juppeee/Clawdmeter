@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 7] = [
+pub const BOARDS: [BoardInfo; 8] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -106,6 +106,17 @@ pub const BOARDS: [BoardInfo; 7] = [
         chip: "ESP32-C6",
         pwr_button: true,
     },
+    BoardInfo {
+        env: "lilygo_t4s3",
+        name: "T4-S3",
+        product: "LILYGO T4-S3",
+        width: 450,
+        height: 600,
+        buy_url: "https://lilygo.cc/products/t4-s3",
+        summary: "450×600 · AMOLED",
+        chip: "ESP32-S3",
+        pwr_button: false,
+    },
 ];
 
 /// Look up a board by env.
@@ -141,7 +152,7 @@ mod tests {
     fn every_board_has_art_and_a_shop() {
         for b in BOARDS {
             assert!(crate::ui::Assets::get(&b.illustration()).is_some(), "{} has no illustration", b.env);
-            assert!(b.buy_url.starts_with("https://www.waveshare.com/"), "{}", b.env);
+            assert!(b.buy_url.starts_with("https://"), "{}", b.env);
         }
     }
 }
