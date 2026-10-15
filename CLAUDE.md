@@ -17,8 +17,8 @@ writes them to the device over BLE.
 - `tools/`: asset converters, `ci/` (release and manifest scripts, with
   unittests), `packaging/`. `research/clawd-official/`: the official Clawd
   animation archive.
-- `SIM-USAGE.md`: simulator manual. `screenshot.sh`: device screenshot over
-  serial.
+- `SIM-USAGE.md`: simulator manual; `docs/sim-grid.md`: every panel at once
+  (`tools/simgrid/`). `screenshot.sh`: device screenshot over serial.
 
 Nested `CLAUDE.md` files load when you read or edit a file in their folder.
 
@@ -46,6 +46,7 @@ pio run -d firmware                                  # default_envs: every hardw
 pio run -d firmware -e waveshare_amoled_216          # one board
 pio test -d firmware -e native                       # host tests; always pass -e native
 pio run -d firmware -e sim && (cd firmware && .pio/build/sim/program)   # simulator (SDL2 dev files)
+python3 tools/simgrid/simgrid.py serve               # every panel at once (docs/sim-grid.md)
 (cd desktop && cargo test --workspace --locked)      # fmt/clippy/Windows check: desktop/CLAUDE.md
 python3 -m unittest discover -s tools/ci/tests        # release/manifest scripts
 ```

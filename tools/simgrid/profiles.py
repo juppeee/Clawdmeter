@@ -1,0 +1,81 @@
+"""The panels the grid shows: one cell per distinct panel size and set of
+board capabilities, labelled with the boards it stands for.
+
+Each cell runs the simulator built at its size (SIM_LCD_W / SIM_LCD_H) with
+the capability overrides the sim understands (SIM_CIRCLE, SIM_NO_PWR,
+SIM_MINIMAL, SIM_BUTTONS). Boards on main come first, then the open port
+PRs' panels. Add a board here when its panel size or capabilities aren't
+covered yet; boards that only share a cell go in its `boards` list.
+"""
+
+from dataclasses import dataclass, field
+
+
+@dataclass(frozen=True)
+class Profile:
+    id: str                 # short, stable, used on the command line
+    w: int
+    h: int
+    boards: tuple           # board names / envs this cell stands for
+    round: bool = False     # BoardCaps.round_panel
+    pwr: bool = True        # BoardCaps.has_pwr_button
+    buttons: int = 1        # BoardCaps.button_count (1 = BOOT only)
+    minimal: bool = False   # BoardCaps.minimal_ui
+    on_main: bool = True    # False for a port that is still a PR
+
+    @property
+    def size(self):
+        return f"{self.w}x{self.h}"
+
+    @property
+    def label(self):
+        return f"{self.w}×{self.h}{' round' if self.round else ''} · {', '.join(self.boards)}"
+
+    def env(self):
+        """Environment overrides for this cell's simulator process."""
+        e = {"SIM_BUTTONS": str(self.buttons)}
+        if self.round:
+            e["SIM_CIRCLE"] = "1"
+        if not self.pwr:
+            e["SIM_NO_PWR"] = "1"
+        if self.minimal:
+            e["SIM_MINIMAL"] = "1"
+        return e
+
+
+PROFILES = (
+    Profile("216", 480, 480, ("AMOLED-2.16", "AMOLED-2.16 C6", "4848S040", "SenseCap Indicator"),
+            buttons=2),
+    Profile("lcd4", 480, 480, ("LCD-4",), pwr=False),
+    Profile("18", 368, 448, ("AMOLED-1.8", "AMOLED-1.8 C6")),
+    Profile("206", 410, 502, ("AMOLED-2.06",)),
+    Profile("154", 240, 240, ("LCD-1.54",), buttons=2),
+    Profile("round", 466, 466, ("AMOLED-1.32", "AMOLED-1.43"), round=True, on_main=False),
+    Profile("t4s3", 450, 600, ("LilyGO T4-S3",), on_main=False),
+    Profile("cyd", 320, 240, ("ESP32-2432S028R", "ESP32-2432S024C", "M5Stack FIRE"), on_main=False),
+    Profile("cydp", 240, 320, ("CYD portrait", "Freenove S3", "Waveshare LCD-2"), on_main=False),
+    Profile("cube", 284, 240, ("Xingzhi Cube 1.83",), on_main=False),
+    Profile("lcd183", 240, 284, ("Waveshare LCD-1.83",), on_main=False),
+    Profile("tdisplay", 170, 320, ("LilyGO T-Display S3",), on_main=False),
+    Profile("stick", 135, 240, ("M5StickS3",), on_main=False),
+    Profile("epaper", 200, 200, ("ePaper 1.54",), minimal=True, on_main=False),
+)
+
+
+def select(ids=None):
+    """Profiles by id (comma list or iterable); all of them when None.
+    `main` selects the boards on main."""
+    if not ids:
+        return list(PROFILES)
+    if isinstance(ids, str):
+        ids = [i for i in ids.split(",") if i]
+    out = []
+    for i in ids:
+        if i == "main":
+            out += [p for p in PROFILES if p.on_main and p not in out]
+            continue
+        match = [p for p in PROFILES if p.id == i or p.size == i]
+        if not match:
+            raise ValueError(f"unknown board {i!r}; known: {', '.join(p.id for p in PROFILES)}")
+        out += [p for p in match if p not in out]
+    return out

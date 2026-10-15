@@ -1,6 +1,6 @@
 ---
 name: verifying-firmware-ui
-description: Checks firmware UI and Clawd behaviour changes visually - headless simulator screenshots (SIM_SHOTS, SIM_CMDS, SIM_TAPS, other panel sizes), director walkthroughs, then `clawd <beat>` + `screenshot` on a connected board, with the C6 no-screenshot limit. Use after any change to the meters, Clawd, the face, layouts or LVGL drawing, when asked to screenshot the device or simulator, or before opening a firmware UI PR.
+description: Checks firmware UI and Clawd behaviour changes visually - the simulator grid (every panel at once, scripted, deterministic), single-sim screenshots (SIM_SHOTS, SIM_CMDS, SIM_TAPS), director walkthroughs, then `clawd <beat>` + `screenshot` on a connected board, with the C6 no-screenshot limit. Use after any change to the meters, Clawd, the face, layouts or LVGL drawing, when asked to screenshot the device or simulator, or before opening a firmware UI PR.
 ---
 
 # Verifying firmware UI
@@ -8,11 +8,37 @@ description: Checks firmware UI and Clawd behaviour changes visually - headless 
 Check your own UI changes; don't ask the user to look first. Read every
 capture you take. The simulator is the first pass, real hardware the last.
 
-<!-- When the multi-board simulator grid lands, it becomes the default first
-pass: add it as the first section here and keep the single-board run as the
-fallback. -->
+## Simulator grid (start here)
 
-## Simulator
+`tools/simgrid/` runs the sim for every supported panel at once on one
+virtual clock (guide: [docs/sim-grid.md](../../../docs/sim-grid.md)). Write a
+script of actions to your scratch dir and run it headless; it rebuilds stale
+sims, prints the files it saved, and gives the same pixels every run:
+
+```bash
+SCRATCH=/your/scratch/dir
+cat > "$SCRATCH/check.txt" <<EOS
+step 6000
+shot $SCRATCH/meters.png
+beat attention
+record $SCRATCH/attention.gif fps=12 scale=0.4
+step 8000
+record_stop
+link false
+step 500
+shot $SCRATCH/pairing.png
+EOS
+python3 tools/simgrid/simgrid.py run "$SCRATCH/check.txt"
+```
+
+Read every PNG, and
+pull a few frames out of a GIF to check motion. `--boards 154,round` limits
+the cells; `simgrid.py actions` lists everything a script can do (payload
+fields, presets, alerts, events, beats, taps and button presses on one
+board, the BLE link, battery, scenarios). For a before/after comparison,
+run the same script on both versions.
+
+## Single simulator
 
 The sim runs the full firmware loop unmodified in an SDL2 window (director,
 meters, idle fade, pair gesture, payload/signals, rate math, chime logic);
