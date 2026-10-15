@@ -40,7 +40,7 @@
 
 // ---- Buttons ----
 // BOOT is repurposed as "rotate the UI 90° CW" (see imu.cpp) instead of HID
-// Space. PWR keeps the shared role: short press cycles animations/brightness,
+// Space. PWR keeps the shared role: short press cycles brightness,
 // hold ~3 s + release pairs, hold 8 s powers off.
 #define BTN_ROTATE_GPIO      0     // BOOT, active LOW
 #define BTN_PWR_GPIO         17    // PWR, active LOW
