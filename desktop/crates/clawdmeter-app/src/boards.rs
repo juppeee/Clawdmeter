@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 10] = [
+pub const BOARDS: [BoardInfo; 11] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -136,6 +136,17 @@ pub const BOARDS: [BoardInfo; 10] = [
         height: 480,
         buy_url: "https://www.aliexpress.com/item/3256806115962222.html",
         summary: "480×480 · RGB panel",
+        chip: "ESP32-S3",
+        pwr_button: false,
+    },
+    BoardInfo {
+        env: "spotpear_s3_154",
+        name: "SpotPear 1.54 MUMA",
+        product: "SpotPear ESP32-S3-LCD-1.54 MUMA (touch)",
+        width: 240,
+        height: 240,
+        buy_url: "https://spotpear.com/shop/ESP32-S3-AI-1.54-inch-LCD-Display-TouchScreen-N16R8-muma-DeepSeek.html",
+        summary: "240×240 · SPI LCD",
         chip: "ESP32-S3",
         pwr_button: false,
     },
