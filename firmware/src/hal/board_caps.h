@@ -13,6 +13,9 @@ struct BoardCaps {
 
     int16_t width;           // active display width in pixels
     int16_t height;          // active display height in pixels
+    bool    round_panel;     // the visible panel is a circle inscribed in
+                             // width x height (round AMOLEDs); the meters
+                             // keep inside it (layout.h)
 
     uint8_t button_count;    // 1 = primary (BOOT) only; 2 = primary + secondary
     bool    has_rotation;    // IMU-driven CPU rotation in the flush callback
@@ -22,10 +25,13 @@ struct BoardCaps {
                              // nothing else animates (e-ink, slow panels).
                              // Shared code reads it through minimal_mode().
     bool    has_pwr_button;  // a PWR-role button reaches the firmware (AXP PKEY,
-                             // expander pin or GPIO): brightness, next scene,
+                             // expander pin or GPIO): brightness and
                              // hold-to-pair. Without one (LCD-4: KEY/PWR is a
                              // hardware reset) a 5 s touch hold on the pairing
                              // hint clears the bonds instead (pair_hold.h).
+    bool    has_touch;       // a touchscreen. Without one BOOT dismisses an
+                             // active alert before it does anything else
+                             // (director_button).
 };
 
 const BoardCaps& board_caps(void);
