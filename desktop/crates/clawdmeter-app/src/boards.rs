@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 21] = [
+pub const BOARDS: [BoardInfo; 23] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -257,6 +257,28 @@ pub const BOARDS: [BoardInfo; 21] = [
         height: 240,
         buy_url: "https://www.amazon.com/dp/B0BVFXR313",
         summary: "320×240 · resistive touch · 1 button",
+        chip: "ESP32",
+        pwr_button: true,
+    },
+    BoardInfo {
+        env: "esp32_2432s024c",
+        name: "CYD 2.4",
+        product: "ESP32-2432S024C Cheap Yellow Display (portrait)",
+        width: 240,
+        height: 320,
+        buy_url: "https://www.amazon.com/dp/B0CLGD2DG6",
+        summary: "240×320 · capacitive touch · 1 button",
+        chip: "ESP32",
+        pwr_button: true,
+    },
+    BoardInfo {
+        env: "esp32_2432s024c_landscape",
+        name: "CYD 2.4 landscape",
+        product: "ESP32-2432S024C Cheap Yellow Display (landscape)",
+        width: 320,
+        height: 240,
+        buy_url: "https://www.amazon.com/dp/B0CLGD2DG6",
+        summary: "320×240 · capacitive touch · 1 button",
         chip: "ESP32",
         pwr_button: true,
     },
