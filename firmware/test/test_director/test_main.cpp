@@ -1,0 +1,165 @@
+// The director against timed stand-ins for its actors (fake_actors.cpp):
+// whatever the situation does, there is never more than one Clawd on screen
+// (corner sprite, full-size sprite, stage performer, face).
+//   pio test -d firmware -e native -f test_director
+#include <unity.h>
+#include "fake_world.h"
+#include "../../src/clawd_director.cpp"
+
+static const uint32_t TICK_MS = 10;
+
+// The first frame that broke the rule, if any.
+static bool     broke = false;
+static uint32_t broke_at = 0;
+static char     broke_what[96];
+
+static void check_one_clawd(void) {
+    const OnScreen s = fake_on_screen();
+    if (broke || fake_clawds(s) <= 1) return;
+    broke = true;
+    broke_at = fake_now_ms;
+    snprintf(broke_what, sizeof(broke_what), "beat %s:%u corner %d big %d performer %d face %d",
+             director_beat_name(), step, s.corner, s.big, s.performer, s.face);
+}
+
+// Which beats a run went through, so a fuzz pass can't be vacuous.
+static const int BEAT_COUNT = sizeof(BEAT_NAMES) / sizeof(BEAT_NAMES[0]);
+static bool seen[BEAT_COUNT];
+
+static void run_for(uint32_t ms) {
+    for (uint32_t t = 0; t < ms; t += TICK_MS) {
+        fake_now_ms += TICK_MS;
+        fake_actors_tick();
+        director_tick();
+        seen[beat] = true;
+        check_one_clawd();
+    }
+}
+
+static void assert_every_beat_seen(void) {
+    for (int b = 0; b < BEAT_COUNT; b++) TEST_ASSERT_TRUE_MESSAGE(seen[b], BEAT_NAMES[b]);
+}
+
+static void assert_one_clawd(void) {
+    if (!broke) return;
+    char msg[160];
+    snprintf(msg, sizeof(msg), "two Clawds at %lu ms: %s", (unsigned long)broke_at, broke_what);
+    TEST_FAIL_MESSAGE(msg);
+}
+
+static UsageData live_payload(void) {
+    UsageData d;
+    memset(&d, 0, sizeof(d));
+    d.valid = true;
+    d.ok = true;
+    d.session_pct = 10;
+    d.session_reset_mins = 120;
+    d.activity = -1;
+    d.sessions = -1;
+    return d;
+}
+
+static void send(const UsageData& d, const SignalsUpdate& sig) { director_on_payload(&d, &sig); }
+
+static SignalsUpdate no_signal(void) {
+    SignalsUpdate s;
+    memset(&s, 0, sizeof(s));
+    return s;
+}
+
+static void fresh_director(void);
+
+void setUp(void) {
+    broke = false;
+    world = { true, 0, false, true };
+}
+void tearDown(void) {}
+
+// The screensaver rests, then dips into a calm scene. The face must be off
+// screen before the performer appears, and he must be gone before it rises.
+static void test_screensaver_calm_dip_keeps_one_clawd(void) {
+    fresh_director();
+    run_for(15 * 1000 + 2000);                    // quiet: the screensaver starts
+    TEST_ASSERT_EQUAL_STRING("screensaver", director_beat_name());
+    run_for(60 * 1000);                           // rest, dip, rest, dip, ...
+    assert_one_clawd();
+}
+
+// Seeded fuzz: activity, prompts, stops, usage moving, fresh windows,
+// alerts and clears, taps, buttons, the link dropping, and the QA beats, at
+// random moments over a long stretch.
+static uint32_t fz = 0xC1A3D;
+static uint32_t fz_next(void) { fz ^= fz << 13; fz ^= fz >> 17; fz ^= fz << 5; return fz; }
+static uint32_t fz_range(uint32_t lo, uint32_t hi) { return lo + fz_next() % (hi - lo + 1); }
+
+// director_init() is for boot; between runs, also drop what a run left
+// pending (this file includes the director, so its statics are in reach).
+static void fresh_director(void) {
+    attention_on = false;
+    resume_screensaver = false;
+    react_anim = NULL;
+    joy_pending = false;
+    clawd_tuning_fast(&clawd_tuning());
+    director_init();
+    // Hooks installed: one activity reading is enough for signals to know.
+    signals_clear();
+    UsageData d = live_payload();
+    d.activity = 0;
+    signals_ingest_at(&d, fake_now_ms);
+}
+
+static void fuzz(uint32_t seed, uint32_t total_ms, bool has_big) {
+    fz = seed;
+    world.has_big = has_big;
+    fresh_director();
+    float pct = 10;
+    uint32_t es = 0;
+    for (uint32_t t = 0; t < total_ms && !broke;) {
+        const uint32_t gap = fz_range(50, 6000);
+        run_for(gap);
+        t += gap;
+        UsageData d = live_payload();
+        SignalsUpdate sig = no_signal();
+        switch (fz_next() % 16) {
+        case 0: case 1:  world.activity = (int)fz_range(0, 3); break;
+        case 2:          world.activity = 3; break;
+        case 3: case 4:  sig.event_fired = true; sig.event = "psb"[fz_next() % 3]; sig.event_seq = ++es; break;
+        case 5:          pct += 1; d.session_pct = pct; break;
+        case 6:          sig.session_reset = true; pct = 0; d.session_pct = pct; break;
+        case 7:          director_alert("needs you"); continue;
+        case 8:          director_alert_clear(); continue;
+        case 9: case 10: director_tap((int)fz_range(0, 479)); continue;
+        case 11:         director_button(); continue;
+        case 12:         world.meters_live = fz_next() % 4 != 0; continue;
+        case 13: {
+            static const char* const BEATS[] = { "show", "screensaver", "lurk", "peek", "joy", "home" };
+            director_debug(BEATS[fz_next() % 6]);
+            continue;
+        }
+        default:         break;                   // a quiet stretch
+        }
+        d.session_pct = pct;
+        send(d, sig);
+    }
+    assert_one_clawd();
+}
+
+static void test_fuzz_one_clawd_with_full_size_sprite(void) {
+    memset(seen, 0, sizeof(seen));
+    for (uint32_t seed = 1; seed <= 40 && !broke; seed++) fuzz(seed * 2654435761u, 30 * 60 * 1000, true);
+    assert_every_beat_seen();
+}
+
+static void test_fuzz_one_clawd_without_full_size_sprite(void) {
+    memset(seen, 0, sizeof(seen));
+    for (uint32_t seed = 1; seed <= 20 && !broke; seed++) fuzz(seed * 40503u, 30 * 60 * 1000, false);
+    assert_every_beat_seen();
+}
+
+int main(int, char**) {
+    UNITY_BEGIN();
+    RUN_TEST(test_screensaver_calm_dip_keeps_one_clawd);
+    RUN_TEST(test_fuzz_one_clawd_with_full_size_sprite);
+    RUN_TEST(test_fuzz_one_clawd_without_full_size_sprite);
+    return UNITY_END();
+}

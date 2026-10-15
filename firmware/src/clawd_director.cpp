@@ -452,10 +452,12 @@ static void run_screensaver(uint32_t now) {
     if (!ui_meters_live()) { to_meters(false); return; }   // link dropped: show the hint
     if (step == 3) {
         // Resting: dip into a calm scene now and then (also breaks up the
-        // flat orange field for burn-in).
+        // flat orange field for burn-in). One Clawd: the stage is set empty
+        // behind the face, he walks on only once the face is gone, and walks
+        // off before it comes back.
         if ((int32_t)(now - calm_at) < 0 || face_busy()) return;
         face_set_resting(false);
-        open_stage(true);
+        open_stage(false);
         next_step(200);
         return;
     }
@@ -468,8 +470,6 @@ static void run_screensaver(uint32_t now) {
     }
     if (!settled(now) || !mascot_away()) return;
     switch (step) {
-    case 0:  // gets up to check on you (handled before settled(), below)
-        break;
     case 1:
         face_rise();
         next_step();
@@ -483,15 +483,24 @@ static void run_screensaver(uint32_t now) {
         face_drop();
         next_step();
         break;
-    case 5:
-        splash_perform_group(0, t.calm_scene_ms, true);
+    case 5:  // the face is gone: he strolls on
+        splash_walk_home(100);
         next_step();
         break;
     case 6:
+        splash_perform_group(0, t.calm_scene_ms, true);
+        next_step();
+        break;
+    case 7:
+        splash_walk_off_right(100);
+        next_step();
+        break;
+    case 8:  // off the stage: the face comes back up
+        if (splash_performer_visible()) return;
         face_rise();
         next_step();
         break;
-    case 7:  // the room behind the face is the meters again
+    case 9:  // the room behind the face is the meters again
         close_stage();
         mascot_place_away();
         step = 2;
