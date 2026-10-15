@@ -47,8 +47,9 @@ class Profile:
 
 
 PROFILES = (
-    Profile("216", 480, 480, ("AMOLED-2.16", "AMOLED-2.16 C6", "4848S040", "SenseCap Indicator"),
+    Profile("216", 480, 480, ("AMOLED-2.16", "AMOLED-2.16 C6", "SenseCap Indicator"),
             buttons=2),
+    Profile("4848", 480, 480, ("4848S040",), pwr=False, buttons=0, on_main=False),
     Profile("lcd4", 480, 480, ("LCD-4",), pwr=False),
     Profile("18", 368, 448, ("AMOLED-1.8", "AMOLED-1.8 C6")),
     Profile("206", 410, 502, ("AMOLED-2.06",)),
