@@ -10,7 +10,7 @@
 // single-cell LiPo: 4.20 V → 100 %, 3.30 V → 0 %.
 //
 // PWR-button synthesis: the board has no PMU push-button and no second
-// GPIO button, so brightness / next-scene is mapped to a long press of
+// GPIO button, so brightness cycling is mapped to a long press of
 // GPIO 0 (the same button input.cpp reports as PRIMARY). The two HALs
 // observe the same GPIO independently — a brief press is just a Space PTT;
 // a hold past PWR_LONGPRESS_MS fires one PWR press event without disturbing
