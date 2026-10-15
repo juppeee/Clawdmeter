@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 12] = [
+pub const BOARDS: [BoardInfo; 13] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -158,6 +158,17 @@ pub const BOARDS: [BoardInfo; 12] = [
         height: 480,
         buy_url: "https://www.seeedstudio.com/SenseCAP-Indicator-D1L-p-5646.html",
         summary: "480×480 · RGB TFT",
+        chip: "ESP32-S3",
+        pwr_button: true,
+    },
+    BoardInfo {
+        env: "freenove_s3_display_nontouch",
+        name: "S3 Display (no touch)",
+        product: "Freenove ESP32-S3 Display 2.8 inch (non-touch, FNK0104A)",
+        width: 240,
+        height: 320,
+        buy_url: "https://store.freenove.com/products/fnk0104",
+        summary: "240×320 · SPI TFT",
         chip: "ESP32-S3",
         pwr_button: true,
     },
