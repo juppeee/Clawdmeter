@@ -284,7 +284,7 @@ sends `{"dismiss":true}` on BLE TX (`…-0003`). The app clears the alert it
 sent, including its tray state, without echoing a clear back. A host `x`
 clear ends the device alert without a dismissal notification.
 
-The app also expires uncleared alerts after 10 minutes; Hooks test alerts
+The app also expires uncleared alerts after 2 minutes; Hooks test alerts
 expire after 30 seconds. If the alert was sent, app expiry queues a clear
 for the device. These app limits are separate from the device's 2-minute
 attention timer (`SIM_FAST` compresses that device timer to 20 seconds).
