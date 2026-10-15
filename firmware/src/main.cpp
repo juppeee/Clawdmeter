@@ -1,239 +1,150 @@
 #include <Arduino.h>
+#include <Wire.h>
 #include <lvgl.h>
 #include <ArduinoJson.h>
-#include "display_cfg.h"
+#include <esp_heap_caps.h>
+
 #include "data.h"
 #include "ui.h"
 #include "ble.h"
-#include "power.h"
-#include "imu.h"
 #include "splash.h"
+#include "mascot.h"
+#include "clawd_director.h"
 #include "usage_rate.h"
-#include "buttons.h"
+#include "signals.h"
+#include "payload.h"
+#include "minimal_mode.h"
+#include "build_info.h"
+#include "idle.h"
+#include "idle_cfg.h"
+#include "brightness.h"
+#include "perf.h"
+#include "pair_hold.h"
 
-// ============================================================
-// Board-specific display driver instantiation
-// ============================================================
-//
-// Each board wires up `gfx` (Arduino_GFX base pointer) and provides a
-// `board_set_brightness(level)` helper used during the rotation flash.
-// Everything below this section is board-agnostic.
-
-#if defined(BOARD_WAVESHARE_AMOLED_216)
-
-static Arduino_DataBus  *bus      = new Arduino_ESP32QSPI(
-    LCD_CS, LCD_SCLK, LCD_SDIO0, LCD_SDIO1, LCD_SDIO2, LCD_SDIO3);
-static Arduino_CO5300   *amoled   = new Arduino_CO5300(
-    bus, LCD_RESET, 0 /* rotation; we rotate in software */,
-    BOARD_LCD_W, BOARD_LCD_H, 0, 0, 0, 0);
-Arduino_GFX *gfx = amoled;
-
-void board_set_brightness(uint8_t level) { amoled->setBrightness(level); }
-
-XPowersPMU      pmu;
-SensorQMI8658   imu;
-
-#elif defined(BOARD_LILYGO_T_DISPLAY_S3)
-
-// 8-bit i80 parallel bus + ST7789. The ST7789 panel internally is 240x320
-// but only 170 columns are wired out, so the column window starts at
-// x=LCD_COL_OFFSET.
-static Arduino_DataBus *bus = new Arduino_ESP32LCD8(
-    LCD_DC, LCD_CS, LCD_WR, LCD_RD,
-    LCD_D0, LCD_D1, LCD_D2, LCD_D3,
-    LCD_D4, LCD_D5, LCD_D6, LCD_D7);
-static Arduino_ST7789 *st7789 = new Arduino_ST7789(
-    bus, LCD_RESET, BOARD_FIXED_ROTATION,
-    true /* IPS */, BOARD_LCD_W, BOARD_LCD_H,
-    LCD_COL_OFFSET, LCD_ROW_OFFSET, LCD_COL_OFFSET, LCD_ROW_OFFSET);
-Arduino_GFX *gfx = st7789;
-
-// Backlight is a plain GPIO on this board. Map [0..0] to OFF, anything
-// else to ON. A future change could put the pin on LEDC for true PWM.
-void board_set_brightness(uint8_t level) {
-    digitalWrite(LCD_BL, level > 0 ? HIGH : LOW);
-}
-
-#elif defined(BOARD_WAVESHARE_ESP32_S3_TOUCH_LCD_2)
-
-// ST7789T3 over standard 4-wire SPI. Standard 240x320 panel, no column
-// offset. LCD_RESET is shared with GPIO0/BOOT/STRAP — gfx->begin()
-// briefly drives it low (panel reset), which is fine because the reset
-// pulse happens before anything else uses the pin.
-static Arduino_DataBus *bus = new Arduino_ESP32SPI(
-    LCD_DC, LCD_CS, LCD_SCLK, LCD_MOSI, LCD_MISO);
-static Arduino_ST7789 *st7789 = new Arduino_ST7789(
-    bus, LCD_RESET, BOARD_FIXED_ROTATION,
-    true /* IPS */, BOARD_LCD_W, BOARD_LCD_H,
-    LCD_COL_OFFSET, LCD_ROW_OFFSET, LCD_COL_OFFSET, LCD_ROW_OFFSET);
-Arduino_GFX *gfx = st7789;
-
-void board_set_brightness(uint8_t level) {
-    digitalWrite(LCD_BL, level > 0 ? HIGH : LOW);
-}
-
-#endif
-
-// ============================================================
-// LVGL plumbing
-// ============================================================
+#include "hal/board_caps.h"
+#include "hal/display_hal.h"
+#include "hal/touch_hal.h"
+#include "hal/input_hal.h"
+#include "hal/power_hal.h"
+#include "hal/imu_hal.h"
+#include "hal/sound_hal.h"
+#include "hal/board_info_hal.h"
 
 static UsageData usage = {};
 
-// ---- Touch ----
-// The concrete driver class differs per board (CST92xx vs CST816), so
-// each board header defines BOARD_TOUCH_CLASS and we instantiate it
-// here as a file-local object. No other compilation unit needs it.
-#if BOARD_HAS_TOUCH
-static BOARD_TOUCH_CLASS touch;
-static volatile bool     touch_pressed = false;
-static volatile uint16_t touch_x = 0;
-static volatile uint16_t touch_y = 0;
-static volatile bool     touch_data_ready = false;
+// ---- LVGL draw buffers (partial render mode) ----
+// PSRAM-equipped boards (S3) can comfortably hold larger strips. PSRAM-free
+// boards (e.g. ESP32-C6) allocate from internal SRAM, so we shrink the strip
+// — 480×20 RGB565 = 19 KB × 2 buffers = 38 KB, fits beside everything else.
+#ifdef BOARD_HAS_PSRAM
+#define BUF_LINES 40
+#define LV_BUF_CAPS (MALLOC_CAP_SPIRAM)
+#else
+#define BUF_LINES 20
+#define LV_BUF_CAPS (MALLOC_CAP_INTERNAL | MALLOC_CAP_8BIT)
+#endif
+static uint16_t* buf1 = nullptr;
+static uint16_t* buf2 = nullptr;
 
-static void IRAM_ATTR touch_isr(void) {
-    touch_data_ready = true;
+static uint32_t my_tick(void) { return millis(); }
+
+static void my_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
+    int32_t w = area->x2 - area->x1 + 1;
+    int32_t h = area->y2 - area->y1 + 1;
+    display_hal_draw_bitmap(area->x1, area->y1, w, h, (uint16_t*)px_map);
+    lv_display_flush_ready(disp);
 }
 
-static void touch_read(void) {
-    if (!touch_data_ready) return;
-    touch_data_ready = false;
-
-    int16_t tx[5], ty[5];
-    uint8_t n = touch.getPoint(tx, ty, touch.getSupportTouchPoint());
-    if (n > 0) {
-        touch_pressed = true;
-        touch_x = (uint16_t)tx[0];
-        touch_y = (uint16_t)ty[0];
-    } else {
-        touch_pressed = false;
-    }
+static void rounder_cb(lv_event_t* e) {
+    lv_area_t* area = (lv_area_t*)lv_event_get_param(e);
+    display_hal_round_area(&area->x1, &area->y1, &area->x2, &area->y2);
 }
+
+// Touch policy is driven by IDLE_WAKE_ON_TOUCH:
+//   true  → a press edge while asleep wakes the device and the first touch is
+//           swallowed (mirrors the button wake-consumption); a press while
+//           awake counts as activity.
+//   false → touch never counts as activity and is fully swallowed while the
+//           panel is dark, so pets/sleeves can't wake it overnight and the
+//           director can't act on taps nobody can see.
+// A finger is on the panel (after the wake filter below); read by the
+// touch-hold re-pair on boards without a PWR button.
+static bool touch_down = false;
 
 static void my_touch_cb(lv_indev_t* indev, lv_indev_data_t* data) {
-    if (touch_pressed) {
-        data->point.x = touch_x;
-        data->point.y = touch_y;
+    uint16_t x, y;
+    bool pressed;
+    touch_hal_read(&x, &y, &pressed);
+    const bool raw_pressed = pressed;
+
+    if (IDLE_WAKE_ON_TOUCH) {
+        static bool touch_was = false;
+        static bool touch_wake_swallowed = false;
+        if (raw_pressed && !touch_was) {
+            // Press edge — consume as wake if asleep.
+            if (idle_consume_wake_press()) {
+                touch_wake_swallowed = true;
+                pressed = false;
+            }
+        } else if (!raw_pressed && touch_was) {
+            // Release edge.
+            if (touch_wake_swallowed) {
+                touch_wake_swallowed = false;
+                pressed = false;
+            }
+        } else if (raw_pressed && touch_wake_swallowed) {
+            // Held finger through wake — keep hiding until release.
+            pressed = false;
+        }
+        touch_was = raw_pressed;
+    } else if (idle_is_asleep()) {
+        pressed = false;
+    }
+
+    touch_down = pressed;
+    if (pressed) {
+        data->point.x = x;
+        data->point.y = y;
         data->state = LV_INDEV_STATE_PRESSED;
     } else {
         data->state = LV_INDEV_STATE_RELEASED;
     }
 }
-#endif // BOARD_HAS_TOUCH
 
-// ---- LVGL draw buffers (PSRAM-backed, partial render) ----
-// Use the larger dimension so the buffer also holds rotated strips: on
-// the Waveshare we rotate strips in software, so a BOARD_LCD_W-wide strip
-// could end up BOARD_LCD_W tall after a 90° rotation.
-#define BUF_LINES 40
-#define BUF_STRIDE  ((BOARD_LCD_W > BOARD_LCD_H) ? BOARD_LCD_W : BOARD_LCD_H)
-static uint16_t *buf1 = nullptr;
-static uint16_t *buf2 = nullptr;
-#if BOARD_HAS_IMU
-static uint16_t *rot_buf = nullptr;   // only the software-rotation path needs this
-#endif
-
-static uint32_t my_tick(void) { return millis(); }
-
-#if BOARD_HAS_IMU
-// CO5300 cannot exchange rows/columns in hardware — its MADCTL only does
-// axis flips — so when the IMU reports a 90°/180°/270° orientation we
-// rotate each LVGL strip in software before pushing pixels.
-static void rotate_strip(const uint16_t *src, int32_t w, int32_t h,
-                         int32_t sx, int32_t sy, uint8_t r,
-                         int32_t *dx, int32_t *dy, int32_t *dw, int32_t *dh) {
-    const int S = BOARD_LCD_W;   // square panel: W == H
-
-    switch (r) {
-    case 1: // 90° CW
-        *dw = h; *dh = w;
-        *dx = S - sy - h;
-        *dy = sx;
-        for (int32_t y = 0; y < h; y++)
-            for (int32_t x = 0; x < w; x++)
-                rot_buf[x * h + (h - 1 - y)] = src[y * w + x];
-        break;
-    case 2: // 180°
-        *dw = w; *dh = h;
-        *dx = S - sx - w;
-        *dy = S - sy - h;
-        for (int32_t y = 0; y < h; y++)
-            for (int32_t x = 0; x < w; x++)
-                rot_buf[(h - 1 - y) * w + (w - 1 - x)] = src[y * w + x];
-        break;
-    case 3: // 270° CW
-        *dw = h; *dh = w;
-        *dx = sy;
-        *dy = S - sx - w;
-        for (int32_t y = 0; y < h; y++)
-            for (int32_t x = 0; x < w; x++)
-                rot_buf[(w - 1 - x) * h + y] = src[y * w + x];
-        break;
-    default:
-        *dx = sx; *dy = sy; *dw = w; *dh = h;
-        break;
-    }
-}
-#endif // BOARD_HAS_IMU
-
-static void my_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
-    int32_t w = area->x2 - area->x1 + 1;
-    int32_t h = area->y2 - area->y1 + 1;
-    uint16_t *src = (uint16_t*)px_map;
-
-#if BOARD_HAS_IMU
-    uint8_t r = imu_get_rotation();
-    if (r != 0) {
-        int32_t dx, dy, dw, dh;
-        rotate_strip(src, w, h, area->x1, area->y1, r, &dx, &dy, &dw, &dh);
-        gfx->draw16bitRGBBitmap(dx, dy, rot_buf, dw, dh);
-        lv_display_flush_ready(disp);
-        return;
-    }
-#endif
-    gfx->draw16bitRGBBitmap(area->x1, area->y1, src, w, h);
-    lv_display_flush_ready(disp);
-}
-
-#if BOARD_LCD_IS_AMOLED
-// CO5300 requires even-aligned flush regions; ST7789 doesn't care.
-static void rounder_cb(lv_event_t* e) {
-    lv_area_t *area = (lv_area_t*)lv_event_get_param(e);
-    area->x1 = area->x1 & ~1;
-    area->y1 = area->y1 & ~1;
-    area->x2 = area->x2 | 1;
-    area->y2 = area->y2 | 1;
-}
-#endif
-
-// ============================================================
-// JSON / serial command handling
-// ============================================================
-
+// Parse a JSON line into UsageData (payload.cpp holds the pure parser).
 static bool parse_json(const char* json, UsageData* out) {
-    JsonDocument doc;
-    DeserializationError err = deserializeJson(doc, json);
-    if (err) {
-        Serial.printf("JSON parse error: %s\n", err.c_str());
+    const char* err = nullptr;
+    if (!payload_parse(json, out, &err)) {
+        Serial.printf("JSON parse error: %s\n", err ? err : "?");
         return false;
     }
-
-    out->session_pct = doc["s"] | 0.0f;
-    out->session_reset_mins = doc["sr"] | -1;
-    out->weekly_pct = doc["w"] | 0.0f;
-    out->weekly_reset_mins = doc["wr"] | -1;
-    strlcpy(out->status, doc["st"] | "unknown", sizeof(out->status));
-    out->ok = doc["ok"] | false;
-    out->valid = true;
     return true;
 }
 
+// Forget every bonded host and advertise again, so another computer (or
+// this one, after removing the device) can pair. The PWR hold gesture, the
+// touch hold on boards without PWR, and the `unpair` serial command all end
+// here.
+static void clear_pairing(const char* why) {
+    Serial.printf("Pair: clearing bonds (%s), advertising\n", why);
+    ble_clear_bonds();
+    ui_set_pair_hint(PAIR_HINT_CLEARED);
+}
+
+// ---- Serial command buffer ----
 #define CMD_BUF_SIZE 64
 static char cmd_buf[CMD_BUF_SIZE];
 static int cmd_pos = 0;
 
-static void send_screenshot(void) {
-    const uint32_t w = BOARD_LCD_W, h = BOARD_LCD_H;
+static void send_screenshot() {
+#ifndef BOARD_HAS_PSRAM
+    // A full RGB565 framebuffer doesn't fit in internal SRAM on PSRAM-free
+    // boards (e.g. 480×480×2 = 460 KB). Capture is unsupported there.
+    Serial.println("SCREENSHOT_UNSUPPORTED");
+    return;
+#else
+    const uint32_t w = board_caps().width;
+    const uint32_t h = board_caps().height;
     const uint32_t row_bytes = w * 2;
     const uint32_t buf_size = row_bytes * h;
     uint8_t* sbuf = (uint8_t*)heap_caps_malloc(buf_size, MALLOC_CAP_SPIRAM);
@@ -252,22 +163,55 @@ static void send_screenshot(void) {
         return;
     }
 
-    Serial.printf("SCREENSHOT_START %lu %lu %lu\n", (unsigned long)w, (unsigned long)h, (unsigned long)buf_size);
+    Serial.printf("SCREENSHOT_START %lu %lu %lu\n",
+        (unsigned long)w, (unsigned long)h, (unsigned long)buf_size);
     Serial.flush();
     Serial.write(sbuf, buf_size);
     Serial.flush();
     Serial.println();
     Serial.println("SCREENSHOT_END");
-
     heap_caps_free(sbuf);
+#endif
 }
 
-static void check_serial_cmd(void) {
+// One JSON line identifying this build, for the desktop flasher's first
+// detection probe. Keys are fixed: env, ver, rev, link.
+static void send_info() {
+    Serial.printf("{\"env\":\"%s\",\"ver\":\"%s\",\"rev\":\"%s\",\"link\":\"ble\"}\n",
+                  CLAWD_ENV, CLAWD_VERSION, board_hal_rev());
+}
+
+static void check_serial_cmd() {
     while (Serial.available()) {
         char c = Serial.read();
         if (c == '\n' || c == '\r') {
             cmd_buf[cmd_pos] = '\0';
             if (strcmp(cmd_buf, "screenshot") == 0) send_screenshot();
+            else if (strcmp(cmd_buf, "chime") == 0 || strcmp(cmd_buf, "buzz") == 0) sound_hal_chime();
+            else if (strncmp(cmd_buf, "chime ", 6) == 0) {
+                // Dev tool for tuning a board's speaker: `chime <gain> [volume]`,
+                // e.g. `chime 0.6 70` (until reboot).
+                float g = 0;
+                int v = -1;
+                if (sscanf(cmd_buf + 6, "%f %d", &g, &v) >= 1) {
+                    sound_hal_tune(g, v);
+                    Serial.printf("{\"chime\":{\"gain\":%.2f,\"volume\":%d}}\n", g, v);
+                } else {
+                    Serial.println("usage: chime [<gain 0..1> [<volume 0..100>]]");
+                }
+            }
+            else if (strcmp(cmd_buf, "info") == 0)  send_info();
+            else if (strcmp(cmd_buf, "perf") == 0)  perf_print();
+            else if (strcmp(cmd_buf, "ble") == 0) ble_print_status();
+            else if (strcmp(cmd_buf, "disconnect") == 0) ble_disconnect_all();
+            else if (strcmp(cmd_buf, "unpair") == 0) {
+                clear_pairing("serial");
+                Serial.println("{\"unpair\":true}");
+            }
+            else if (strncmp(cmd_buf, "clawd ", 6) == 0) {
+                const bool ok = director_debug(cmd_buf + 6);
+                Serial.printf("{\"clawd\":\"%s\",\"ok\":%s}\n", cmd_buf + 6, ok ? "true" : "false");
+            }
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;
@@ -275,155 +219,208 @@ static void check_serial_cmd(void) {
     }
 }
 
-// ============================================================
-// setup / loop
-// ============================================================
+// Each board provides this. Must bring up the shared I2C bus (Wire.begin
+// with the board's SDA/SCL pins) and any board-private hardware that has
+// to settle before display/touch (e.g. an IO expander gating the LCD
+// reset line). Called exactly once at the start of setup().
+extern "C" void board_init(void);
 
-void setup(void) {
+void setup() {
     Serial.begin(115200);
     delay(300);
     Serial.println("{\"ready\":true}");
-    Serial.printf("Board: %s\n", BOARD_NAME);
-    Serial.printf("Display: %dx%d %s\n", BOARD_LCD_W, BOARD_LCD_H,
-                  BOARD_LCD_IS_AMOLED ? "AMOLED (CO5300)" : "LCD (ST7789)");
 
-#if defined(BOARD_LILYGO_T_DISPLAY_S3)
-    // Bring the panel power rail up first so the ST7789 has VCC when we
-    // talk to it. Then drive the backlight high so the user sees pixels.
-    pinMode(LCD_POWER_ON, OUTPUT);
-    digitalWrite(LCD_POWER_ON, HIGH);
-    pinMode(LCD_BL, OUTPUT);
-    digitalWrite(LCD_BL, HIGH);
-    pinMode(LCD_RD, OUTPUT);
-    digitalWrite(LCD_RD, HIGH);
-#elif defined(BOARD_WAVESHARE_ESP32_S3_TOUCH_LCD_2)
-    // Drive the backlight high before the panel comes up so the first
-    // frame isn't a black flash. Reset is handled inside gfx->begin().
-    pinMode(LCD_BL, OUTPUT);
-    digitalWrite(LCD_BL, HIGH);
-#endif
+    board_init();
 
-#if BOARD_HAS_I2C
-    Wire.begin(IIC_SDA, IIC_SCL);
-#endif
+    display_hal_init();
+    display_hal_begin();
+    idle_init();        // takes over panel brightness and starts the idle timer
+    brightness_init();  // load the user's saved brightness level and apply via idle
 
-    gfx->begin();
-    gfx->fillScreen(0x0000);
-    board_set_brightness(200);
-    Serial.println("Display init OK");
+    power_hal_init();
+    imu_hal_init();
+    sound_hal_init();
+    touch_hal_init();
 
-    power_init();
-    imu_init();
-
-#if BOARD_HAS_TOUCH
-    touch.setPins(TP_RST, TP_INT);
-    if (!touch.begin(Wire, BOARD_TOUCH_ADDR, IIC_SDA, IIC_SCL)) {
-        Serial.println("Touch init failed");
-    } else {
-        touch.setMaxCoordinates(BOARD_LCD_W, BOARD_LCD_H);
-        // The CST9220 on the Waveshare AMOLED needs its axes swapped +
-        // mirrored to match the panel; the CST816D on the Touch-LCD-2
-        // already reports coordinates aligned to the ST7789, so leave
-        // those transforms off there.
-#  if defined(BOARD_WAVESHARE_AMOLED_216)
-        touch.setSwapXY(true);
-        touch.setMirrorXY(true, false);
-#  endif
-        attachInterrupt(TP_INT, touch_isr, FALLING);
-        Serial.println("Touch init OK");
-    }
-#else
-    Serial.println("Touch: not present on this board");
-#endif
+    // ---- LVGL ----
+    const int W = board_caps().width;
+    const int H = board_caps().height;
 
     lv_init();
     lv_tick_set_cb(my_tick);
 
-    // PSRAM-backed partial render buffers. Sized to the wider edge so
-    // rotated strips fit too (Waveshare 480×40 rotates to 40×480).
-    const size_t buf_pixels = BUF_STRIDE * BUF_LINES;
-    buf1 = (uint16_t*)heap_caps_malloc(buf_pixels * 2, MALLOC_CAP_SPIRAM);
-    buf2 = (uint16_t*)heap_caps_malloc(buf_pixels * 2, MALLOC_CAP_SPIRAM);
-#if BOARD_HAS_IMU
-    rot_buf = (uint16_t*)heap_caps_malloc(buf_pixels * 2, MALLOC_CAP_SPIRAM);
-#endif
+    buf1 = (uint16_t*)heap_caps_malloc(W * BUF_LINES * 2, LV_BUF_CAPS);
+    buf2 = (uint16_t*)heap_caps_malloc(W * BUF_LINES * 2, LV_BUF_CAPS);
 
-    lv_display_t* disp = lv_display_create(BOARD_LCD_W, BOARD_LCD_H);
+    lv_display_t* disp = lv_display_create(W, H);
     lv_display_set_color_format(disp, LV_COLOR_FORMAT_RGB565);
     lv_display_set_flush_cb(disp, my_flush_cb);
-    lv_display_set_buffers(disp, buf1, buf2, buf_pixels * 2,
+    lv_display_set_buffers(disp, buf1, buf2, W * BUF_LINES * 2,
                            LV_DISPLAY_RENDER_MODE_PARTIAL);
-
-#if BOARD_LCD_IS_AMOLED
     lv_display_add_event_cb(disp, rounder_cb, LV_EVENT_INVALIDATE_AREA, NULL);
-#endif
+    perf_attach(disp, LV_DEF_REFR_PERIOD);
 
-#if BOARD_HAS_TOUCH
     lv_indev_t* indev = lv_indev_create();
     lv_indev_set_type(indev, LV_INDEV_TYPE_POINTER);
     lv_indev_set_read_cb(indev, my_touch_cb);
-#endif
 
     ble_init();
-    buttons_init();
-    Serial.println("Buttons init OK");
+    input_hal_init();
 
     ui_init();
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
-    ui_update_battery(power_battery_pct(), power_is_charging());
+    ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
+    director_init();    // rooms + beats; boots on the meters (home)
 
-    ui_show_screen(SCREEN_SPLASH);
-
-    Serial.println("Dashboard ready, waiting for data on BLE...");
+    Serial.printf("Dashboard ready (%s, %dx%d) %lu ms after boot, waiting for data on BLE...\n",
+        board_caps().name, W, H, (unsigned long)millis());
 }
 
 static ble_state_t last_ble_state = BLE_STATE_INIT;
+static int shown_group = 0;   // mood group last logged
 
-#if BOARD_HAS_IMU
-// On rotation change the panel is blanked, LVGL is forced to redraw at
-// the new orientation, then the brightness is ramped back up over ~125ms
-// so the transition reads as deliberate instead of a glitch.
-static void handle_rotation_change(void) {
-    static uint8_t last_rotation = 0;
-    static uint8_t  ramp_step = 0;   // 0=idle, 1-4=ramping
-    static uint32_t ramp_last = 0;
+// Hold-to-pair gesture: hold the PWR button ~3s, then RELEASE → clear all BLE
+// bonds and re-advertise. Clearing on *release* (not while held) is deliberate:
+// holding to power the device OFF (AXP hardware shutdown at 8s) must not wipe
+// the bond — a power-off hold never releases before shutdown. To stop a
+// "chicken-out" release just before 8s from pairing, the gesture disarms at 6s.
+//
+//   ~1.5s long-press edge → PENDING
+//   3.0s (+1500)          → ARMED   (release from here clears bonds)
+//   6.0s (+4500)          → DISARMED (no clear; AXP powers off at 8s)
+#define PAIR_ARM_AFTER_LONG_MS    1500   // 3.0s total
+#define PAIR_DISARM_AFTER_LONG_MS 4500   // 6.0s total
+enum pair_state_t { PAIR_IDLE, PAIR_PENDING, PAIR_ARMED };
+static pair_state_t pair_state        = PAIR_IDLE;
+static uint32_t     pair_long_seen_ms = 0;
 
-    uint8_t rot = imu_get_rotation();
-    if (rot != last_rotation) {
-        board_set_brightness(0);
-        last_rotation = rot;
-        lv_obj_invalidate(lv_screen_active());
-        ramp_step = 1;
+static void pair_tick(void) {
+    if (pair_state == PAIR_IDLE && power_hal_pwr_long_pressed()) {
+        pair_state = PAIR_PENDING;
+        pair_long_seen_ms = millis();
+        (void)power_hal_pwr_released();  // drain any stale release edge
+        Serial.println("PWR long-press: hold to ~3s then release to pair");
+        return;
+    }
+    if (pair_state == PAIR_IDLE) return;
+
+    if (power_hal_pwr_released()) {
+        if (pair_state == PAIR_ARMED) {
+            clear_pairing("PWR hold");
+        } else {
+            Serial.println("Pair: released too early — cancelled");
+        }
+        pair_state = PAIR_IDLE;
         return;
     }
 
-    if (ramp_step == 0) return;
-    uint32_t now = millis();
-    if (now - ramp_last < 25) return;
-    ramp_last = now;
-
-    static const uint8_t levels[] = {60, 120, 170, 200};
-    board_set_brightness(levels[ramp_step - 1]);
-    if (ramp_step >= 4) ramp_step = 0;
-    else                ramp_step++;
+    uint32_t held = millis() - pair_long_seen_ms;
+    if (pair_state == PAIR_PENDING && held >= PAIR_ARM_AFTER_LONG_MS) {
+        pair_state = PAIR_ARMED;
+        Serial.println("Pair: armed — release to pair");
+    } else if (pair_state == PAIR_ARMED && held >= PAIR_DISARM_AFTER_LONG_MS) {
+        pair_state = PAIR_IDLE;  // power-off territory; don't pair
+        Serial.println("Pair: disarmed (holding toward power-off)");
+    }
 }
-#endif
 
-void loop(void) {
-#if BOARD_HAS_TOUCH
-    touch_read();
-#endif
+// Boards without a PWR button: a 5 s touch hold on the pairing hint clears
+// the bonds (pair_hold.h). Only counts while the hint is what you see.
+static PairHold touch_hold = { PAIR_HOLD_UP, false, 0 };
+
+static void touch_pair_tick(void) {
+    if (board_caps().has_pwr_button) return;
+    // Taps on the hint don't make Clawd peek (the face would cover it).
+    director_set_pairing_touch(ui_pair_hint_visible());
+    const bool enabled = ui_pair_hint_visible() && director_room() == ROOM_METERS && !idle_is_asleep();
+    switch (pair_hold_step(&touch_hold, enabled, touch_down, millis())) {
+    case PAIR_HOLD_HOLDING:
+        Serial.println("Pair: touch hold, keep holding to clear the pairing");
+        ui_set_pair_hint(PAIR_HINT_HOLDING);
+        break;
+    case PAIR_HOLD_CANCEL:
+        Serial.println("Pair: touch hold released early, cancelled");
+        ui_set_pair_hint(PAIR_HINT_NORMAL);
+        break;
+    case PAIR_HOLD_FIRE:
+        clear_pairing("touch hold");
+        break;
+    case PAIR_HOLD_NONE:
+        break;
+    }
+}
+
+void loop() {
+    idle_tick();
     lv_timer_handler();
     ui_tick_anim();
     ble_tick();
-    power_tick();
-    imu_tick();
+    power_hal_tick();
+    imu_hal_tick();
+    sound_hal_tick();
     splash_tick();
-    buttons_tick();
+    mascot_tick();
+    director_tick();
+    if (director_take_dismissed()) ble_send_dismiss();
+    // Rotation transition (blank + ramp) would fight the idle fade — skip
+    // ticks while the panel is dark. A rotation that happens during sleep
+    // is detected by the next tick after wake and ramped in then.
+    if (!idle_is_asleep()) display_hal_tick();
 
-#if BOARD_HAS_IMU
-    handle_rotation_change();
-#endif
+    // ---- Physical buttons ----
+    //   PRIMARY   → HID Space  (Claude Code voice-mode PTT)
+    //   SECONDARY → HID Shift+Tab  (mode toggle; only if the board has one)
+    //   PWR       → on the stage: next scene in the group; elsewhere: cycle
+    //               brightness; hold ~3s + release: pairing mode
+    // Any press also tells the director you're here (wakes the screensaver).
+    // First press from sleep is consumed as a wake-only event by
+    // idle_consume_wake_press(); the normal action fires from the second
+    // press. Activity bookkeeping happens inside idle_consume_wake_press
+    // so no separate idle_note_activity() call is needed here.
+    {
+        static bool primary_was = false;
+        static bool primary_wake_swallowed = false;
+        bool primary_now = input_hal_is_held(INPUT_BTN_PRIMARY);
+        if (primary_now != primary_was) {
+            if (primary_now) {
+                if (idle_consume_wake_press()) primary_wake_swallowed = true;
+                else { ble_keyboard_press(0x2C, 0); director_button(); }  // HID Space, no mods
+            } else {
+                if (primary_wake_swallowed) primary_wake_swallowed = false;
+                else                        ble_keyboard_release();
+            }
+            primary_was = primary_now;
+        }
+
+        if (board_caps().button_count >= 2) {
+            static bool secondary_was = false;
+            static bool secondary_wake_swallowed = false;
+            bool secondary_now = input_hal_is_held(INPUT_BTN_SECONDARY);
+            if (secondary_now != secondary_was) {
+                if (secondary_now) {
+                    if (idle_consume_wake_press()) secondary_wake_swallowed = true;
+                    else { ble_keyboard_press(0x2B, 0x02); director_button(); }  // HID Tab + LEFT_SHIFT
+                } else {
+                    if (secondary_wake_swallowed) secondary_wake_swallowed = false;
+                    else                          ble_keyboard_release();
+                }
+                secondary_was = secondary_now;
+            }
+        }
+
+        if (power_hal_pwr_pressed()) {
+            if (!idle_consume_wake_press()) {
+                // On the stage PWR swaps the scene and stays in the room (a
+                // screensaver calm dip steps to the other calm scene);
+                // anywhere else it cycles brightness and counts as you being here.
+                if (director_room() == ROOM_STAGE) director_stage_next();
+                else { brightness_cycle(); director_button(); }
+            }
+        }
+
+        pair_tick();
+        touch_pair_tick();
+    }
 
     ble_state_t bs = ble_get_state();
     if (bs != last_ble_state) {
@@ -431,32 +428,82 @@ void loop(void) {
         ui_update_ble_status(bs, ble_get_device_name(), ble_get_mac_address());
     }
 
-    static int last_pct = -2;
+    static int  last_pct      = -2;
     static bool last_charging = false;
-    int pct = power_battery_pct();
-    bool charging = power_is_charging();
-    if (pct != last_pct || charging != last_charging) {
+    static bool last_vbus     = false;
+    int  pct      = power_hal_battery_pct();
+    bool charging = power_hal_is_charging();
+    bool vbus     = power_hal_is_vbus_in();
+    if (pct != last_pct || charging != last_charging || vbus != last_vbus) {
+        if (pct != last_pct) ble_set_battery_level(pct);
         last_pct = pct;
         last_charging = charging;
-        ui_update_battery(pct, charging);
+        last_vbus = vbus;
+        ui_update_battery(pct, charging, vbus);
     }
 
     check_serial_cmd();
 
     if (ble_has_data()) {
         if (parse_json(ble_get_data(), &usage)) {
-            int g_before = usage_rate_group();
-            usage_rate_sample(usage.session_pct);
-            int g_after = usage_rate_group();
-            if (g_after != g_before) {
-                Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
-                              g_before, g_after, usage.session_pct);
-                if (splash_is_active()) splash_pick_for_current_rate();
+            // Fast + slow clock bookkeeping: rate sample (replays skipped),
+            // hook activity lift, event dedupe. See signals.h.
+            const SignalsUpdate sig = signals_ingest(&usage);
+            const bool session_reset = sig.session_reset;
+            const int g_before = sig.group_before;
+            const int g_after  = sig.group_after;
+            shown_group = g_after;
+            if (sig.event_fired)
+                Serial.printf("[%lu] hook event '%c' (#%lu)\n", (unsigned long)millis(),
+                              sig.event ? sig.event : '?', (unsigned long)sig.event_seq);
+            // 5-hour session limit refilled → ding so the user knows they can
+            // use Claude again (no-op on boards without sound). Gated on the
+            // app's opt-in `c` (reset_chime); the `chime` serial cmd ignores it.
+            if (session_reset && usage.chime) {
+                Serial.println("session reset detected — chime");
+                sound_hal_chime();
+            }
+            // Claude Code hook fired on the host: the same ding. Not gated on
+            // `c`: the app only sets `b` when its alert chime is on.
+            if (usage.beep) {
+                Serial.println("attention — chime");
+                sound_hal_chime();
             }
             ui_update(&usage);
+            // A prompt (or you're back after a gap): you're at the computer,
+            // so a dimmed or dark panel wakes before Clawd notices you. A
+            // Stop or tool activity doesn't: Claude working alone isn't you.
+            if (sig.event_fired && (sig.event == 'p' || sig.event == 'b'))
+                idle_note_activity();
+            director_on_payload(&usage, &sig);
+            if (usage.alert_msg[0]) {
+                Serial.println("attention — mascot");
+                idle_note_activity();
+                director_alert(usage.alert_msg);
+            }
+            if (usage.alert_clear) director_alert_clear();
+            if (g_after != g_before)
+                Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
+                    g_before, g_after, usage.session_pct);
             ble_send_ack();
         } else {
             ble_send_nack();
+        }
+    }
+
+    // The mood group also moves without a payload: the 15-min window decays
+    // to Idle on its own and a hook activity lift expires. Nothing needs to
+    // react (the corner and the stage read the group when they pick), but log
+    // it so the serial trace matches what Clawd does.
+    {
+        static uint32_t last_check = 0;
+        if (millis() - last_check >= 1000) {
+            last_check = millis();
+            const int g = usage_rate_group();
+            if (g != shown_group) {
+                Serial.printf("usage rate: group %d -> %d (decay)\n", shown_group, g);
+                shown_group = g;
+            }
         }
     }
 
