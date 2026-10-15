@@ -466,7 +466,7 @@ and Off, 35-peek-* a tap on the meters: crouch, hop, ducks
 - Hardware: send `clawd show`, `clawd screensaver`, `clawd attention`,
   `clawd joy`, `clawd lurk`, `clawd peek [x]` (the peek now, as a tap at x)
   or `clawd home` on the serial console, then `screenshot`
-  (`.claude/skills/flashing-and-probing-boards/scripts/screenshot.py`). This replaces swapping the boot screen in `main.cpp`.
+  (`.claude/skills/capturing-device-screenshots/scripts/screenshot.py`). This replaces swapping the boot screen in `main.cpp`.
   The device boots to the meters. `perf` prints the redraw cost of the last
   face rise, face drop and performance (below).
 

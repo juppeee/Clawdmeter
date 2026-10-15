@@ -48,7 +48,7 @@ the corresponding capabilities accurately.
    to the meters. Check touch coordinates, buttons, battery state, Bluetooth,
    brightness, and any supported audio or rotation.
 7. Review all device states at the panel's native resolution. On PSRAM boards,
-   `.claude/skills/flashing-and-probing-boards/scripts/screenshot.py out.png` captures the framebuffer
+   `.claude/skills/capturing-device-screenshots/scripts/screenshot.py out.png` captures the framebuffer
    as a PNG. C6 builds disable
    snapshots; inspect the physical display. Simulator captures supplement
    hardware checks but do not replace them.

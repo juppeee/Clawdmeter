@@ -1,6 +1,6 @@
 ---
 name: flashing-and-probing-boards
-description: Flashes firmware to a connected Clawdmeter board over USB and talks to it over serial - upload commands, picking the port, and the serial command set (info, ble, unpair, disconnect, perf, chime tuning, clawd beats) and PNG screenshots of the device's screen. Use when asked to flash or upload firmware, screenshot a board, read the board's state, debug pairing or BLE on a device, tune the chime, or run any serial command on hardware.
+description: Flashes firmware to a connected Clawdmeter board over USB and talks to it over serial - upload commands, picking the port, and the serial command set (info, ble, unpair, disconnect, perf, chime tuning, clawd beats). Use when asked to flash or upload firmware, read the board's state, debug pairing or BLE on a device, tune the chime, or run any serial command on hardware.
 ---
 
 # Flashing and probing boards
@@ -36,12 +36,6 @@ and fails with a clear message when no board or several are attached. If
 `pyserial` is missing, run it with `~/.platformio/penv/bin/python`. Close any
 `pio device monitor` first; it holds the port.
 
-Capture the screen as a PNG sized to the panel (same port rules), then Read it:
-
-```bash
-python3 ${CLAUDE_SKILL_DIR}/scripts/screenshot.py /path/out.png
-```
-
 | Command | Reply / effect |
 | --- | --- |
 | `info` | JSON: env, version, panel revision, link state |
@@ -56,11 +50,11 @@ python3 ${CLAUDE_SKILL_DIR}/scripts/screenshot.py /path/out.png
 | `chime <gain> [volume]` | Tune the speaker until reboot: gain 0..1, ES8311 volume 0..100. The 2.16 ships 0.7 / 77 (tuned by ear); the 1.8 and LCD-1.54 ship 0.7 / 75 (not tuned by ear) |
 | `unpair` | Clear bonds and re-advertise; replies `{"unpair":true}` |
 | `disconnect` | Drop every BLE link |
-| `screenshot` | Binary framebuffer dump; use `screenshot.py` above. Not available on C6 boards (no PSRAM) |
+| `screenshot` | Binary framebuffer dump; use the `capturing-device-screenshots` skill for a PNG |
 
 The authoritative list is the command parser in `firmware/src/main.cpp`
 (search `cmd_buf`); director beats are in `director_debug()` in
 `firmware/src/clawd_director.cpp`.
 
-For UI work, pair these with the `verifying-firmware-ui` skill: force a beat,
-`screenshot.py`, Read the PNG.
+For UI work, force a beat here, then capture it with the
+`capturing-device-screenshots` skill.

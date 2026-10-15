@@ -52,7 +52,7 @@ def main():
     port_path = args.port or default_port()
     cmd = " ".join(args.command)
     if cmd == "screenshot":
-        sys.exit("use screenshot.py for screenshots (binary framebuffer dump)")
+        sys.exit("screenshot is a binary framebuffer dump: use the capturing-device-screenshots skill")
 
     try:
         port = serial.Serial(port_path, BAUD, timeout=0.05)

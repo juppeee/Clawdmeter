@@ -117,15 +117,14 @@ each UI iteration:
 
 1. Force the state: `clawd <show|screensaver|attention|joy|lurk|home>` or
    `clawd peek <x>` over serial.
-2. Capture it: `python3 .claude/skills/flashing-and-probing-boards/scripts/screenshot.py out.png`
-   (PNG sized to the panel; `--port` when several boards are attached).
+2. Capture it with the `capturing-device-screenshots` skill.
 3. Read the PNG.
 
 There's no need to edit the boot screen in `main.cpp` to reach a state.
 
-**C6 boards have no `screenshot`** (no PSRAM for the snapshot,
-`LV_USE_SNAPSHOT=0`). Verify C6 changes in the sim at 480×480 / 368×448 and
-say in the PR that the C6 panel needs eyeballing on hardware.
+**C6 boards can't be captured** (no PSRAM for the snapshot). Verify C6
+changes in the sim at 480×480 / 368×448 and say in the PR that the C6 panel
+needs eyeballing on hardware.
 
 ## Reporting
 

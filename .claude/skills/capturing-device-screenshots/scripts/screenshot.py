@@ -14,18 +14,29 @@ C6 boards answer SCREENSHOT_UNSUPPORTED: they have no PSRAM for the snapshot.
 """
 
 import argparse
+import glob
 import struct
 import sys
 import time
 import zlib
-
-from serial_cmd import BAUD, default_port
 
 try:
     import serial
 except ImportError:
     sys.exit("pyserial missing: run with ~/.platformio/penv/bin/python, "
              "or pip install pyserial")
+
+BAUD = 115200  # monitor_speed of every env in firmware/platformio.ini
+
+
+def default_port():
+    found = sorted(glob.glob("/dev/ttyACM*") + glob.glob("/dev/cu.usbmodem*"))
+    if len(found) == 1:
+        return found[0]
+    if not found:
+        sys.exit("no board found (no /dev/ttyACM* or /dev/cu.usbmodem*); "
+                 "plug one in or pass --port")
+    sys.exit(f"several serial ports: {', '.join(found)}; pass --port")
 
 
 def read_frame(port, timeout):
