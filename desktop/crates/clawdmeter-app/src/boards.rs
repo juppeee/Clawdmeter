@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 11] = [
+pub const BOARDS: [BoardInfo; 12] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -149,6 +149,17 @@ pub const BOARDS: [BoardInfo; 11] = [
         summary: "240×240 · SPI LCD",
         chip: "ESP32-S3",
         pwr_button: false,
+    },
+    BoardInfo {
+        env: "sensecap_indicator_d1l",
+        name: "SenseCAP Indicator D1L",
+        product: "Seeed Studio SenseCAP Indicator D1L",
+        width: 480,
+        height: 480,
+        buy_url: "https://www.seeedstudio.com/SenseCAP-Indicator-D1L-p-5646.html",
+        summary: "480×480 · RGB TFT",
+        chip: "ESP32-S3",
+        pwr_button: true,
     },
 ];
 
