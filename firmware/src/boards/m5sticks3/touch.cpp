@@ -1,10 +1,9 @@
 #include "../../hal/touch_hal.h"
 
 // No touch controller on the M5StickS3. The HAL permanently reports
-// "released" — LVGL's pointer indev simply never fires a click. The tap
-// gesture's job (splash/usage toggle) moves to the side button: power.cpp
-// synthesizes the PWR role from BtnB and main.cpp routes its short press
-// to ui_toggle_splash() via PWR_BTN_TOGGLES_SCREENS.
+// "released" — LVGL's pointer indev simply never fires a click. The side
+// button stands in for it: power.cpp synthesizes the PWR role from BtnB
+// (BoardCaps.has_pwr_button), which the director treats as you being here.
 
 void touch_hal_init(void) {}
 

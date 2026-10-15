@@ -49,6 +49,9 @@ struct Layout {
     const lv_font_t* pct_font;       // big percentage number
     const lv_font_t* ent_pct_font;   // enterprise spending number
     const lv_font_t* pill_font;      // "Session" / "Weekly" pill
+    const char* session_pill;        // pill labels (short on narrow screens)
+    const char* weekly_pill;
+    bool    show_title;              // header title / clock (dropped on narrow screens)
     const lv_font_t* reset_font;     // "Resets in ..." line
     const lv_font_t* pace_font;      // enterprise "Under/On/Over pace" line
     const lv_font_t* anim_font;      // animated status line
@@ -99,6 +102,9 @@ static void compute_layout(const BoardCaps& c) {
     L.anim_font    = &font_mono_32;
     L.anim_y = -15;
     L.small_icons = false;
+    L.session_pill = "Session";
+    L.weekly_pill  = "Weekly";
+    L.show_title = true;
     L.title_nudge = 16;
     L.logo_y = L.title_y - 10;
     L.batt_y = L.title_y;
@@ -138,7 +144,7 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_device_font   = &font_styrene_20;
         L.bt_credit_1_font = &font_styrene_16;
         L.bt_credit_2_font = &font_styrene_14;
-    } else {
+    } else if (c.width >= 200) {
         // Small layout — tuned for 240x240 (LCD-1.54 and similar square TFTs).
         // Everything shrinks: fonts two steps down, panels ~half height, and
         // the corner logo/battery switch to the 40px/24px small assets.
@@ -176,6 +182,50 @@ static void compute_layout(const BoardCaps& c) {
         L.bt_info_panel_h = 90;
         L.bt_reset_zone_h = 60;
         L.bt_title_font    = &font_tiempos_34;
+        L.bt_status_font   = &font_styrene_20;
+        L.bt_device_font   = &font_styrene_14;
+        L.bt_credit_1_font = &font_styrene_12;
+        L.bt_credit_2_font = &font_styrene_12;
+    } else {
+        // Stick layout — tuned for 135x240 portrait (M5StickS3 and similar).
+        // Height is plentiful, width is the enemy: the corner Clawd and the
+        // battery share the top strip, so the header title/clock is dropped;
+        // pills read "5h"/"7d" and the pairing hint wraps.
+        L.margin = 6;
+        L.title_y = 4;
+        L.content_y = 44;
+        L.usage_panel_h = 78;
+        L.usage_panel_gap = 8;
+        L.usage_bar_y = 34;
+        L.usage_reset_y = 54;
+        L.bar_h = 10;
+        L.panel_pad_x = 8;
+        L.panel_pad_y = 6;
+        L.pill_pad_x = 7;
+        L.pill_pad_y = 2;
+        L.title_font   = &font_tiempos_34;
+        L.pct_font     = &font_styrene_24;
+        L.ent_pct_font = &font_tiempos_34;
+        L.pill_font    = &font_styrene_12;
+        L.reset_font   = &font_styrene_12;
+        L.pace_font    = &font_styrene_12;
+        L.anim_font    = &font_mono_18;
+        L.anim_y = -6;
+        L.small_icons = true;
+        L.show_title = false;
+        L.session_pill = "5h";
+        L.weekly_pill  = "7d";
+        L.title_nudge = 0;
+        L.logo_y = 2;
+        L.batt_y = 10;
+        L.batt_w = ICON_BATTERY_SMALL_W;
+        L.pair_y1 = 12;
+        L.pair_y2 = 40;
+        L.pair_y3 = 82;
+        L.pair_y4 = 140;
+        L.bt_info_panel_h = 80;
+        L.bt_reset_zone_h = 46;
+        L.bt_title_font    = &font_styrene_24;
         L.bt_status_font   = &font_styrene_20;
         L.bt_device_font   = &font_styrene_14;
         L.bt_credit_1_font = &font_styrene_12;
@@ -459,6 +509,10 @@ static lv_obj_t* make_pair_line(const lv_font_t* font, lv_color_t color, int16_t
     lv_label_set_text(l, "");
     lv_obj_set_style_text_font(l, font, 0);
     lv_obj_set_style_text_color(l, color, 0);
+    // Wrap inside the margins and center, so a long hint line (narrow
+    // screens) breaks into two centered lines instead of running off.
+    lv_obj_set_width(l, L.scr_w - 2 * L.margin);
+    lv_obj_set_style_text_align(l, LV_TEXT_ALIGN_CENTER, 0);
     lv_obj_align(l, LV_ALIGN_TOP_MID, 0, y);
     return l;
 }
@@ -507,6 +561,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     // The nudge balances the corner logo on the left; smaller on small
     // screens where the logo is 40px and the battery icon sits closer.
     lv_obj_align(lbl_title, LV_ALIGN_TOP_MID, L.title_nudge, L.title_y);
+    if (!L.show_title) lv_obj_add_flag(lbl_title, LV_OBJ_FLAG_HIDDEN);
 
     // Usage panels (shown when connected) live in a transparent full-size group
     // so they can be toggled against the pairing hint as one unit.
@@ -519,7 +574,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_clear_flag(usage_group, LV_OBJ_FLAG_SCROLLABLE);
     lv_obj_add_flag(usage_group, LV_OBJ_FLAG_EVENT_BUBBLE);
 
-    panel_session = make_usage_panel(usage_group, L.content_y, "Session",
+    panel_session = make_usage_panel(usage_group, L.content_y, L.session_pill,
                      &lbl_session_pct, &lbl_session_label,
                      &bar_session, &lbl_session_reset);
 
@@ -544,7 +599,7 @@ static void init_usage_screen(lv_obj_t* scr) {
     lv_obj_add_flag(lbl_spending_status, LV_OBJ_FLAG_HIDDEN);
 
     panel_weekly = make_usage_panel(usage_group,
-                     L.content_y + L.usage_panel_h + L.usage_panel_gap, "Weekly",
+                     L.content_y + L.usage_panel_h + L.usage_panel_gap, L.weekly_pill,
                      &lbl_weekly_pct, &lbl_weekly_label,
                      &bar_weekly, &lbl_weekly_reset);
     // Recolor enabled so enterprise period box can color pace and reset separately
@@ -656,7 +711,7 @@ void ui_update(const UsageData* data) {
         if (panel_weekly) lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
     } else {
         lv_obj_set_style_text_font(lbl_session_pct, L.pct_font, 0);
-        lv_label_set_text(lbl_session_label, "Session");
+        lv_label_set_text(lbl_session_label, L.session_pill);
         lv_obj_clear_flag(lbl_session_reset, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_spending_desc,   LV_OBJ_FLAG_HIDDEN);

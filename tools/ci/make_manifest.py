@@ -40,6 +40,7 @@ DISPLAY_NAMES = {
     "waveshare_amoled_206": "Waveshare ESP32-S3 AMOLED 2.06\" (watch)",
     "waveshare_lcd_154": "Waveshare ESP32-S3 LCD 1.54\"",
     "waveshare_lcd_4": "Waveshare ESP32-S3 LCD 4\"",
+    "m5sticks3": "M5Stack M5StickS3",
 }
 
 REQUIRED = ("env", "chip", "flash_size", "file", "sha256")
