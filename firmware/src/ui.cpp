@@ -94,7 +94,8 @@ static uint32_t connected_at_ms = 0;       // when we last entered CONNECTED ("C
 static uint32_t anim_last_ms = 0;
 static uint8_t anim_spinner_idx = 0;
 static uint8_t anim_phase = 0;
-static uint8_t anim_msg_idx = 0;
+static uint8_t anim_msg_idx = 0;    // counts verb changes (the stale line alternates on it)
+static uint8_t anim_verb_idx = 0;   // the verb shown: the next one that fits the line
 static uint32_t anim_msg_start = 0;
 static const char* frozen_shown = nullptr;   // spinner held still: the word on screen
 
@@ -143,6 +144,17 @@ static const char* const anim_messages[] = {
     "Working", "Wrangling",
 };
 #define ANIM_MSG_COUNT (sizeof(anim_messages) / sizeof(anim_messages[0]))
+
+// The first verb from `i` on that fits the status line as "<glyph> <verb>…";
+// a narrow panel skips the long ones rather than clipping them.
+static uint8_t fitting_verb(uint8_t i) {
+    for (uint8_t n = 0; n < ANIM_MSG_COUNT; n++, i = (i + 1) % ANIM_MSG_COUNT) {
+        char buf[48];
+        snprintf(buf, sizeof(buf), "%s %s\xE2\x80\xA6", spinner_frames[1], anim_messages[i]);
+        if (layout_text_width(L.status_font, buf) <= L.status_w) return i;
+    }
+    return i;
+}
 
 static lv_color_t pct_color(float pct) {
     if (pct >= 80.0f) return COL_RED;
@@ -474,6 +486,7 @@ void ui_init(void) {
     performer_init(scr, L.card[1].y + L.card[1].h);
 
     lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
+    anim_verb_idx = fitting_verb(0);
 }
 
 void ui_update(const UsageData* data) {
@@ -650,6 +663,7 @@ void ui_tick_anim(void) {
     const ClawdTuning& tune = clawd_tuning();
     if (now - anim_msg_start >= tune.verb_ms) {
         anim_msg_idx = (anim_msg_idx + 1) % ANIM_MSG_COUNT;
+        anim_verb_idx = fitting_verb((anim_verb_idx + 1) % ANIM_MSG_COUNT);
         anim_msg_start = now;
     }
 
@@ -673,7 +687,7 @@ void ui_tick_anim(void) {
     } else if (now - connected_at_ms < 5000) {
         text = "Connected";
     } else {
-        text = anim_messages[anim_msg_idx];
+        text = anim_messages[anim_verb_idx];
     }
 
     if (!tune.spinner) {
@@ -730,14 +744,15 @@ void ui_set_alert_text(const char* message) {
         // Minimal mode: nothing moves, so a long message is cut, not scrolled.
         lv_label_set_long_mode(lbl_anim, minimal_mode() ? LV_LABEL_LONG_DOT
                                                         : LV_LABEL_LONG_SCROLL_CIRCULAR);
-        lv_obj_set_width(lbl_anim, L.status_w);
+        // One line: without a fixed height LONG_DOT would wrap onto the cards.
+        lv_obj_set_size(lbl_anim, L.status_w, lv_font_get_line_height(L.status_font));
         lv_label_set_text(lbl_anim, message);
         return;
     }
     if (!alert_active) return;
     alert_active = false;
     lv_label_set_long_mode(lbl_anim, LV_LABEL_LONG_WRAP);
-    lv_obj_set_width(lbl_anim, LV_SIZE_CONTENT);
+    lv_obj_set_size(lbl_anim, LV_SIZE_CONTENT, LV_SIZE_CONTENT);
     anim_last_ms = 0;          // whimsical line redraws on the next tick
     still_shown = nullptr;
     frozen_shown = nullptr;
