@@ -440,10 +440,6 @@ void ble_clear_bonds(void) {
     need_advertise = true;
 }
 
-bool ble_has_bonds(void) {
-    return NimBLEDevice::getNumBonds() > 0;
-}
-
 void ble_print_status(void) {
     static const char* names[] = {"INIT", "ADVERTISING", "CONNECTED", "DISCONNECTED"};
     Serial.printf("BLE status: state=%s bonds=%d owner=%s\n",

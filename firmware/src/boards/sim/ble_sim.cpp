@@ -117,7 +117,6 @@ const char* ble_get_device_name(void) { return "Clawdmeter (sim)"; }
 const char* ble_get_mac_address(void) { return "00:51:4D:00:00:01"; }
 
 void ble_clear_bonds(void) { printf("[sim] pair gesture completed — bonds cleared\n"); }
-bool ble_has_bonds(void)   { return true; }
 void ble_print_status(void) { printf("BLE status: state=%s (sim)\n", connected ? "CONNECTED" : "ADVERTISING"); }
 void ble_disconnect_all(void) { printf("[sim] disconnect\n"); }
 

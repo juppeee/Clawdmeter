@@ -62,6 +62,5 @@ int   usage_rate_activity_at(uint32_t now_ms);
 int   usage_rate_group_at(uint32_t now_ms);
 
 // ---- millis() wrappers (usage_rate_clock.cpp) ----
-bool  usage_rate_sample(float session_pct, bool replay = false);
 int   usage_rate_group(void);
 int   usage_rate_base_group(void);    // rate only, no activity lift

@@ -18,8 +18,6 @@ pub const R_S: f32 = 6.0;
 pub const R_ITEM: f32 = 8.0;
 /// Radius for panels (the device's zone radius).
 pub const R_M: f32 = 12.0;
-/// Radius for the window chrome.
-pub const R_L: f32 = 20.0;
 /// Pill radius.
 pub const R_PILL: f32 = 999.0;
 
