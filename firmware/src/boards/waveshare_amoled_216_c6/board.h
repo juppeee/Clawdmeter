@@ -47,14 +47,13 @@
 //   PWR  (cycle screens) — AXP2101 PKEY IRQ, handled in power.cpp
 //   KEY  (secondary) — GPIO 10, sends Shift+Tab (mode toggle) over BLE HID
 // KEY GPIO isn't documented by Waveshare; identified empirically by
-// scanning unused GPIOs at boot (see git history of board_init.cpp).
+// scanning unused GPIOs at boot.
 #define BTN_BACK_GPIO        9
 #define BTN_FWD_GPIO         10
 
 // ---- Capability flags ----
 #define BOARD_HAS_SECONDARY_BUTTON 1
-#define BOARD_HAS_ROTATION         0    // C6 has no PSRAM headroom for the rotation strip
-#define BOARD_HAS_IMU              1    // present + initialized for I2C bus health
-#define BOARD_HAS_TOUCH            1
+#define BOARD_HAS_ROTATION         1    // via CO5300 MADCTL (panel-side), no rotation strip needed
+#define BOARD_HAS_IMU              1    // QMI8658 drives auto-rotation
 #define BOARD_HAS_BATTERY          1
 #define BOARD_HAS_IO_EXPANDER      0    // TCA9554 exists on board but only services audio
