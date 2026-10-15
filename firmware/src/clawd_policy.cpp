@@ -115,6 +115,23 @@ void clawd_set_liveliness(int level) {
 
 int clawd_liveliness(void) { return liveliness; }
 
+// ─── Attention animation ─────────────────────────────────────────────────────
+static int attn_anim_s = CLAWD_ATTN_ANIM_DEFAULT_S;
+
+int clawd_attn_anim_clamp(int seconds) {
+    if (seconds < 0) return 0;
+    if (seconds > CLAWD_ATTN_ANIM_MAX_S) return CLAWD_ATTN_ANIM_MAX_S;
+    return seconds;
+}
+
+uint32_t clawd_attn_anim_ms(int seconds, uint32_t alert_timeout_ms) {
+    seconds = clawd_attn_anim_clamp(seconds);
+    return (uint32_t)((uint64_t)alert_timeout_ms * seconds / CLAWD_ATTN_ANIM_MAX_S);
+}
+
+void clawd_set_attn_anim(int seconds) { attn_anim_s = clawd_attn_anim_clamp(seconds); }
+int  clawd_attn_anim(void) { return attn_anim_s; }
+
 // ─── Randomness ──────────────────────────────────────────────────────────────
 void clawd_rng_seed(ClawdRng* r, uint32_t seed) { r->s = seed ? seed : 0x9E3779B9u; }
 

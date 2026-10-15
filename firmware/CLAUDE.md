@@ -27,7 +27,7 @@ pins and hardware gotchas, which loads when you work in that folder.
   `clawd_tuning_fast()` under `SIM_FAST`). There is no separate stage:
   `performer.cpp` plays the full-size scenes on the meters, in front of the
   panels (PSRAM boards; C6 plays corner acts instead). Liveliness (`lv`,
-  1 No-nonsense … 5 All-nonsense, kept in NVS by `liveliness.cpp`) acts
+  1 No-nonsense … 5 All-nonsense, kept in NVS by `clawd_prefs.cpp`) acts
   only through `clawd_tuning_scaled()`; add new behaviour to the tuning
   rather than checking the level elsewhere. The module map, every beat, the
   tunables and the C6 differences are in `docs/clawd-director.md`: read it

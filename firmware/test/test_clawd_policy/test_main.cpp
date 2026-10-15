@@ -361,6 +361,23 @@ static void test_liveliness_clamps_and_rebuilds_from_the_base(void) {
     clawd_tuning_set_base(&T);
 }
 
+// The attention animation is a share of the alert: 120 s is all of it,
+// 0 is none, and it follows the alert timeout (the sim's 20 s alert).
+static void test_attention_animation_is_a_share_of_the_alert(void) {
+    TEST_ASSERT_EQUAL_UINT32(120000, clawd_attn_anim_ms(120, 120000));
+    TEST_ASSERT_EQUAL_UINT32(30000, clawd_attn_anim_ms(30, 120000));
+    TEST_ASSERT_EQUAL_UINT32(10000, clawd_attn_anim_ms(10, 120000));
+    TEST_ASSERT_EQUAL_UINT32(0, clawd_attn_anim_ms(0, 120000));
+    TEST_ASSERT_EQUAL_UINT32(5000, clawd_attn_anim_ms(30, 20000));
+    TEST_ASSERT_EQUAL_UINT32(120000, clawd_attn_anim_ms(600, 120000));   // clamped
+    TEST_ASSERT_EQUAL_INT(0, clawd_attn_anim_clamp(-5));
+    ClawdTuning before = clawd_tuning();
+    clawd_set_attn_anim(0);                      // not part of the liveliness tuning
+    TEST_ASSERT_EQUAL_MEMORY(&before, &clawd_tuning(), sizeof(before));
+    TEST_ASSERT_EQUAL_INT(0, clawd_attn_anim());
+    clawd_set_attn_anim(CLAWD_ATTN_ANIM_DEFAULT_S);
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_show_needs_five_sustained_minutes_of_level_3);
@@ -393,5 +410,6 @@ int main(int, char**) {
     RUN_TEST(test_all_nonsense_earns_shows_sooner_and_on_lighter_work);
     RUN_TEST(test_levels_in_between_interpolate);
     RUN_TEST(test_liveliness_clamps_and_rebuilds_from_the_base);
+    RUN_TEST(test_attention_animation_is_a_share_of_the_alert);
     return UNITY_END();
 }

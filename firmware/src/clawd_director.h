@@ -49,6 +49,10 @@ void director_button(void);        // a physical button press: you're here
 // pending reaction) stops.
 void director_set_liveliness(int level);
 
+// How long Clawd's attention animation runs, in seconds (clawd_policy.h;
+// 0 = off). The alert itself is unchanged.
+void director_set_attn_anim(int seconds);
+
 // Print every beat step with a timestamp (the sim turns it on with
 // SIM_TRACE=1 for walkthrough timings). Beat changes always print.
 void director_set_trace(bool on);

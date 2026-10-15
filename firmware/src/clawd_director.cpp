@@ -44,6 +44,7 @@ static bool     attention_on = false;
 static bool     attention_dismissed = false;  // ended here; the app hasn't heard
 static bool     pairing_touch = false;        // director_set_pairing_touch
 static uint32_t attention_since = 0;
+static bool     attn_anim_done = false;       // Clawd's part of the alert is over; it stays up
 static AttnFrom attn_from = ATTN_FROM_HOME;   // what it interrupted
 static uint32_t attn_mark = 0;                // last_engagement right after the alert
 static bool     attn_engaged = false;         // you showed up since the alert (sticky across refreshes)
@@ -152,6 +153,14 @@ static void to_meters(bool noticed) {
 }
 
 // ─── Attention ───────────────────────────────────────────────────────────────
+// Clawd's part of an alert: he points and waves for the attention
+// animation's time (clawd_attn_anim), then sits in his seat while the alert
+// itself stays up until a tap, a clear or its timeout.
+static bool attn_anim_running(uint32_t now) {
+    return !attn_anim_done &&
+           (uint32_t)(now - attention_since) < clawd_attn_anim_ms(clawd_attn_anim(), clawd_tuning().alert_timeout_ms);
+}
+
 static void end_attention(AttnEnd how) {
     if (!attention_on) return;
     attention_on = false;
@@ -184,10 +193,11 @@ void director_alert(const char* message) {
     engage();
     attn_mark = last_engagement;
     attention_since = now_ms();
+    attn_anim_done = false;                   // a new alert gets its animation again
     ui_set_alert_text(message);
-    if (attention_on) return;                 // refresh text + timer only
+    if (attention_on) return;                 // refresh text + timers only
     attention_on = true;
-    if (beat == B_ATTENTION) { step = 0; mascot_attention(true); return; }
+    if (beat == B_ATTENTION) { step = 0; return; }
     // Attention never waits: interrupt whatever is on.
     if (face_visible() || performing) {
         face_set_resting(false);
@@ -264,6 +274,10 @@ void director_button(void) {
     if (beat == B_SCREENSAVER) to_meters(false);
 }
 
+void director_set_attn_anim(int seconds) {
+    clawd_set_attn_anim(seconds);             // a running alert follows it on the next tick
+}
+
 void director_set_liveliness(int level) {
     clawd_set_liveliness(level);
     const ClawdTuning& t = clawd_tuning();
@@ -338,7 +352,7 @@ static void apply_minimal(bool on) {
     beat = attention_on ? B_ATTENTION : B_HOME;
     step = 0;
     mascot_autonomy(!on && !attention_on);
-    if (attention_on) mascot_attention(true);
+    if (attention_on && attn_anim_running(now_ms())) mascot_attention(true);
     Serial.printf("director: minimal %s\n", on ? "on" : "off");
 }
 
@@ -533,7 +547,16 @@ static void run_run_home(uint32_t now) {
 
 static void run_attention(uint32_t now) {
     if (step == 0) {
-        if (!mascot_in_attention()) mascot_attention(true);
+        if (attn_anim_running(now)) {
+            mascot_attention(true);
+        } else {
+            if (!attn_anim_done) {            // the animation is over (or off): home to his seat
+                attn_anim_done = true;
+                mascot_attention(false, true);
+                mascot_hurry_home();
+            }
+            if (mascot_away()) mascot_return(-1, 150);   // arrived here with him out of sight
+        }
         if ((uint32_t)(now - attention_since) >= clawd_tuning().alert_timeout_ms)
             end_attention(ATTN_END_TIMEOUT);
         return;

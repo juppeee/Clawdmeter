@@ -74,6 +74,20 @@ void clawd_tuning_set_base(const ClawdTuning* base);
 void clawd_set_liveliness(int level);
 int  clawd_liveliness(void);
 
+// ─── Attention animation ─────────────────────────────────────────────────────
+// How long Clawd points and waves when Claude needs you, in seconds (the
+// app's Attention animation: 120, 30, 10, or 0 = off; payload `aa`, kept in
+// NVS). Only his animation stops: the alert itself (message, tap to
+// dismiss, alert_timeout_ms) is unchanged. Liveliness doesn't touch it.
+// 120 s is the whole alert; the time scales with the tuning's alert timeout
+// so the sim's fast alert keeps the proportions.
+#define CLAWD_ATTN_ANIM_MAX_S     120
+#define CLAWD_ATTN_ANIM_DEFAULT_S 120
+int      clawd_attn_anim_clamp(int seconds);   // 0..120
+uint32_t clawd_attn_anim_ms(int seconds, uint32_t alert_timeout_ms);
+void     clawd_set_attn_anim(int seconds);
+int      clawd_attn_anim(void);
+
 // ─── Randomness ──────────────────────────────────────────────────────────────
 // Small xorshift so behaviour is reproducible in tests (seeded) and cheap on
 // device (seeded from millis at boot).

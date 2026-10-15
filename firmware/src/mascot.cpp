@@ -31,6 +31,7 @@ enum Mode {
     M_BIG_ACT,    // ... waving / pointing
     M_BIG_OUT,    // ... walking off
     M_HELD,       // minimal mode attention: a held pointing frame
+    M_SEAT_ATTN,  // attention without the full-size sprite: waving / pointing in his seat
 };
 enum After { AFTER_SEAT, AFTER_AWAY, AFTER_LURK, AFTER_BIG };
 
@@ -57,7 +58,7 @@ static uint32_t seated_since = 0;
 static uint32_t idle_gap = 7000;
 static const char* last_act = NULL;
 static int      big_dx = 0;
-static uint8_t  big_act = 0;           // 0 waving, 1 pointing
+static uint8_t  big_act = 0;           // 0 waving, 1 pointing (attention, either size)
 static ClawdRng rng;
 
 // Per mood group: how long he sits between acts and which acts he picks.
@@ -185,6 +186,16 @@ static void big_enter(void) {
     draw_big();
 }
 
+static void seat_attention(void) {
+    big_act = 0;
+    start_frames(clawd_anim("waving"));
+    speed = 100;
+    facing = +1;
+    x = slot_x;
+    mode = M_SEAT_ATTN;
+    draw_corner();
+}
+
 static void lurk_start(void) {
     const ClawdAnim* l = clawd_anim("lurking");
     if (!l || !big_img) { walk_to(slot_x, 100, AFTER_SEAT); return; }
@@ -264,7 +275,7 @@ bool mascot_out(void) {
 }
 bool mascot_in_attention(void) {
     return attn || mode == M_BIG_IN || mode == M_BIG_ACT || mode == M_BIG_OUT ||
-           mode == M_HELD || (mode == M_WALK && after == AFTER_BIG);
+           mode == M_HELD || mode == M_SEAT_ATTN || (mode == M_WALK && after == AFTER_BIG);
 }
 
 void mascot_autonomy(bool on) {
@@ -398,11 +409,15 @@ void mascot_attention(bool on, bool to_seat) {
         }
         return;
     }
-    if (!big_img) {                                // no PSRAM: message-only
-        // He may have been placed away behind a curtain (attention cut a show
-        // or the screensaver short). Nothing walks on in his place, so the
-        // corner Clawd walks back to his seat instead of leaving it empty.
-        if (mode == M_AWAY || (mode == M_WALK && after != AFTER_SEAT)) mascot_return(-1, 150);
+    if (!big_img) {                                // no PSRAM: he waves and points from his seat
+        if (on) {
+            // He may be out (attention cut a show short): he walks back to
+            // his seat first, and mascot_tick starts the wave there.
+            if (mode == M_SEATED || mode == M_ACT) seat_attention();
+            else mascot_return(-1, 150);
+        } else if (mode == M_SEAT_ATTN) {
+            seat();
+        }
         return;
     }
     if (on) {
@@ -451,7 +466,11 @@ static void seated_tick(uint32_t now) {
 void mascot_tick(void) {
     if (!img || !anim) return;
     const uint32_t now = millis();
-    if (mode == M_SEATED) { seated_tick(now); return; }
+    if (mode == M_SEATED) {
+        if (attn && !big_img && !minimal) { seat_attention(); return; }   // back in his seat for the alert
+        seated_tick(now);
+        return;
+    }
     if (mode == M_AWAY || mode == M_HELD) return;
 
     const ClawdAnim* a = anim;
@@ -463,11 +482,12 @@ void mascot_tick(void) {
     if (walking && frame == a->loop_end) next = a->loop_start;   // hold the gait loop
 
     if (next >= a->frame_count) {
-        if (mode == M_BIG_ACT) {                       // wave, point, wave, ...
+        if (mode == M_BIG_ACT || mode == M_SEAT_ATTN) {   // wave, point, wave, ...
             big_act ^= 1;
             start_frames(clawd_anim(big_act ? "pointing" : "waving"));
             speed = 100;
-            draw_big();
+            if (mode == M_BIG_ACT) draw_big();
+            else                   draw_corner();
             return;
         }
         if (mode == M_LURK) {                          // back in from the right

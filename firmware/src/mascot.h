@@ -14,7 +14,7 @@
 //
 // The corner sprite works on every board (its ~23 KB buffer falls back to
 // internal RAM); the full-size sprite needs PSRAM (~250 KB). Without it the
-// lurk trip is skipped and attention is message-only.
+// lurk trip is skipped and attention is a wave and point from his seat.
 
 lv_obj_t* mascot_create(lv_obj_t *parent, int slot_x, int feet_y, int cell);
 void mascot_tick(void);
@@ -47,7 +47,9 @@ void mascot_reset(void);             // seated now, nothing pending
 
 // Attention: corner walks off left at 2x, the big Clawd walks on at 2x and
 // alternates waving and pointing until attention(false), then walks off and
-// the small one walks home. Minimal mode: a held pointing frame in the seat.
+// the small one walks home. Without the full-size sprite he waves and points
+// in his seat instead (walking back to it first if he's out). Minimal mode:
+// a held pointing frame in the seat.
 // to_seat=false (only meaningful with on=false): the small one stays off
 // screen after the big one leaves, for a screensaver that resumes.
 void mascot_attention(bool on, bool to_seat = true);

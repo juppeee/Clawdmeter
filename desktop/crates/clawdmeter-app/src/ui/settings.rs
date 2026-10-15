@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use clawdmeter_core::autostart::{self, LaunchMode};
-use clawdmeter_core::config::{AlertOn, ClockMode, ConfigFile, LIVELINESS_MAX};
+use clawdmeter_core::config::{AlertOn, AttentionAnim, ClockMode, ConfigFile, LIVELINESS_MAX};
 use clawdmeter_core::{Paths, Settings};
 use clawdmeter_flash::device::{self, FirmwareInfo};
 use gpui::{div, img, prelude::*, px, Context, EventEmitter, PathPromptOptions, SharedString, Window};
@@ -568,25 +568,58 @@ impl SettingsView {
             ),
         ));
         let me = cx.entity().downgrade();
+        let level = self.settings.liveliness;
         pane = pane.child(field_stacked(
             t,
-            "Silliness",
-            "How lively Clawd is. No-nonsense keeps him still in his corner, though taps and alerts still get a \
-             reaction; All-nonsense brings frequent shows and reactions.",
-            div().w_full().flex().justify_center().child(stepped_slider(
+            "Animation silliness",
+            "How lively Clawd is",
+            div()
+                .w_full()
+                .flex()
+                .flex_col()
+                .items_center()
+                .gap(px(10.))
+                .child(stepped_slider(
+                    t,
+                    "liveliness",
+                    LIVELINESS_MAX,
+                    level,
+                    &[(1, "No-nonsense"), (3, "Some-nonsense"), (5, "All-nonsense")],
+                    true,
+                    move |level, _, cx| {
+                        let _ = me.update(cx, |v, cx| {
+                            v.save(|s, _| s.liveliness = level);
+                            cx.notify();
+                        });
+                    },
+                ))
+                .child(
+                    div()
+                        .debug_selector(move || format!("liveliness-info-{level}"))
+                        .text_size(px(13.))
+                        .text_color(t.dim)
+                        .text_center()
+                        .child(liveliness_info(level)),
+                ),
+        ));
+        let me = cx.entity().downgrade();
+        pane = pane.child(field(
+            t,
+            "Attention animation",
+            "How long Clawd points and waves when Claude needs you. The alert stays up either way.",
+            segmented(
                 t,
-                "liveliness",
-                LIVELINESS_MAX,
-                self.settings.liveliness,
-                &[(1, "No-nonsense"), (3, "Some-nonsense"), (5, "All-nonsense")],
+                "attention-anim",
+                &AttentionAnim::ALL.map(|a| (a, attention_anim_label(a))),
+                &self.settings.attention_anim,
                 true,
-                move |level, _, cx| {
+                move |a, _, cx| {
                     let _ = me.update(cx, |v, cx| {
-                        v.save(|s, _| s.liveliness = level);
+                        v.save(|s, _| s.attention_anim = a);
                         cx.notify();
                     });
                 },
-            )),
+            ),
         ));
         let (me1, me2) = (cx.entity().downgrade(), cx.entity().downgrade());
         let (alert, reset) = (self.settings.alert_chime, self.settings.reset_chime);
@@ -1308,6 +1341,26 @@ pub(crate) fn write_settings(
     cfg.save(path)
 }
 
+/// What Clawd does at a liveliness level, under the slider.
+fn liveliness_info(level: u8) -> &'static str {
+    match level {
+        1 => "Still in his corner, a new verb once a minute. Taps and alerts still get a reaction.",
+        2 => "Mostly still: fewer corner acts, and shows only after long busy stretches.",
+        3 => "Corner acts now and then, a show after a busy stretch, a screensaver while you're away.",
+        4 => "Livelier: more corner acts, and shows come sooner and more often.",
+        _ => "Frequent shows and reactions. Even a moderately busy stretch earns a show.",
+    }
+}
+
+fn attention_anim_label(a: AttentionAnim) -> &'static str {
+    match a {
+        AttentionAnim::Min2 => "2m",
+        AttentionAnim::S30 => "30s",
+        AttentionAnim::S10 => "10s",
+        AttentionAnim::Off => "Off",
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use gpui::{Modifiers, TestAppContext, VisualTestContext};
@@ -1340,10 +1393,16 @@ mod tests {
         let text = std::fs::read_to_string(&paths.config_file).unwrap();
         assert!(text.starts_with("# mine\n"), "comments kept: {text}");
         assert!(text.contains("reset_chime = on"), "{text}");
+        assert!(cx.debug_bounds("liveliness-info-3").is_some(), "the default level's line");
         click(cx, "liveliness-1");
         assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("liveliness = 1"));
+        assert!(cx.debug_bounds("liveliness-info-1").is_some(), "the line follows the slider");
         click(cx, "liveliness-3"); // Back to the default: the key stays, the value follows.
         assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("liveliness = 3"));
+        click(cx, "attention-anim-3"); // Off
+        assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("attention_anim = off"));
+        click(cx, "attention-anim-1"); // 30 s
+        assert!(std::fs::read_to_string(&paths.config_file).unwrap().contains("attention_anim = 30s"));
 
         view.update(cx, |v, cx| v.show(Page::Settings, false, cx));
         click(cx, "poll-2"); // While working: 5 min

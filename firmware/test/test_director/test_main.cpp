@@ -70,6 +70,7 @@ static SignalsUpdate no_signal(void) {
 }
 
 static void fresh_director(void);
+static int fuzz_attn_s = CLAWD_ATTN_ANIM_DEFAULT_S;
 
 void setUp(void) {
     broke = false;
@@ -105,6 +106,7 @@ static void fresh_director(void) {
     clawd_tuning_fast(&fast);
     clawd_tuning_set_base(&fast);
     clawd_set_liveliness(CLAWD_LIVELINESS_DEFAULT);
+    clawd_set_attn_anim(fuzz_attn_s);
     director_init();
     // Hooks installed: one activity reading is enough for signals to know.
     signals_clear();
@@ -226,6 +228,80 @@ static void test_fuzz_one_clawd_at_every_liveliness(void) {
     assert_one_clawd();
 }
 
+// Attention animation Off: the alert is up (message, dismissing tap, the
+// app hears about it) but he never points or waves; he sits in his seat,
+// including when the alert cut a show short and he had to come back.
+static void attention_off(bool has_big) {
+    world.has_big = has_big;
+    fuzz_attn_s = 0;
+    fresh_director();
+    world.activity = 3;
+    TEST_ASSERT_TRUE(director_debug("show"));
+    run_for(has_big ? 9000 : 1500);              // mid-performance (or mid corner act)
+    director_alert("needs you");
+    bool animated = false;
+    for (int t = 0; t < 15000; t += TICK_MS) {   // under the sim's 20 s alert
+        run_for(TICK_MS);
+        if (fake_attention_animating()) animated = true;
+    }
+    TEST_ASSERT_FALSE_MESSAGE(animated, "he pointed or waved with the animation off");
+    TEST_ASSERT_EQUAL_STRING("attention", director_beat_name());
+    TEST_ASSERT_TRUE(attention_on);
+    TEST_ASSERT_TRUE(fake_corner_seated_still());
+    director_tap(200);                           // the alert itself still works
+    TEST_ASSERT_TRUE(director_take_dismissed());
+    run_for(5000);
+    TEST_ASSERT_EQUAL_STRING("home", director_beat_name());
+    assert_one_clawd();
+    fuzz_attn_s = CLAWD_ATTN_ANIM_DEFAULT_S;
+}
+static void test_attention_animation_off_with_full_size_sprite(void) { attention_off(true); }
+static void test_attention_animation_off_without_full_size_sprite(void) { attention_off(false); }
+
+// A short attention animation (10 s: 1.7 s of the sim's 20 s alert): he
+// points and waves, then goes back to his seat while the alert stays up
+// until its own timeout.
+static void attention_short(bool has_big) {
+    world.has_big = has_big;
+    fuzz_attn_s = 10;
+    fresh_director();
+    director_alert("needs you");
+    run_for(1000);
+    TEST_ASSERT_TRUE(fake_attention_animating());
+    run_for(6000);                               // his part is over, and he's home
+    TEST_ASSERT_FALSE(fake_attention_animating());
+    TEST_ASSERT_TRUE(fake_corner_seated_still());
+    TEST_ASSERT_TRUE(attention_on);
+    TEST_ASSERT_EQUAL_STRING("attention", director_beat_name());
+    run_for(8000);                               // 15 s in: still sitting, alert still up
+    TEST_ASSERT_TRUE(fake_corner_seated_still());
+    TEST_ASSERT_TRUE(attention_on);
+    director_alert("needs you again");           // a new alert animates again
+    run_for(1000);
+    TEST_ASSERT_TRUE(fake_attention_animating());
+    run_for(25 * 1000);                          // the alert times out (nobody came: the
+    TEST_ASSERT_FALSE(attention_on);             // quiet time may have opened the screensaver)
+    TEST_ASSERT_TRUE(director_take_dismissed());
+    TEST_ASSERT_TRUE(strcmp(director_beat_name(), "attention") != 0);
+    assert_one_clawd();
+    fuzz_attn_s = CLAWD_ATTN_ANIM_DEFAULT_S;
+}
+static void test_short_attention_animation_with_full_size_sprite(void) { attention_short(true); }
+static void test_short_attention_animation_without_full_size_sprite(void) { attention_short(false); }
+
+static void test_fuzz_one_clawd_at_every_attention_animation(void) {
+    static const int SETTINGS[] = { 0, 10, 30 };
+    for (int i = 0; i < 3 && !broke; i++) {
+        fuzz_attn_s = SETTINGS[i];
+        for (uint32_t seed = 1; seed <= 6 && !broke; seed++) {
+            fuzz(seed * 7919u + i, 20 * 60 * 1000, true);
+            fuzz(seed * 104729u + i, 20 * 60 * 1000, false);
+        }
+    }
+    fuzz_attn_s = CLAWD_ATTN_ANIM_DEFAULT_S;
+    assert_one_clawd();
+}
+
 int main(int, char**) {
     UNITY_BEGIN();
     RUN_TEST(test_screensaver_calm_dip_keeps_one_clawd);
@@ -234,5 +310,10 @@ int main(int, char**) {
     RUN_TEST(test_no_nonsense_sits_still_through_everything_but_taps);
     RUN_TEST(test_no_nonsense_ends_a_running_show);
     RUN_TEST(test_fuzz_one_clawd_at_every_liveliness);
+    RUN_TEST(test_attention_animation_off_with_full_size_sprite);
+    RUN_TEST(test_attention_animation_off_without_full_size_sprite);
+    RUN_TEST(test_short_attention_animation_with_full_size_sprite);
+    RUN_TEST(test_short_attention_animation_without_full_size_sprite);
+    RUN_TEST(test_fuzz_one_clawd_at_every_attention_animation);
     return UNITY_END();
 }

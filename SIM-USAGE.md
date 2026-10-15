@@ -106,7 +106,7 @@ SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
 | --- | --- |
 | `SIM_SHOTS` | `ms:path,ms:path`; ascending times, exit after the last shot. |
 | `SIM_TAPS` | `ms@x,y;ms@x,y`; a 120 ms press at each time. |
-| `SIM_CMDS` | `ms:command;ms:command`; serial commands, including `clawd peek <x>` and `liveliness <1-5>`. `pwr`, `prompt`, `stop`, `alert`, and `link` inject their corresponding input. |
+| `SIM_CMDS` | `ms:command;ms:command`; serial commands, including `clawd peek <x>`, `liveliness <1-5>` and `attention_anim <seconds>`. `pwr`, `prompt`, `stop`, `alert`, and `link` inject their corresponding input. |
 | `SIM_MINIMAL=1` | Set the simulator's `BoardCaps.minimal_ui` at startup to preview a minimal-display board. |
 | `SIM_TRACE=1` | Log director transitions and steps. |
 | `SIM_NO_PWR=1` | Play a board without a PWR button (like the LCD-4): `P` does nothing and the pairing hint offers the touch-hold gesture. |

@@ -98,7 +98,7 @@ passed. Beat changes always print; every step prints too after
 | `face-home` | tap, prompt, button or attention while the screensaver face is up; a tap, attention or the end of its curiosity while the peek face is up | If woken by a prompt or tapped during a peek, he blinks first (noticing), then the face drops into the meters, and the corner hurries home at 1.5×. |
 | `run-home` | tap or attention during a performance; a tap, prompt, button or usage moving during a calm dip | The scene releases to the idle pose on the spot, holds 200 ms, and he runs off left, ramping from 1.5× to 3× over 400 ms. Once he's gone, the corner walks home at 1.5×. |
 | `peek` | any tap on the meters (`home` or `corner`), live or stale (below) | Seated: a startled hop (`jumping` from its crouch, 2×), then he ducks out through the nearest edge at 4×; already moving or out: straight out at 4×. The face rises, eyes glance toward the tap's x and hold 1.6–2.4 s, a blink (30 % double), the look comes back to you, and the face stays up, curious, for 5 min: resting like the screensaver face (blinks every 2–6 s, some double), its glances going back toward the tap most of the time. Then it goes back on its own; a tap sends it back right away (with the acknowledging blink). Both go through `face-home`: the drop, and he walks back to his seat at 1.5×. (below: what else happens while it's up) |
-| `attention` | `m` (alert) in a payload | The corner walks off at 2×, the big Clawd (12 px cells) walks on at 2×, then waves and points alternately. A tap, `x` (clear) or 2 min sends the big one off left. Interrupts a show or the screensaver through `face-home` / `run-home`, and then returns to where it left off (below). |
+| `attention` | `m` (alert) in a payload | The corner walks off at 2×, the big Clawd (12 px cells) walks on at 2×, then waves and points alternately (no PSRAM: he waves and points in his seat). The alert lasts until a tap, `x` (clear) or 2 min; his animation lasts the **attention animation** time (below), 2 min by default, after which the big one walks off left and the corner Clawd sits in his seat while the alert stays up. Off: no animation, he sits in his seat. A new alert animates again. Interrupts a show or the screensaver through `face-home` / `run-home`, and then returns to where it left off (below). |
 
 **Which scene a show plays.** The trigger (activity 3) lifts the live mood
 group to Heavy, so the show reads the usage-only base group instead, floored
@@ -325,7 +325,8 @@ a board capability, with no NVS override, desktop setting, or serial toggle.
   dancing or jumping happy twice, a wave) and a calm dip is the corner Clawd
   walking back to his seat for a while (see Beats).
 - No full-size sprite (about 250 KB), so there's no lurk trip, and attention
-  is message-only: the corner stays in his seat.
+  is a wave and point in his seat (he walks back to it first if he's out),
+  for the attention animation's time.
 
 ## Buttons
 
@@ -349,9 +350,9 @@ defaults).
 
 ## Liveliness
 
-The app's **Silliness** slider (config `liveliness`, payload `lv`, 1–5,
+The app's **Animation silliness** slider (config `liveliness`, payload `lv`, 1–5,
 default 3) sets how lively Clawd is. The device stores the last value in
-NVS (`liveliness.cpp`, key `lively`) so it applies from boot. One pure
+NVS (`clawd_prefs.cpp`, key `lively`) so it applies from boot. One pure
 function, `clawd_tuning_scaled()`, turns the base tuning (the defaults, or
 `SIM_FAST`'s) into the effective one; the director, the corner and the
 status line read nothing else, and `director_set_liveliness()` applies a
@@ -372,6 +373,22 @@ scaling), `test_director` (No-nonsense sits still through activity, prompts,
 stops, usage and a reset but still peeks on a tap; turning it down mid-show
 ends the show; the one-Clawd fuzz at every level). In the sim:
 `SIM_CMDS="300:liveliness 1"`, or `"lv":1` in a scenario line.
+
+## Attention animation
+
+The app's **Attention animation** (config `attention_anim` = `2m`, `30s`,
+`10s` or `off`; payload `aa` in seconds, 120 / 30 / 10 / 0) sets how long
+Clawd points and waves for an alert. It's stored in NVS (`clawd_prefs.cpp`,
+key `attn_anim`) and liveliness doesn't touch it. Only his animation stops:
+the message, the dismissing tap, `x`, the 2-minute alert timeout and the
+`{"dismiss":true}` notify are unchanged. When the time is up the big Clawd
+walks off and the corner Clawd walks home to his seat (no PSRAM: the seat's
+wave stops); he sits still there until the alert ends. `clawd_attn_anim_ms()`
+maps the setting onto the tuning's alert timeout (2 min = the whole alert),
+so under `SIM_FAST` 30 s is 5 s of the 20 s alert. Native tests: Off and a
+10 s setting, with and without the full-size sprite, and the one-Clawd fuzz
+at Off / 10 s / 30 s (`test_director`). In the sim:
+`SIM_CMDS="300:attention_anim 0"`, or `"aa":0` in a scenario line.
 
 ## QA
 
@@ -396,7 +413,9 @@ ends the show; the one-Clawd fuzz at every level). In the sim:
   output (01–25 the main walkthrough, 26 stale data, 27–29 a lurk cut short,
   30–31 attention handing back to the screensaver, 32 PWR during a calm dip,
   33–34 the jump at 368×448 and its 240×240 fallback, 37–38 a show at
-  368×448 and 240×240, 39 No-nonsense mid-walkthrough (he sits still), 35-peek-* a tap on the meters: crouch, hop, ducks
+  368×448 and 240×240, 39 No-nonsense mid-walkthrough (he sits still), 40–42 the attention
+animation at 30 s (waving, then back in his seat with the alert still up)
+and Off, 35-peek-* a tap on the meters: crouch, hop, ducks
   out, face rises, looks toward the tap, blinks, still up seconds later (a
   glance back toward the tap, a blink), the tap on the face blinks and drops
   it, back in his seat; then a tap on stale meters (12–13) and while pairing

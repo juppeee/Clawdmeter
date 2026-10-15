@@ -25,7 +25,7 @@ static bool done(uint32_t until) { return (int32_t)(now() - until) >= 0; }
 static uint32_t scaled(uint32_t ms, uint16_t pct) { return ms * 100 / (pct ? pct : 100); }
 
 // ─── Corner + full-size sprite (mascot.h) ───────────────────────────────────
-enum MMode { M_SEATED, M_ACT, M_WALK, M_AWAY, M_LURK, M_BIG_IN, M_BIG_ACT, M_BIG_OUT, M_HELD };
+enum MMode { M_SEATED, M_ACT, M_WALK, M_AWAY, M_LURK, M_BIG_IN, M_BIG_ACT, M_BIG_OUT, M_HELD, M_SEAT_ATTN };
 enum MAfter { A_SEAT, A_AWAY, A_LURK, A_BIG };
 static MMode    m_mode = M_SEATED;
 static MAfter   m_after = A_SEAT;
@@ -57,7 +57,7 @@ bool mascot_out(void) {
 }
 bool mascot_in_attention(void) {
     return m_attn || m_mode == M_BIG_IN || m_mode == M_BIG_ACT || m_mode == M_BIG_OUT ||
-           m_mode == M_HELD || (m_mode == M_WALK && m_after == A_BIG);
+           m_mode == M_HELD || m_mode == M_SEAT_ATTN || (m_mode == M_WALK && m_after == A_BIG);
 }
 void mascot_autonomy(bool on) { m_autonomy = on; if (on && m_mode == M_SEATED) m_seated_since = now(); }
 
@@ -113,7 +113,12 @@ void mascot_attention(bool on, bool to_seat) {
     m_to_seat = on || to_seat;
     if (m_minimal) { if (on) m_mode = M_HELD; else m_seat(); return; }
     if (!world.has_big) {
-        if (m_mode == M_AWAY || (m_mode == M_WALK && m_after != A_SEAT)) mascot_return(-1, 150);
+        if (on) {
+            if (m_mode == M_SEATED || m_mode == M_ACT) m_mode = M_SEAT_ATTN;
+            else mascot_return(-1, 150);
+        } else if (m_mode == M_SEAT_ATTN) {
+            m_seat();
+        }
         return;
     }
     if (on) {
@@ -133,6 +138,7 @@ void mascot_attention(bool on, bool to_seat) {
 void mascot_tick(void) {
     switch (m_mode) {
     case M_SEATED:
+        if (m_attn && !world.has_big && !m_minimal) { m_mode = M_SEAT_ATTN; return; }
         if (!m_autonomy || m_minimal || now() - m_seated_since < 4000) return;
         if (world.has_big && m_rand() % 3 == 0) { m_walk(A_LURK, 100); return; }
         m_mode = M_ACT; m_act_auto = true; m_until = now() + 1200;
@@ -229,7 +235,8 @@ void fake_actors_tick(void) {
 
 OnScreen fake_on_screen(void) {
     OnScreen s;
-    s.corner = (m_mode == M_SEATED || m_mode == M_ACT || m_mode == M_WALK || m_mode == M_HELD);
+    s.corner = (m_mode == M_SEATED || m_mode == M_ACT || m_mode == M_WALK || m_mode == M_HELD ||
+                m_mode == M_SEAT_ATTN);
     s.big = (m_mode == M_LURK || m_mode == M_BIG_IN || m_mode == M_BIG_ACT || m_mode == M_BIG_OUT);
     s.performer = performer_visible();
     s.face = face_visible();
@@ -237,6 +244,7 @@ OnScreen fake_on_screen(void) {
 }
 
 bool fake_corner_seated_still(void) { return m_mode == M_SEATED; }
+bool fake_attention_animating(void) { return mascot_in_attention(); }
 
 int fake_clawds(const OnScreen& s) {
     return (int)s.corner + (int)s.big + (int)s.performer + (int)s.face;

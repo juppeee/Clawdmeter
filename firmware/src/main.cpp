@@ -18,7 +18,7 @@
 #include "idle.h"
 #include "idle_cfg.h"
 #include "brightness.h"
-#include "liveliness.h"
+#include "clawd_prefs.h"
 #include "perf.h"
 #include "pair_hold.h"
 
@@ -214,6 +214,11 @@ static void check_serial_cmd() {
                 if (cmd_buf[10] == ' ') liveliness_set(atoi(cmd_buf + 11));
                 Serial.printf("{\"liveliness\":%d}\n", liveliness_get());
             }
+            else if (strcmp(cmd_buf, "attention_anim") == 0 || strncmp(cmd_buf, "attention_anim ", 15) == 0) {
+                // QA: `attention_anim [seconds]` (0 = off; until the app sends its own).
+                if (cmd_buf[14] == ' ') attn_anim_set(atoi(cmd_buf + 15));
+                Serial.printf("{\"attention_anim\":%d}\n", attn_anim_get());
+            }
             else if (strncmp(cmd_buf, "clawd ", 6) == 0) {
                 const bool ok = director_debug(cmd_buf + 6);
                 Serial.printf("{\"clawd\":\"%s\",\"ok\":%s}\n", cmd_buf + 6, ok ? "true" : "false");
@@ -277,7 +282,7 @@ void setup() {
     ui_update_ble_status(ble_get_state(), ble_get_device_name(), ble_get_mac_address());
     ui_update_battery(power_hal_battery_pct(), power_hal_is_charging(), power_hal_is_vbus_in());
     director_init();    // rooms + beats; boots on the meters (home)
-    liveliness_init();  // the saved liveliness, before the app says otherwise
+    clawd_prefs_init();  // the saved liveliness and attention animation, before the app says otherwise
 
     Serial.printf("Dashboard ready (%s, %dx%d) %lu ms after boot, waiting for data on BLE...\n",
         board_caps().name, W, H, (unsigned long)millis());
@@ -480,6 +485,7 @@ void loop() {
             if (sig.event_fired && (sig.event == 'p' || sig.event == 'b'))
                 idle_note_activity();
             if (usage.liveliness > 0) liveliness_set(usage.liveliness);
+            if (usage.attn_anim_s >= 0) attn_anim_set(usage.attn_anim_s);
             director_on_payload(&usage, &sig);
             if (usage.alert_msg[0]) {
                 Serial.println("attention — mascot");
