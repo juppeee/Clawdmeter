@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 7] = [
+pub const BOARDS: [BoardInfo; 9] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -106,6 +106,28 @@ pub const BOARDS: [BoardInfo; 7] = [
         chip: "ESP32-C6",
         pwr_button: true,
     },
+    BoardInfo {
+        env: "lilygo_t_display_s3",
+        name: "T-Display S3",
+        product: "LILYGO T-Display S3",
+        width: 170,
+        height: 320,
+        buy_url: "https://lilygo.cc/products/t-display-s3",
+        summary: "170×320 · 2 buttons",
+        chip: "ESP32-S3",
+        pwr_button: true,
+    },
+    BoardInfo {
+        env: "waveshare_lcd_2",
+        name: "LCD 2",
+        product: "Waveshare ESP32-S3-Touch-LCD-2",
+        width: 240,
+        height: 320,
+        buy_url: "https://www.waveshare.com/esp32-s3-touch-lcd-2.htm?&aff_id=149786",
+        summary: "240×320 · touch only",
+        chip: "ESP32-S3",
+        pwr_button: false,
+    },
 ];
 
 /// Look up a board by env.
@@ -141,7 +163,7 @@ mod tests {
     fn every_board_has_art_and_a_shop() {
         for b in BOARDS {
             assert!(crate::ui::Assets::get(&b.illustration()).is_some(), "{} has no illustration", b.env);
-            assert!(b.buy_url.starts_with("https://www.waveshare.com/"), "{}", b.env);
+            assert!(b.buy_url.starts_with("https://"), "{}", b.env);
         }
     }
 }
