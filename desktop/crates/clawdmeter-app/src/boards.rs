@@ -28,7 +28,7 @@ pub struct BoardInfo {
 }
 
 /// Every hardware env in `firmware/platformio.ini` (not `sim` / `native`).
-pub const BOARDS: [BoardInfo; 13] = [
+pub const BOARDS: [BoardInfo; 14] = [
     BoardInfo {
         env: "waveshare_amoled_216",
         name: "AMOLED 2.16",
@@ -169,6 +169,17 @@ pub const BOARDS: [BoardInfo; 13] = [
         height: 320,
         buy_url: "https://store.freenove.com/products/fnk0104",
         summary: "240×320 · SPI TFT",
+        chip: "ESP32-S3",
+        pwr_button: true,
+    },
+    BoardInfo {
+        env: "xingzhi_cube_183",
+        name: "Xingzhi Cube 1.83",
+        product: "Xingzhi Cube 1.83 inch TFT WiFi (2-mic)",
+        width: 284,
+        height: 240,
+        buy_url: "https://www.aliexpress.com/item/1005010442374066.html",
+        summary: "284×240 · SPI TFT",
         chip: "ESP32-S3",
         pwr_button: true,
     },

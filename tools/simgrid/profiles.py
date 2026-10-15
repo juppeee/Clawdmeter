@@ -58,6 +58,8 @@ PROFILES = (
     Profile("round", 466, 466, ("AMOLED-1.32", "AMOLED-1.43"), round=True, on_main=False),
     Profile("t4s3", 450, 600, ("LilyGO T4-S3",), pwr=False, on_main=False),
     Profile("cyd", 320, 240, ("ESP32-2432S028R", "ESP32-2432S024C", "M5Stack FIRE"), on_main=False),
+    Profile("cydp", 240, 320, ("CYD portrait", "Freenove S3", "Waveshare LCD-2"), on_main=False),
+    Profile("cube", 284, 240, ("Xingzhi Cube 1.83",), buttons=2, touch=False, on_main=False),
     Profile("cydp", 240, 320, ("CYD portrait", "Waveshare LCD-2"), on_main=False),
     Profile("fnk", 240, 320, ("Freenove S3 Display (non-touch)",), buttons=0, minimal=True, touch=False, on_main=False),
     Profile("cube", 284, 240, ("Xingzhi Cube 1.83",), on_main=False),
