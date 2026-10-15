@@ -65,6 +65,8 @@ const ASSETS: &[(&str, &[u8])] = bundled![
         "lilygo_t4s3",
         "waveshare_lcd_183",
         "esp32_s3_4848s040",
+        "lilygo_t_display_s3",
+        "waveshare_lcd_2",
         "waveshare_epaper_154",
         "xingzhi_cube_183",
         "freenove_s3_display_nontouch",

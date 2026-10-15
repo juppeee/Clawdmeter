@@ -43,6 +43,8 @@ DISPLAY_NAMES = {
     "lilygo_t4s3": "LILYGO T4-S3 AMOLED 2.41\"",
     "waveshare_lcd_183": "Waveshare ESP32-S3 LCD 1.83\"",
     "esp32_s3_4848s040": "Guition ESP32-S3 4848S040 (4\")",
+    "lilygo_t_display_s3": "LILYGO T-Display S3",
+    "waveshare_lcd_2": "Waveshare ESP32-S3 Touch LCD 2\"",
     "waveshare_epaper_154": "Waveshare ESP32-S3 ePaper 1.54\"",
     "xingzhi_cube_183": "Xingzhi Cube 1.83 inch TFT WiFi",
     "freenove_s3_display_nontouch": "Freenove ESP32-S3 Display 2.8 inch (non-touch)",

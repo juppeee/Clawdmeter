@@ -36,6 +36,8 @@ Nested `CLAUDE.md` files load when you read or edit a file in their folder.
 | `lilygo_t4s3` | LILYGO T4-S3 | RM690B0 AMOLED 450×600, CST226SE touch, SY6970 charger |
 | `waveshare_lcd_183` | Waveshare ESP32-S3-Touch-LCD-1.83 | ST7789P SPI 240×284, CST816 touch, AXP2101 |
 | `esp32_s3_4848s040` | Guition-style ESP32-S3 4848S040 | ST7701S RGB 480×480, GT911 touch, no buttons readable |
+| `lilygo_t_display_s3` | LILYGO T-Display S3 (non-touch) | ST7789 i80 parallel 170×320, BOOT + a PWR-role key |
+| `waveshare_lcd_2` | Waveshare ESP32-S3-Touch-LCD-2 | ST7789T3 SPI 240×320, CST816D touch, no usable buttons |
 | `waveshare_epaper_154` | Waveshare ESP32-S3-ePaper-1.54 | SSD1681 e-paper 200×200, no touch, `minimal_ui` |
 | `xingzhi_cube_183` | Xingzhi Cube 1.83 TFT WiFi | ST7789-type SPI 284×240 landscape, no touch, 3 buttons, battery ADC |
 | `freenove_s3_display_nontouch` | Freenove ESP32-S3 Display (FNK0104A, non-touch) | ILI9341 SPI 240×320, minimal UI, BOOT is the only button |
