@@ -49,10 +49,23 @@ jobs:
         with:
           fetch-depth: 1
 
+      # Optional: post as a repo-owned GitHub App (its own name and avatar) when
+      # the TRIAGE_APP_ID variable and TRIAGE_APP_PRIVATE_KEY secret are set.
+      # Otherwise comments come from github-actions[bot].
+      - name: App token
+        id: app
+        if: steps.cap.outputs.skip != 'true' && vars.TRIAGE_APP_ID != ''
+        uses: actions/create-github-app-token@v1
+        with:
+          app-id: ${{ vars.TRIAGE_APP_ID }}
+          private-key: ${{ secrets.TRIAGE_APP_PRIVATE_KEY }}
+
       - name: Write triage tools
         if: steps.cap.outputs.skip != 'true'
         env:
           TOOLS: ${{ runner.temp }}/triage
+          BOT_LOGIN: ${{ steps.app.outputs.app-slug && format('{0}[bot]', steps.app.outputs.app-slug) || 'github-actions[bot]' }}
+          NOUN: ${{ github.event_name == 'issues' && 'issue' || 'pull request' }}
         run: |
           mkdir -p "$TOOLS"
           cat > "$TOOLS/label.sh" <<EOF
@@ -64,13 +77,23 @@ jobs:
           EOF
           cat > "$TOOLS/comment.sh" <<EOF
           #!/usr/bin/env bash
-          # Posts the one triage comment on $KIND #$NUMBER. Usage: comment.sh "BODY"
+          # Posts the one triage comment on $KIND #$NUMBER, listing related items.
+          # Usage: comment.sh "#123 Title: why it's related" ...   (1 to 5 items)
           set -euo pipefail
-          [ \$# -eq 1 ] && [ -n "\$1" ] || { echo "usage: comment.sh BODY" >&2; exit 2; }
+          [ \$# -ge 1 ] && [ \$# -le 5 ] || { echo "usage: comment.sh ITEM... (1 to 5)" >&2; exit 2; }
+          for i in "\$@"; do
+            [[ "\$i" =~ ^#[0-9]+\ [^[:cntrl:]]{1,200}\$ ]] || { echo "bad item: \$i" >&2; exit 2; }
+          done
           n=\$(gh api "repos/$GITHUB_REPOSITORY/issues/$NUMBER/comments" --paginate \
-                --jq '[.[] | select(.user.login == "github-actions[bot]")] | length')
+                --jq '[.[] | select(.user.login == "$BOT_LOGIN")] | length')
           [ "\$n" -eq 0 ] || { echo "already commented" >&2; exit 1; }
-          gh issue comment $NUMBER -R "$GITHUB_REPOSITORY" --body "\$1"
+          body="Thanks for opening this $NOUN.
+
+          Here are some possibly related discussions, issues, or pull requests:
+          "
+          for i in "\$@"; do body+="
+          - \$i"; done
+          gh issue comment $NUMBER -R "$GITHUB_REPOSITORY" --body "\$body"
           EOF
           cat > "$TOOLS/discussions.sh" <<EOF
           #!/usr/bin/env bash
@@ -86,7 +109,7 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
-          github_token: ${{ github.token }}
+          github_token: ${{ steps.app.outputs.token || github.token }}
           allowed_non_write_users: '*'
           prompt: |
             Triage ${{ env.KIND == 'issue' && 'issue' || 'pull request' }} #${{ env.NUMBER }} in ${{ github.repository }}.
@@ -96,9 +119,12 @@ jobs:
             closed issues and PRs for duplicates with `gh search` or `gh issue list --search`.
             Label it with `${{ runner.temp }}/triage/label.sh LABEL...`, using only labels from
             `gh label list`. List open discussions with `${{ runner.temp }}/triage/discussions.sh`.
-            Comment at most once, with `${{ runner.temp }}/triage/comment.sh "BODY"`, and only when
-            it is a clear duplicate, clearly answered by the docs in this checkout, or clearly
-            belongs in an open discussion, linking the target.
+            If there are genuinely related open discussions, issues or pull requests (duplicates,
+            the discussion a feature request belongs in, earlier work on the same thing), comment
+            once with `${{ runner.temp }}/triage/comment.sh ITEM...`: 1 to 5 items, most relevant
+            first, each one line like "#204 Extra pages and features: where requests for new
+            device pages are being discussed". The script writes the greeting and bullet list.
+            Post no comment when nothing is clearly related.
             Never close anything, never edit the author's text, never review code.
           claude_args: |
             --model sonnet
