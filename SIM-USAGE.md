@@ -111,6 +111,7 @@ SDL_VIDEODRIVER=dummy SIM_FAST=1 SIM_SCENARIO=sim/director.jsonl \
 | `SIM_BUTTONS=1` | Play a board with BOOT only (`BoardCaps.button_count = 1`); `N` does nothing. |
 | `SIM_CIRCLE=1` | Set `BoardCaps.round_panel` to preview a round panel; the corners outside the circle are drawn as a grey bezel. |
 | `SIM_TRACE=1` | Log director transitions and steps. |
+| `SIM_NO_TOUCH=1` | Play a board without a touchscreen: `B` (BOOT) dismisses an active alert before it does anything else. |
 | `SIM_NO_PWR=1` | Play a board without a PWR button (like the LCD-4): `P` does nothing and the pairing hint offers the touch-hold gesture. |
 | `SIM_NO_BATTERY=1` | Start on USB power with no battery fitted (same as pressing `U`). |
 | `SIM_EDGE_WATCH=1` | Log non-black pixel counts in the bottom 16 rows and right 16 columns to expose stray edge rendering. |

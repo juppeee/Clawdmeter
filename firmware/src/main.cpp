@@ -395,7 +395,10 @@ void loop() {
         if (primary_now != primary_was) {
             if (primary_now) {
                 if (idle_consume_wake_press()) primary_wake_swallowed = true;
-                else { ble_keyboard_press(0x2C, 0); director_button(); }  // HID Space, no mods
+                // No touchscreen: BOOT dismisses an active alert first and is
+                // not a push-to-talk press then.
+                else if (director_button(true)) primary_wake_swallowed = true;
+                else { ble_keyboard_press(0x2C, 0); }                     // HID Space, no mods
             } else {
                 if (primary_wake_swallowed) primary_wake_swallowed = false;
                 else                        ble_keyboard_release();
@@ -410,7 +413,7 @@ void loop() {
             if (secondary_now != secondary_was) {
                 if (secondary_now) {
                     if (idle_consume_wake_press()) secondary_wake_swallowed = true;
-                    else { ble_keyboard_press(0x2B, 0x02); director_button(); }  // HID Tab + LEFT_SHIFT
+                    else { ble_keyboard_press(0x2B, 0x02); director_button(false); }  // HID Tab + LEFT_SHIFT
                 } else {
                     if (secondary_wake_swallowed) secondary_wake_swallowed = false;
                     else                          ble_keyboard_release();
@@ -423,7 +426,7 @@ void loop() {
             if (!idle_consume_wake_press()) {
                 // Cycles brightness, and counts as you being here.
                 brightness_cycle();
-                director_button();
+                director_button(false);
             }
         }
 

@@ -11,6 +11,7 @@ struct FakeWorld {
     int  activity;
     bool asleep;
     bool has_big;          // PSRAM boards: the performer, lurk trips, the attention walk-on
+    bool has_touch;        // BoardCaps.has_touch
 };
 extern FakeWorld world;
 

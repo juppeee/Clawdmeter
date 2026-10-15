@@ -139,7 +139,7 @@ static void fuzz(uint32_t seed, uint32_t total_ms, bool has_big) {
         case 7:          director_alert("needs you"); continue;
         case 8:          director_alert_clear(); continue;
         case 9: case 10: director_tap((int)fz_range(0, 479)); continue;
-        case 11:         director_button(); continue;
+        case 11:         (void)director_button(true); continue;
         case 12:         world.meters_live = fz_next() % 4 != 0; continue;
         case 13: {
             static const char* const BEATS[] = { "show", "screensaver", "lurk", "peek", "joy", "home" };
@@ -255,6 +255,38 @@ static void attention_off(bool has_big) {
     assert_one_clawd();
     fuzz_attn_s = CLAWD_ATTN_ANIM_DEFAULT_S;
 }
+// Without a touchscreen BOOT is the dismiss gesture: it ends an alert (and
+// tells the app) instead of doing its normal job; with nothing to dismiss, or
+// with a touchscreen, the press is left to its normal role.
+static void test_boot_dismisses_alert_without_touch(void) {
+    world.has_big = true;
+    world.has_touch = false;
+    fresh_director();
+    TEST_ASSERT_FALSE_MESSAGE(director_button(true), "nothing to dismiss");
+    director_alert("needs you");
+    run_for(1000);
+    TEST_ASSERT_TRUE(attention_on);
+    TEST_ASSERT_FALSE_MESSAGE(director_button(false), "a secondary button is not the dismiss gesture");
+    TEST_ASSERT_TRUE(attention_on);
+    TEST_ASSERT_TRUE_MESSAGE(director_button(true), "BOOT dismisses the alert");
+    TEST_ASSERT_FALSE(attention_on);
+    TEST_ASSERT_TRUE(director_take_dismissed());
+    run_for(5000);
+    TEST_ASSERT_EQUAL_STRING("home", director_beat_name());
+    TEST_ASSERT_FALSE_MESSAGE(director_button(true), "back to push to talk");
+    world.has_touch = true;
+}
+
+static void test_boot_leaves_alert_alone_with_touch(void) {
+    world.has_big = true;
+    world.has_touch = true;
+    fresh_director();
+    director_alert("needs you");
+    run_for(1000);
+    TEST_ASSERT_FALSE(director_button(true));
+    TEST_ASSERT_TRUE(attention_on);
+}
+
 static void test_attention_animation_off_with_full_size_sprite(void) { attention_off(true); }
 static void test_attention_animation_off_without_full_size_sprite(void) { attention_off(false); }
 
@@ -310,6 +342,8 @@ int main(int, char**) {
     RUN_TEST(test_no_nonsense_sits_still_through_everything_but_taps);
     RUN_TEST(test_no_nonsense_ends_a_running_show);
     RUN_TEST(test_fuzz_one_clawd_at_every_liveliness);
+    RUN_TEST(test_boot_dismisses_alert_without_touch);
+    RUN_TEST(test_boot_leaves_alert_alone_with_touch);
     RUN_TEST(test_attention_animation_off_with_full_size_sprite);
     RUN_TEST(test_attention_animation_off_without_full_size_sprite);
     RUN_TEST(test_short_attention_animation_with_full_size_sprite);

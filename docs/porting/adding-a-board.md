@@ -108,9 +108,13 @@ A new port must include:
   `desktop/crates/clawdmeter-app/src/boards.rs`, plus the SVG registration
   in `desktop/crates/clawdmeter-app/src/ui/mod.rs`.
 - An entry with the display name and buy link in the README's
-  **Supported boards** table. Waveshare product links must include
+  **Supported boards** table (new ports start under **Experimental**; a
+  report in the "Board support reports" discussion moves them to Stable).
+  Waveshare product links must include
   `?aff_id=149786` (or `&aff_id=149786` when a query already exists).
-  Other vendors use a plain product link. Apply this to the app entry too.
+  Other vendors use a plain product link to the maker's own store. When
+  the maker has no store of its own, a marketplace listing (Amazon,
+  AliExpress) is fine. Apply this to the app entry too.
 - A display-name entry in `tools/ci/make_manifest.py`'s `DISPLAY_NAMES`.
   Confirm that the environment, release manifest, and app catalog agree.
 

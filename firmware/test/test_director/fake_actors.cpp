@@ -10,6 +10,7 @@
 #include "ui.h"
 #include "idle.h"
 #include "minimal_mode.h"
+#include "hal/board_caps.h"
 #include "usage_rate.h"
 #include "signals.h"
 #include "clawd_anim.h"
@@ -18,7 +19,14 @@
 uint32_t   fake_now_ms = 1000;
 bool       fake_serial_echo = false;
 FakeSerial Serial;
-FakeWorld  world = { true, 0, false, true };
+FakeWorld  world = { true, 0, false, true, true };
+
+// The only BoardCaps field the director reads.
+const BoardCaps& board_caps(void) {
+    static BoardCaps caps;
+    caps.has_touch = world.has_touch;
+    return caps;
+}
 
 static uint32_t now(void) { return fake_now_ms; }
 static bool done(uint32_t until) { return (int32_t)(now() - until) >= 0; }

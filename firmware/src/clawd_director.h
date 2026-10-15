@@ -43,7 +43,11 @@ void director_tap(int x);
 // being here and dismisses an alert, but Clawd doesn't peek, so the hint
 // stays in view for the hold.
 void director_set_pairing_touch(bool on);
-void director_button(void);        // a physical button press: you're here
+// A physical button press: you're here. `primary` is BOOT. On a board
+// without a touchscreen a BOOT press first dismisses an active alert and
+// returns true (the caller then skips the button's normal action, push to
+// talk); otherwise false.
+bool director_button(bool primary);
 // Apply a liveliness level (clawd_policy.h) now: the tuning changes, and
 // what the new level rules out (a show, the screensaver, idle acts, a
 // pending reaction) stops.

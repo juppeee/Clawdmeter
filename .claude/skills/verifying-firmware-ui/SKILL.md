@@ -64,7 +64,7 @@ Write captures outside the repo (a scratch dir), convert BMP → PNG if needed
 | `SIM_CMDS="ms:cmd;…"` | Serial commands, e.g. `clawd show`, `clawd peek <x>`, `liveliness 1`; `pwr`, `prompt`, `stop`, `alert` press the button/keys |
 | `SIM_TAPS="ms@x,y;…"` | Touches; `ms@x,y+hold_ms` for a touch hold |
 | `SIM_TRACE=1` | Director transitions with timestamps (find when a beat actually happens) |
-| `SIM_NO_PWR=1` / `SIM_MINIMAL=1` | A board without a PWR button / `BoardCaps.minimal_ui` |
+| `SIM_NO_PWR=1` / `SIM_NO_TOUCH=1` / `SIM_MINIMAL=1` | A board without a PWR button / without a touchscreen / `BoardCaps.minimal_ui` |
 | `SIM_CIRCLE=1` | A round panel (`BoardCaps.round_panel`); the corners are drawn as a bezel |
 | `SIM_AUTOSHOT_MS`, `SIM_AUTOSHOT_PATH` | One headless shot (what CI captures) |
 

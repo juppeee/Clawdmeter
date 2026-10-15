@@ -125,8 +125,9 @@ change for the first time.
   ESP32-S3-Touch-AMOLED-2.16." If none, "not reviewed by a human". Report
   only confirmed involvement; approval to proceed is not review.
 - A new board also needs its buy link and preferably a photo of it running
-  Clawdmeter (say if there is none). Its SVG and catalog entries are part of
-  the port, not follow-up work.
+  Clawdmeter (say if there is none). A marketplace link (Amazon, AliExpress)
+  is fine when the maker has no store of its own. Its SVG and catalog entries
+  are part of the port, not follow-up work.
 
 ## CI
 

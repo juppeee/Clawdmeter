@@ -3,8 +3,8 @@ board capabilities, labelled with the boards it stands for.
 
 Each cell runs the simulator built at its size (SIM_LCD_W / SIM_LCD_H) with
 the capability overrides the sim understands (SIM_CIRCLE, SIM_NO_PWR,
-SIM_MINIMAL, SIM_BUTTONS). Boards on main come first, then the open port
-PRs' panels. Add a board here when its panel size or capabilities aren't
+SIM_NO_TOUCH, SIM_MINIMAL, SIM_BUTTONS). Boards on main come first, then the
+open port PRs' panels. Add a board here when its panel size or capabilities aren't
 covered yet; boards that only share a cell go in its `boards` list.
 """
 
@@ -21,6 +21,7 @@ class Profile:
     pwr: bool = True        # BoardCaps.has_pwr_button
     buttons: int = 1        # BoardCaps.button_count (1 = BOOT only)
     minimal: bool = False   # BoardCaps.minimal_ui
+    touch: bool = True      # BoardCaps.has_touch
     on_main: bool = True    # False for a port that is still a PR
 
     @property
@@ -40,6 +41,8 @@ class Profile:
             e["SIM_NO_PWR"] = "1"
         if self.minimal:
             e["SIM_MINIMAL"] = "1"
+        if not self.touch:
+            e["SIM_NO_TOUCH"] = "1"
         return e
 
 
