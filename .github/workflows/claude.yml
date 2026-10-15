@@ -27,12 +27,28 @@ jobs:
       id-token: write
       actions: read # Required for Claude to read CI results on PRs
     steps:
+      # The action checks out a PR's head branch and gets a token that can push,
+      # so it must never run on a fork PR. Fork PRs get `@claude review` instead.
+      - name: Skip fork PRs
+        id: fork
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number || (github.event.issue.pull_request && github.event.issue.number) || '' }}
+        run: |
+          if [ -n "$PR" ]; then
+            fork=$(gh pr view "$PR" -R "$GITHUB_REPOSITORY" --json isCrossRepository --jq .isCrossRepository)
+            echo "fork PR: $fork"
+            echo "skip=$fork" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Checkout repository
+        if: steps.fork.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           fetch-depth: 1
 
       - name: Run Claude Code
+        if: steps.fork.outputs.skip != 'true'
         id: claude
         uses: anthropics/claude-code-action@v1
         with:
