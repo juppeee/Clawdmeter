@@ -57,10 +57,6 @@ void display_hal_set_brightness(uint8_t level) {
     ledcWrite(LCD_BACKLIGHT, level);
 }
 
-void display_hal_fill_screen(uint16_t color) {
-    display.fillScreen(color);
-}
-
 void display_hal_draw_bitmap(
     int32_t x,
     int32_t y,
