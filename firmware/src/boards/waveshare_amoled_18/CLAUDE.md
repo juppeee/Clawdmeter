@@ -13,5 +13,5 @@ Waveshare ESP32-S3-Touch-AMOLED-1.8 (368×448 portrait, XCA9554 IO expander). Bu
 - IMU: QMI8658 @ 0x6B (same chip — initialized for I2C bus health, rotation logic disabled)
 - IO expander: **XCA9554 / PCA9554** @ I2C 0x20. Gates LCD_RST, TP_RST, audio amp enable, and reads the PWR button. **`io_expander_init()` MUST run before `gfx->begin()` or `touch_hal_init()`** — otherwise display/touch stay in reset and silently fail. PWR button is on EXIO4, active HIGH (verified empirically with the deleted `iox` serial debug command).
 - Orientation: **fixed at 0°**. IMU auto-rotation is off (`BOARD_HAS_ROTATION 0`).
-- Buttons: GPIO 0 (BOOT → Space/voice-mode), XCA9554 EXIO4 (PWR → brightness; on the stage → next scene; hold → pair). **No third button** (GPIO 18 button doesn't exist on this board).
+- Buttons: GPIO 0 (BOOT → Space/voice-mode), XCA9554 EXIO4 (PWR → brightness; hold → pair). **No third button** (GPIO 18 button doesn't exist on this board).
 - **XCA9554 EXIO2 must stay HIGH.** Pulling it low takes the FT3168 off the I2C bus (IDF reports `ESP_ERR_INVALID_STATE`, which looks like an I2S/driver wedge). Amp enable is GPIO 46 only.

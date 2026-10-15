@@ -1,6 +1,6 @@
 // The director against timed stand-ins for its actors (fake_actors.cpp):
 // whatever the situation does, there is never more than one Clawd on screen
-// (corner sprite, full-size sprite, stage performer, face).
+// (corner sprite, full-size sprite, performer, face).
 //   pio test -d firmware -e native -f test_director
 #include <unity.h>
 #include "fake_world.h"
@@ -36,8 +36,10 @@ static void run_for(uint32_t ms) {
     }
 }
 
-static void assert_every_beat_seen(void) {
-    for (int b = 0; b < BEAT_COUNT; b++) TEST_ASSERT_TRUE_MESSAGE(seen[b], BEAT_NAMES[b]);
+// Without the full-size sprite nothing performs, so nothing runs home.
+static void assert_every_beat_seen(bool has_big) {
+    for (int b = 0; b < BEAT_COUNT; b++)
+        if (has_big || b != B_RUN_HOME) TEST_ASSERT_TRUE_MESSAGE(seen[b], BEAT_NAMES[b]);
 }
 
 static void assert_one_clawd(void) {
@@ -142,18 +144,29 @@ static void fuzz(uint32_t seed, uint32_t total_ms, bool has_big) {
         send(d, sig);
     }
     assert_one_clawd();
+    // Left alone afterwards, nothing hangs: whatever was running finishes
+    // and he ends up home or in the screensaver.
+    director_alert_clear();
+    world.meters_live = true;
+    world.activity = 0;
+    run_for(3 * 60 * 1000);
+    assert_one_clawd();
+    const char* b = director_beat_name();
+    char msg[64];
+    snprintf(msg, sizeof(msg), "seed %lu stuck in %s", (unsigned long)seed, b);
+    TEST_ASSERT_TRUE_MESSAGE(strcmp(b, "home") == 0 || strcmp(b, "screensaver") == 0, msg);
 }
 
 static void test_fuzz_one_clawd_with_full_size_sprite(void) {
     memset(seen, 0, sizeof(seen));
     for (uint32_t seed = 1; seed <= 40 && !broke; seed++) fuzz(seed * 2654435761u, 30 * 60 * 1000, true);
-    assert_every_beat_seen();
+    assert_every_beat_seen(true);
 }
 
 static void test_fuzz_one_clawd_without_full_size_sprite(void) {
     memset(seen, 0, sizeof(seen));
     for (uint32_t seed = 1; seed <= 20 && !broke; seed++) fuzz(seed * 40503u, 30 * 60 * 1000, false);
-    assert_every_beat_seen();
+    assert_every_beat_seen(false);
 }
 
 int main(int, char**) {

@@ -111,10 +111,12 @@ entry on Windows.
 
 | Meters | Show | Screensaver | Attention |
 | --- | --- | --- | --- |
-| ![Meters](../screenshots/director/01-home-meters.png) | ![Show](../screenshots/director/09-show-scene.png) | ![Screensaver](../screenshots/director/15-screensaver-face.png) | ![Attention](../screenshots/director/20-attention-waves.png) |
+| ![Meters](../screenshots/director/01-home-meters.png) | ![Show](../screenshots/director/06-show-scene.png) | ![Screensaver](../screenshots/director/15-screensaver-face.png) | ![Attention](../screenshots/director/20-attention-waves.png) |
 | Session and weekly usage | After sustained activity | After a quiet stretch | A session needs an answer |
 
-The device boots to the meters. Tap a show or screensaver to return to them.
+The device boots to the meters. Clawd performs his shows right on them,
+in front of the panels. Tap a show or the screensaver to send him back to
+his seat.
 Tap the meters to bring Clawd's face up to the glass; tap again to send him
 back. A tap that wakes a sleeping panel only wakes it.
 
@@ -129,6 +131,8 @@ alerts expire after 30 seconds. C6 boards show the message without the
 full-size Clawd. Optional alert and reset chimes work on boards with an implemented audio output; those boards also ding once when they start.
 Boards with the **minimal display** capability keep the meters and a still
 Clawd, with no animated scenes. This is a board capability, not a user setting.
+C6 boards have no room for the full-size Clawd: their shows are acts in his
+corner seat.
 
 The status line rotates through Claude Code's whimsical thinking verbs when
 all is well. It shows **Waiting** without a connection, **No data** before a
@@ -146,7 +150,7 @@ and character rules.
 | --- | --- |
 | BOOT | Hold to send Space to the focused window, for Claude Code voice input. GPIO 0 on S3; GPIO 9 on C6. |
 | Secondary, where fitted | Send Shift+Tab to the focused window. S3 2.16: GPIO 18; C6 2.16: GPIO 10; LCD-1.54: GPIO 5. |
-| PWR, where software-controlled | Short press: next scene on the stage, brightness elsewhere. Hold about 3 seconds and release: clear pairing. |
+| PWR, where software-controlled | Short press: brightness. Hold about 3 seconds and release: clear pairing. |
 
 The LCD-4 has one user button, BOOT. Its PWR key is a hardware reset.
 

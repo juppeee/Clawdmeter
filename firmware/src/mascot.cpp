@@ -19,7 +19,6 @@ static lv_image_dsc_t big_dsc;
 static int cell = 3, slot_x = 0, feet_y = 0, screen_w = 480;
 static int lurk_cell = 8, lurk_feet_y = 384;
 static int big_cell = 12, big_x0 = 0, big_feet_y = 420;
-static bool visible = true;
 
 // ─── State ───────────────────────────────────────────────────────────────────
 enum Mode {
@@ -115,7 +114,7 @@ static void render(const ClawdAnim* a, uint16_t f, bool mirror, lv_image_dsc_t* 
 
 static void show(lv_obj_t* o, bool on) {
     if (!o) return;
-    if (on && visible) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
+    if (on) lv_obj_clear_flag(o, LV_OBJ_FLAG_HIDDEN);
     else               lv_obj_add_flag(o, LV_OBJ_FLAG_HIDDEN);
 }
 
@@ -263,15 +262,6 @@ bool mascot_out(void) {
 bool mascot_in_attention(void) {
     return attn || mode == M_BIG_IN || mode == M_BIG_ACT || mode == M_BIG_OUT ||
            mode == M_HELD || (mode == M_WALK && after == AFTER_BIG);
-}
-
-void mascot_set_visible(bool v) {
-    visible = v;
-    if (!img) return;
-    const bool corner_on = mode == M_SEATED || mode == M_ACT || mode == M_WALK || mode == M_HELD;
-    const bool big_on = mode == M_LURK || mode == M_BIG_IN || mode == M_BIG_ACT || mode == M_BIG_OUT;
-    show(img, corner_on);
-    show(big_img, big_on);
 }
 
 void mascot_autonomy(bool on) {

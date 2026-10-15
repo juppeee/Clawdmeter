@@ -1,5 +1,5 @@
 #include "ui.h"
-#include "splash.h"
+#include "performer.h"
 #include "mascot.h"
 #include "clawd_anim.h"
 #include "clawd_policy.h"
@@ -586,7 +586,6 @@ void ui_init(void) {
     init_battery_icons();
 
     init_usage_screen(scr);
-    splash_init(scr);       // the stage room sits above the meters when open
 
     battery_img = lv_image_create(scr);
     lv_image_set_src(battery_img, &battery_dscs[0]);
@@ -615,13 +614,19 @@ void ui_init(void) {
                               : top + art_h;
         // Animated: idles, does acts, and takes walk-off/lurk trips (the
         // trips need PSRAM; without it he stays in his seat).
-        // Created last so he walks over the battery and the stage.
+        // Created after the panels so he walks over the battery.
         if (!mascot_create(scr, L.margin, feet, cell)) {
             logo_img = lv_image_create(scr);
             lv_image_set_src(logo_img, &logo_dsc);
             lv_obj_set_pos(logo_img, L.margin, top);
         }
     }
+
+    // Clawd performs in front of the meters, fully drawn, like the
+    // attention walk-on (a tap sends him off). Created last so he's on top
+    // of everything on the screen. His feet stand on the bottom edge of the
+    // last panel, clear of the (Clawd-orange) status line.
+    performer_init(scr, L.content_y + 2 * L.usage_panel_h + L.usage_panel_gap);
 
     lv_obj_set_style_text_align(lbl_anim, LV_TEXT_ALIGN_CENTER, 0);
 }

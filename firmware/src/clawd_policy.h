@@ -16,7 +16,7 @@ struct ClawdTuning {
     uint32_t show_scene_ms;      // how long the show holds its scene loop
     uint32_t quiet_ms;           // no hook events / engagement → screensaver
     uint32_t calm_min_ms;        // face rests this long (min..max, jittered)
-    uint32_t calm_max_ms;        //   before dipping into a calm stage scene
+    uint32_t calm_max_ms;        //   before dipping into a calm performance
     uint32_t calm_scene_ms;      // loop hold of a calm scene
     uint32_t alert_timeout_ms;   // attention gives up after this long
     uint32_t long_turn_ms;       // a turn this long earns a wave on Stop

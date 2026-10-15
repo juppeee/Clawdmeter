@@ -40,7 +40,7 @@ and fails with a clear message when no board or several are attached. If
 | --- | --- |
 | `info` | JSON: env, version, panel revision, link state |
 | `ble` | Link state, bonds, owner, peers |
-| `perf` | Redraw cost of the last face rise / settle / drop / streak |
+| `perf` | Redraw cost of the last face rise / settle / drop / performance |
 | `clawd <show\|screensaver\|attention\|joy\|lurk\|home>` | Force a director beat |
 | `clawd peek <x>` | The peek beat, as a tap at x would |
 | `chime` (`buzz` is an alias) | Play the ding |

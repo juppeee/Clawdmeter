@@ -7,7 +7,7 @@
 #include "data.h"
 #include "ui.h"
 #include "ble.h"
-#include "splash.h"
+#include "performer.h"
 #include "mascot.h"
 #include "clawd_director.h"
 #include "usage_rate.h"
@@ -358,7 +358,7 @@ void loop() {
     power_hal_tick();
     imu_hal_tick();
     sound_hal_tick();
-    splash_tick();
+    performer_tick();
     mascot_tick();
     director_tick();
     if (director_take_dismissed()) ble_send_dismiss();
@@ -370,8 +370,7 @@ void loop() {
     // ---- Physical buttons ----
     //   PRIMARY   → HID Space  (Claude Code voice-mode PTT)
     //   SECONDARY → HID Shift+Tab  (mode toggle; only if the board has one)
-    //   PWR       → on the stage: next scene in the group; elsewhere: cycle
-    //               brightness; hold ~3s + release: pairing mode
+    //   PWR       → cycle brightness; hold ~3s + release: pairing mode
     // Any press also tells the director you're here (wakes the screensaver).
     // First press from sleep is consumed as a wake-only event by
     // idle_consume_wake_press(); the normal action fires from the second
@@ -410,11 +409,9 @@ void loop() {
 
         if (power_hal_pwr_pressed()) {
             if (!idle_consume_wake_press()) {
-                // On the stage PWR swaps the scene and stays in the room (a
-                // screensaver calm dip steps to the other calm scene);
-                // anywhere else it cycles brightness and counts as you being here.
-                if (director_room() == ROOM_STAGE) director_stage_next();
-                else { brightness_cycle(); director_button(); }
+                // Cycles brightness, and counts as you being here.
+                brightness_cycle();
+                director_button();
             }
         }
 
@@ -493,7 +490,7 @@ void loop() {
 
     // The mood group also moves without a payload: the 15-min window decays
     // to Idle on its own and a hook activity lift expires. Nothing needs to
-    // react (the corner and the stage read the group when they pick), but log
+    // react (the corner and the performer read the group when they pick), but log
     // it so the serial trace matches what Clawd does.
     {
         static uint32_t last_check = 0;

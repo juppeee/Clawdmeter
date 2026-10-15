@@ -284,7 +284,7 @@ static void start_motion(FaceMove m) {
     if (moving) perf_end(perf_window());
     if (!visible) {
         // Coming up from all the way down: nothing on screen yet, so it
-        // shows and goes on top of the streak without a redraw.
+        // shows and goes on top of the overlay layer without a redraw.
         pose = gone_pose();
         apply_pose();
         field_show(&field);

@@ -22,7 +22,7 @@ struct BoardCaps {
                              // nothing else animates (e-ink, slow panels).
                              // Shared code reads it through minimal_mode().
     bool    has_pwr_button;  // a PWR-role button reaches the firmware (AXP PKEY,
-                             // expander pin or GPIO): brightness, next scene,
+                             // expander pin or GPIO): brightness and
                              // hold-to-pair. Without one (LCD-4: KEY/PWR is a
                              // hardware reset) a 5 s touch hold on the pairing
                              // hint clears the bonds instead (pair_hold.h).

@@ -1,13 +1,12 @@
 // Timed stand-ins for the director's actors. Each follows the real module's
-// contract (mascot.h, splash.h, face.h, streak.h) closely enough that the
+// contract (mascot.h, performer.h, face.h) closely enough that the
 // director's sequencing runs unchanged; the durations are round numbers in
 // the right range. Visibility is conservative: a walk counts as on screen
 // until it ends.
 #include "fake_world.h"
 #include "mascot.h"
-#include "splash.h"
+#include "performer.h"
 #include "face.h"
-#include "streak.h"
 #include "ui.h"
 #include "idle.h"
 #include "minimal_mode.h"
@@ -32,7 +31,7 @@ static MMode    m_mode = M_SEATED;
 static MAfter   m_after = A_SEAT;
 static uint32_t m_until = 0;
 static uint32_t m_seated_since = 0;
-static bool     m_visible = true, m_autonomy = false, m_minimal = false, m_attn = false;
+static bool     m_autonomy = false, m_minimal = false, m_attn = false;
 static bool     m_stay_away = false, m_to_seat = true, m_act_auto = false;
 static uint32_t m_rng = 12345;
 
@@ -61,7 +60,6 @@ bool mascot_in_attention(void) {
     return m_attn || m_mode == M_BIG_IN || m_mode == M_BIG_ACT || m_mode == M_BIG_OUT ||
            m_mode == M_HELD || (m_mode == M_WALK && m_after == A_BIG);
 }
-void mascot_set_visible(bool v) { m_visible = v; }
 void mascot_autonomy(bool on) { m_autonomy = on; if (on && m_mode == M_SEATED) m_seated_since = now(); }
 
 bool mascot_act(const char*, uint8_t times, bool, uint16_t speed_pct) {
@@ -169,34 +167,27 @@ void mascot_tick(void) {
 }
 
 
-// ─── Stage performer (splash.h) ─────────────────────────────────────────────
+// ─── Performer (performer.h) ─────────────────────────────────────────────────
 enum PState { P_OFF, P_STAND, P_WALK_IN, P_WALK_OUT, P_SCENE };
 static PState   p_state = P_OFF;
 static uint32_t p_until = 0;
-static bool     s_active = false;
 
-void splash_init(lv_obj_t*) {}
-void splash_open(void)  { s_active = true; }
-void splash_close(void) { s_active = false; p_state = P_OFF; }
-bool splash_is_active(void) { return s_active; }
-lv_obj_t* splash_get_root(void) { return NULL; }
-void splash_set_occluded(bool) {}
-void splash_place_home(void) { p_state = P_STAND; }
-void splash_place_offstage_right(void) { p_state = P_OFF; }
-void splash_walk_home(uint16_t spd) {
+void performer_init(lv_obj_t*, int) {}
+bool performer_available(void) { return world.has_big; }
+void performer_place_offstage(int) { p_state = P_OFF; }
+void performer_walk_home(uint16_t spd) {
     if (p_state != P_OFF) { p_state = P_STAND; return; }
     p_state = P_WALK_IN; p_until = now() + scaled(2000, spd);
 }
-void splash_walk_off_right(uint16_t spd) { p_state = P_WALK_OUT; p_until = now() + scaled(2000, spd); }
-void splash_run_off_right(uint16_t from, uint16_t, uint32_t) { splash_walk_off_right(from); }
-void splash_perform(int, uint32_t loop_ms) { p_state = P_SCENE; p_until = now() + loop_ms + 2000; }
-void splash_perform_group(int, uint32_t loop_ms, bool) { splash_perform(0, loop_ms); }
-void splash_release(void) { if (p_state != P_OFF) p_state = P_STAND; }
-bool splash_busy(void) { return p_state == P_WALK_IN || p_state == P_WALK_OUT || p_state == P_SCENE; }
-bool splash_performer_visible(void) { return s_active && p_state != P_OFF; }
-void splash_next(void) {}
-void splash_tick(void) {
-    if (!s_active || !done(p_until)) return;
+void performer_walk_off(int, uint16_t spd) { p_state = P_WALK_OUT; p_until = now() + scaled(2000, spd); }
+void performer_run_off(int side, uint16_t from, uint16_t, uint32_t) { performer_walk_off(side, from); }
+void performer_perform(int, uint32_t loop_ms) { p_state = P_SCENE; p_until = now() + loop_ms + 2000; }
+void performer_perform_group(int, uint32_t loop_ms, bool) { performer_perform(0, loop_ms); }
+void performer_release(void) { if (p_state != P_OFF) p_state = P_STAND; }
+bool performer_busy(void) { return p_state == P_WALK_IN || p_state == P_WALK_OUT || p_state == P_SCENE; }
+bool performer_visible(void) { return p_state != P_OFF; }
+void performer_tick(void) {
+    if (!done(p_until)) return;
     if (p_state == P_WALK_IN || p_state == P_SCENE) p_state = P_STAND;
     else if (p_state == P_WALK_OUT) p_state = P_OFF;
 }
@@ -224,14 +215,6 @@ void face_blink(bool twice) { f_busy_until = now() + (twice ? 500 : 250); }
 void face_set_resting(bool) {}
 void face_look_at_x(int, uint32_t hold_ms) { f_busy_until = now() + hold_ms + 300; }
 
-// ─── Streak (streak.h) ───────────────────────────────────────────────────────
-static uint32_t st_until = 0;
-static bool     st_running = false;
-void streak_init(void) {}
-void streak_run(lv_obj_t*) { st_running = true; st_until = now() + 380; }
-bool streak_running(void) { return st_running; }
-void streak_cancel(void) { st_running = false; }
-
 // ─── The situation ───────────────────────────────────────────────────────────
 bool ui_meters_live(void) { return world.meters_live; }
 void ui_set_alert_text(const char*) {}
@@ -242,16 +225,15 @@ int  signals_activity(void) { return world.activity; }
 int  clawd_anim_index(const char*) { return 0; }
 
 void fake_actors_tick(void) {
-    splash_tick();
+    performer_tick();
     mascot_tick();
-    if (st_running && done(st_until)) st_running = false;
 }
 
 OnScreen fake_on_screen(void) {
     OnScreen s;
-    s.corner = m_visible && (m_mode == M_SEATED || m_mode == M_ACT || m_mode == M_WALK || m_mode == M_HELD);
-    s.big = m_visible && (m_mode == M_LURK || m_mode == M_BIG_IN || m_mode == M_BIG_ACT || m_mode == M_BIG_OUT);
-    s.performer = splash_performer_visible();
+    s.corner = (m_mode == M_SEATED || m_mode == M_ACT || m_mode == M_WALK || m_mode == M_HELD);
+    s.big = (m_mode == M_LURK || m_mode == M_BIG_IN || m_mode == M_BIG_ACT || m_mode == M_BIG_OUT);
+    s.performer = performer_visible();
     s.face = face_visible();
     return s;
 }

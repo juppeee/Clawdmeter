@@ -12,4 +12,4 @@ Waveshare ESP32-S3-Touch-LCD-4 (ST7701 RGB parallel, 480×480 square, GT911 touc
 - No PMU / IMU. Buttons: GPIO 0 only (BOOT → Space/PTT). KEY/PWR is EN/RST (hardware reset). GPIO 18 is display R3.
 - No PWR button (`has_pwr_button = false`): the pairing hint says to pair from the computer, and a 5 s touch hold on it clears the bonds (`pair_hold.{h,cpp}`, native-tested; `SIM_NO_PWR=1` in the sim). The `unpair` serial command (reply `{"unpair":true}`) clears them on any board.
 - RGB tearing fix: pass `bounce_buffer_size_px = LCD_WIDTH * 10` to `Arduino_ESP32RGBPanel`. Do not call `rgbpanel->getFrameBuffer()` after `gfx->begin()`.
-- Only one user button, so: no brightness cycling, re-pairing is the 5 s touch hold on the pairing hint, and the stage is only reachable through situations (a tap means "meters").
+- Only one user button, so: no brightness cycling, re-pairing is the 5 s touch hold on the pairing hint, and shows only come from situations.
