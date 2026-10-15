@@ -13,9 +13,6 @@ firmware/monitor_output.txt
 tools/node_modules/
 tools/package-lock.json
 
-# Mac daemon venv
-daemon/.venv/
-
 # Python bytecode cache
 __pycache__/
 *.pyc
