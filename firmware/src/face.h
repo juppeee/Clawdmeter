@@ -24,7 +24,6 @@ void face_drop(void);          // anticipation hop, then down behind the bezel; 
 void face_hide_now(void);      // no animation (mode switch / reset only)
 
 bool face_visible(void);       // any part of it on screen
-bool face_up(void);            // fully up and not moving
 bool face_moving(void);        // rising (until settled) or dropping
 bool face_busy(void);          // moving, blinking or glancing
 

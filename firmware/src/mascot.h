@@ -18,7 +18,6 @@
 
 lv_obj_t* mascot_create(lv_obj_t *parent, int slot_x, int feet_y, int cell);
 void mascot_tick(void);
-bool mascot_has_big(void);
 
 bool mascot_seated(void);            // in his seat, between acts
 bool mascot_away(void);              // fully off screen

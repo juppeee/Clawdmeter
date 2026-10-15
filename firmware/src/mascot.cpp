@@ -245,7 +245,6 @@ lv_obj_t* mascot_create(lv_obj_t* parent, int sx, int feet, int c) {
     return img;
 }
 
-bool mascot_has_big(void) { return big_img != NULL; }
 bool mascot_seated(void)  { return img && mode == M_SEATED; }
 // Without a corner sprite (allocation failed, static logo instead) he counts
 // as away, so the director's beats never wait on him.

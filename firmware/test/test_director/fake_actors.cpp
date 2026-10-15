@@ -47,7 +47,6 @@ static void m_big_enter(void) {
 }
 
 lv_obj_t* mascot_create(lv_obj_t*, int, int, int) { return NULL; }
-bool mascot_has_big(void) { return world.has_big; }
 bool mascot_seated(void)  { return m_mode == M_SEATED; }
 bool mascot_away(void)    { return m_mode == M_AWAY; }
 bool mascot_busy(void)    { return m_mode != M_SEATED && m_mode != M_AWAY && m_mode != M_HELD; }
@@ -208,7 +207,6 @@ void face_rise_toward(int) { face_rise(); }
 void face_drop(void) { f_state = F_DROPPING; f_until = now() + 510; }
 void face_hide_now(void) { f_state = F_HIDDEN; }
 bool face_visible(void) { return f_state != F_HIDDEN; }
-bool face_up(void) { return f_state == F_UP; }
 bool face_moving(void) { return f_state == F_RISING || f_state == F_DROPPING; }
 bool face_busy(void) { return face_moving() || !done(f_busy_until); }
 void face_blink(bool twice) { f_busy_until = now() + (twice ? 500 : 250); }
