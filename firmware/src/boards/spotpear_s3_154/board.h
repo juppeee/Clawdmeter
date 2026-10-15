@@ -2,10 +2,9 @@
 
 // SpotPear ESP32-S3 1.54" LCD (N16R8) — an UNOFFICIAL community port.
 //
-// This board is NOT one of the four upstream-supported panels. It differs
-// from them in one big way: the display is a plain 4-wire SPI ST7789
-// (240x240 IPS), NOT a QSPI AMOLED. So display.cpp here uses Arduino_HWSPI +
-// Arduino_ST7789 instead of Arduino_ESP32QSPI + an AMOLED driver.
+// The display is a plain 4-wire SPI ST7789 (240x240 IPS), not a QSPI AMOLED:
+// display.cpp uses Arduino_ESP32SPI + Arduino_ST7789, and the backlight is
+// LEDC PWM (the panel has no brightness command). No PMU, so no PWR button.
 //
 // MCU side matches the supported S3 boards: ESP32-S3 + 16MB flash + 8MB OPI
 // PSRAM (the "N16R8" suffix), so BOARD_HAS_PSRAM and qio_opi memory apply.
@@ -59,4 +58,4 @@
 #define BOARD_HAS_IMU              0   // QMI8658 present but unused for now
 #define BOARD_HAS_BATTERY          0   // simple charger + ADC; no PMU. Stubbed.
 #define BOARD_HAS_IO_EXPANDER      0
-#define BOARD_HAS_SOUND            0   // no buzzer/codec — sound.cpp is a no-op
+#define BOARD_HAS_SOUND            0   // sound.cpp is a no-op

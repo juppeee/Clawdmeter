@@ -40,6 +40,7 @@ DISPLAY_NAMES = {
     "waveshare_amoled_206": "Waveshare ESP32-S3 AMOLED 2.06\" (watch)",
     "waveshare_lcd_154": "Waveshare ESP32-S3 LCD 1.54\"",
     "waveshare_lcd_4": "Waveshare ESP32-S3 LCD 4\"",
+    "spotpear_s3_154": "SpotPear ESP32-S3 LCD 1.54\" MUMA",
 }
 
 REQUIRED = ("env", "chip", "flash_size", "file", "sha256")
