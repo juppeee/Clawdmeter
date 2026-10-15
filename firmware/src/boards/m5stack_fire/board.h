@@ -41,7 +41,7 @@
 // so input.cpp uses plain INPUT (not INPUT_PULLUP).
 //   A (left)   → primary,   HID Space (voice-mode PTT)
 //   C (right)  → secondary, HID Shift+Tab (mode toggle)
-//   B (middle) → PWR-role,  cycle screens / brightness / hold-to-pair
+//   B (middle) → PWR-role,  brightness / hold-to-pair
 #define BTN_A_GPIO           39    // primary
 #define BTN_B_GPIO           38    // PWR-role (owned by power.cpp)
 #define BTN_C_GPIO           37    // secondary
