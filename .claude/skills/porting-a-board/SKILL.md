@@ -27,6 +27,8 @@ Port progress:
 - [ ] [env:<env>] in firmware/platformio.ini, and <env> added to default_envs
 - [ ] firmware/src/boards/<env>/CLAUDE.md with pins and hardware gotchas
 - [ ] Row for the board in the root CLAUDE.md "Boards" table
+- [ ] caps.cpp: round_panel = true if the glass is round; no layout code anywhere
+- [ ] Panel size in PANELS (firmware/test/test_layout) if it's a new shape
 - [ ] pio run -d firmware -e <env> builds; pio test -d firmware -e native passes
 - [ ] desktop/crates/clawdmeter-app/assets/boards/<env>.svg (original art)
 - [ ] boards.rs entry + SVG registered in ui/mod.rs; cargo test -p clawdmeter-app boards passes
@@ -45,6 +47,11 @@ Port progress:
   (`tools/ci/hardware_envs.py`), so no workflow edit is needed.
 - Shared code never gets `#ifdef BOARD_*`. If the board needs different
   behaviour, add a `BoardCaps` field or extend the HAL.
+- The meters layout comes from `BoardCaps` width, height and `round_panel`
+  (`layout.cpp`); a port never edits `ui.cpp` or `layout.cpp` for its size.
+  Add a new panel shape to `PANELS` in `firmware/test/test_layout` and run
+  it; if something fails, fix it with a shape rule (narrow, short, round …),
+  never a board check. See "The meters layout" in the porting guide.
 - `board_init()` must release reset lines, power rails and IO expanders before
   `display_hal_init()` / `touch_hal_init()`, or the panel and touch silently
   fail to probe.
