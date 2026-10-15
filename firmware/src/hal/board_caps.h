@@ -29,6 +29,9 @@ struct BoardCaps {
                              // hold-to-pair. Without one (LCD-4: KEY/PWR is a
                              // hardware reset) a 5 s touch hold on the pairing
                              // hint clears the bonds instead (pair_hold.h).
+    bool    has_touch;       // a touchscreen. Without one BOOT dismisses an
+                             // active alert before it does anything else
+                             // (director_button).
 };
 
 const BoardCaps& board_caps(void);

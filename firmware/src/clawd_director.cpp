@@ -7,6 +7,7 @@
 #include "ui.h"
 #include "idle.h"
 #include "minimal_mode.h"
+#include "hal/board_caps.h"
 #include "usage_rate.h"
 #include <Arduino.h>
 #include <lvgl.h>
@@ -268,10 +269,15 @@ void director_tap(int x) {
 
 void director_set_pairing_touch(bool on) { pairing_touch = on; }
 
-void director_button(void) {
+bool director_button(bool primary) {
     engage();
+    if (primary && attention_on && !board_caps().has_touch) {
+        end_attention(ATTN_END_TAP);          // nothing to tap: BOOT dismisses it
+        return true;
+    }
     resume_screensaver = false;
     if (beat == B_SCREENSAVER) to_meters(false);
+    return false;
 }
 
 void director_set_attn_anim(int seconds) {

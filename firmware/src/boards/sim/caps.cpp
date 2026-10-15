@@ -5,7 +5,8 @@
 
 // SIM_NO_PWR=1 plays a board without a PWR button (LCD-4): the p key does
 // nothing and the pairing hint offers the touch hold instead. SIM_MINIMAL=1
-// plays a minimal-mode board. SIM_CIRCLE=1 plays a round panel (the
+// plays a minimal-mode board. SIM_NO_TOUCH=1 plays a board without a
+// touchscreen (BOOT dismisses an alert). SIM_CIRCLE=1 plays a round panel (the
 // corners outside the circle are drawn as a grey bezel). SIM_BUTTONS=1 plays
 // a board with BOOT only.
 static BoardCaps make_caps(void) {
@@ -20,9 +21,12 @@ static BoardCaps make_caps(void) {
     .has_imu = false,
     .minimal_ui   = false,   // full animated UI; true for e-ink / slow panels
     .has_pwr_button = true,  // the p key
+    .has_touch = true,       // the mouse
     };
     const char* no_pwr = getenv("SIM_NO_PWR");
     if (no_pwr && *no_pwr && *no_pwr != '0') caps.has_pwr_button = false;
+    const char* no_touch = getenv("SIM_NO_TOUCH");
+    if (no_touch && *no_touch && *no_touch != '0') caps.has_touch = false;
     const char* minimal = getenv("SIM_MINIMAL");
     if (minimal && *minimal && *minimal != '0') caps.minimal_ui = true;
     const char* buttons = getenv("SIM_BUTTONS");

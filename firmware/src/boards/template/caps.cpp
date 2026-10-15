@@ -12,6 +12,7 @@ static const BoardCaps caps = {
     .has_imu      = (bool)BOARD_HAS_IMU,
     .minimal_ui   = false,   // full animated UI; true for e-ink / slow panels
     .has_pwr_button = false,  // set true once power.cpp reports PWR presses
+    .has_touch = true,
 };
 
 const BoardCaps& board_caps(void) { return caps; }
