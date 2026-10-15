@@ -71,7 +71,10 @@ Port progress:
 - `desktop/crates/clawdmeter-app/src/boards.rs`: display name and buy link.
   Register the SVG in `desktop/crates/clawdmeter-app/src/ui/mod.rs`.
   `boards::tests` fails if an env, its art or its shop link is missing.
-- README **Supported boards** table: the same display name and buy link.
+- README **Supported boards** table: the same display name and buy link, in
+  the **Experimental** table. A board moves to Stable once someone reports it
+  working in the "Board support reports" discussion (env name, firmware
+  version, a photo).
 - `tools/ci/make_manifest.py` `DISPLAY_NAMES`: without it the release ships the
   board under its env name and prints a warning.
 - Buy links: Waveshare links carry `?aff_id=149786` (`&aff_id=149786` when the

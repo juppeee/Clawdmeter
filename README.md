@@ -32,7 +32,7 @@ Supported on every release.
 Ports contributed by the community. Expect rough edges: bugs, or a layout
 that isn't optimal for the panel. If something is off, fix it and open a PR.
 If everything works, tell us in the
-[Board support reports](https://github.com/HermannBjorgvin/Clawdmeter/discussions/DISCUSSION_NUMBER)
+[Board support reports](https://github.com/HermannBjorgvin/Clawdmeter/discussions/222)
 discussion (env name, firmware version, a photo) and we'll move the board to
 Stable.
 
