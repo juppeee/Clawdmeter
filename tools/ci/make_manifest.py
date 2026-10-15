@@ -43,6 +43,7 @@ DISPLAY_NAMES = {
     "lilygo_t4s3": "LILYGO T4-S3 AMOLED 2.41\"",
     "waveshare_lcd_183": "Waveshare ESP32-S3 LCD 1.83\"",
     "esp32_s3_4848s040": "Guition ESP32-S3 4848S040 (4\")",
+    "waveshare_amoled_132": "Waveshare ESP32-S3 AMOLED 1.32\" (round)",
     "esp32_2432s024c": "ESP32-2432S024C CYD 2.4\" (portrait)",
     "esp32_2432s024c_landscape": "ESP32-2432S024C CYD 2.4\" (landscape)",
     "esp32_2432s028r": "ESP32-2432S028R CYD 2.8\" (portrait)",

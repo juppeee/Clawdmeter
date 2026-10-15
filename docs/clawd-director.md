@@ -290,6 +290,19 @@ timing only, never new frames: the scene releases to the idle pose and holds
 a beat (anticipation), then the walk-off ramps from 1.5× to 3× over its first
 400 ms (ease-in) instead of starting at full speed.
 
+## Round panels
+
+With `BoardCaps.round_panel` the glass is the circle inscribed in the
+panel, so Clawd walks on and off along it. `panel_row_span()` in
+`splash_geometry.h` gives the visible span of a row (the whole width on a
+rectangular panel, the circle's chord on a round one) and every entrance
+uses it at the row he walks on: the corner Clawd leaving and coming back
+(`mascot.cpp`: `off_left_x` / `off_right_x`), the full-size attention walk-on
+and walk-off, the lurk peek, and the performer's walks (`performer.cpp`: the
+grid cells on the glass at his floor row). None of them spends time walking
+where there is no glass, and nobody starts at the bounding box's edge.
+Rectangular panels are unchanged. Unit-tested in `test/test_splash_geometry`.
+
 ## Alert dismissal and expiry
 
 A tap or the device's 2-minute attention timeout ends the local alert and

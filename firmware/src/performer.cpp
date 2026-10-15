@@ -77,6 +77,11 @@ static bool            cells_any = false;          // the last composed frame sh
 
 static int home_ax(const ClawdAnim* a) { return ANCHOR_X + a->ox; }
 
+// The grid cells that are on the glass on his floor row: all of them on a
+// rectangular panel, the circle's chord on a round one. He walks on and off
+// at these edges.
+static int stage_c0 = 0, stage_c1 = GRID;
+
 static const uint8_t* compose(const ClawdAnim* a, uint16_t f, int ax, bool mirror) {
     memset(stage_cells, 0, sizeof(stage_cells));
     if (!a) return stage_cells;
@@ -185,7 +190,7 @@ static void stand(void) {
 // Off stage: the whole walking frame past that edge.
 static int offstage_dx(int side) {
     if (!stand_anim) return side * GRID;
-    return side > 0 ? GRID - home_ax(stand_anim) : -(home_ax(stand_anim) + stand_anim->w);
+    return side > 0 ? stage_c1 - home_ax(stand_anim) : stage_c0 - (home_ax(stand_anim) + stand_anim->w);
 }
 static bool is_offstage(void) { return dx >= offstage_dx(+1) || dx <= offstage_dx(-1); }
 
@@ -299,6 +304,9 @@ void performer_init(lv_obj_t* parent, int feet_y) {
     // His feet (art row 37) on the floor; centred across. The grid may hang
     // past the bottom edge; nothing is drawn there.
     lv_obj_set_pos(img, (c.width - dim) / 2, feet_y - (ANCHOR_Y + CLAWD_ART_H) * cell);
+    int x0, x1;
+    panel_row_span(c.width, c.height, c.round_panel, feet_y, &x0, &x1);
+    span_to_cells((c.width - dim) / 2, cell, GRID, x0, x1, &stage_c0, &stage_c1);
     lv_obj_add_flag(img, LV_OBJ_FLAG_HIDDEN);
     shown = false;
     pst = P_OFF;
@@ -372,6 +380,17 @@ bool performer_visible(void) { return cells_any; }
 bool performer_busy(void) { return pst == P_WALK || pst == P_SCENE || pst == P_CHOREO; }
 
 // ─── Tick ────────────────────────────────────────────────────────────────────
+// Where a walker stops at the right edge of the glass, and where he is off it
+// to the left; the right edge is never left of where he starts.
+static int right_edge_dx(const ClawdAnim* a) {
+    const int dx_r = (stage_c1 - a->w) - home_ax(a);
+    return dx_r > 0 ? dx_r : 0;
+}
+static int left_edge_dx(const ClawdAnim* a) {
+    const int dx_l = stage_c0 - a->w - home_ax(a);
+    return dx_l < -1 ? dx_l : -1;
+}
+
 static void choreo_leg(int target) {
     walk_start(cur, gait, target, 100);
     leg_active = true;
@@ -391,10 +410,10 @@ static void choreo_tick(uint32_t now) {
     }
     switch (choreo_phase) {
     case 0:  // standing at home
-        if (now - choreo_since > 1200) { choreo_phase = 1; choreo_leg((GRID - a->w) - home_ax(a)); }
+        if (now - choreo_since > 1200) { choreo_phase = 1; choreo_leg(right_edge_dx(a)); }
         break;
     case 2:  // at the right edge
-        if (now - choreo_since > 1200) { choreo_phase = 3; choreo_leg(-a->w - home_ax(a)); }
+        if (now - choreo_since > 1200) { choreo_phase = 3; choreo_leg(left_edge_dx(a)); }
         break;
     case 4:  // off left: a beat, then back home
         if (now - choreo_since > 800) { choreo_phase = 5; choreo_leg(0); }
