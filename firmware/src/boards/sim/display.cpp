@@ -15,6 +15,13 @@ static SDL_Texture*  tex = NULL;
 static uint16_t*     shadow = NULL;   // full-frame RGB565 — what the panel "shows"
 static uint8_t       brightness = 200;
 static bool          dirty = false;
+static uint32_t      frame_version = 0;   // moves with every flush and brightness change
+
+const uint16_t* sim_display_pixels(uint8_t* bright, uint32_t* version) {
+    *bright = brightness;
+    *version = frame_version;
+    return shadow;
+}
 
 // SIM_EDGE_WATCH=1: log whenever what the bottom EDGE_ROWS rows and the
 // right EDGE_ROWS columns show changes (non-black pixel counts), with the
@@ -45,6 +52,7 @@ static void edge_watch(void) {
 }
 
 static void present(void) {
+    if (sim_ctrl_active()) { dirty = false; return; }   // the host reads sim_display_pixels()
     edge_watch();
     SDL_UpdateTexture(tex, NULL, shadow, LCD_WIDTH * 2);
     // AMOLED brightness → linear dim of the whole frame.
@@ -79,6 +87,7 @@ void display_hal_begin(void) { present(); }
 void display_hal_set_brightness(uint8_t level) {
     if (level == brightness) return;
     brightness = level;
+    frame_version++;
     // Present immediately so idle fades stay visible even while main.cpp
     // skips display_hal_tick() (asleep).
     present();
@@ -112,6 +121,7 @@ void display_hal_draw_bitmap(int32_t x, int32_t y, int32_t w, int32_t h,
             if (off_glass(px, dy)) shadow[dy * LCD_WIDTH + px] = BEZEL;
     }
     dirty = true;
+    frame_version++;
 }
 
 void display_hal_tick(void) {

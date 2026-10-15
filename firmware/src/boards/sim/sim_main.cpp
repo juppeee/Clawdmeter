@@ -29,6 +29,10 @@ int main(void) {
     // SIM_TRACE=1: print every director beat step with a timestamp (the
     // timings walkthrough screenshots are picked from). Beat changes always print.
     if (getenv("SIM_TRACE")) director_set_trace(true);
+    if (sim_ctrl_active()) {
+        sim_ctrl_run();
+        return 0;
+    }
     setup();
     while (!sim_should_quit()) {
         sim_pump();
