@@ -16,6 +16,15 @@ Remove this section if it does not apply. -->
 verified, or write "not tested on hardware". Builds and simulator runs do
 not count as hardware testing. -->
 
+## Agent review
+
+- [ ] A subagent on a frontier model such as Opus reviewed this PR's full
+      diff before it was opened.
+
+<!-- List only findings left unfixed, and why. If no review could run,
+leave the box unticked and say why. Human-written PRs with no agent
+involvement can remove this section. -->
+
 ## Human involvement
 
 <!-- State what the human author reviewed and QA'd. For example:
