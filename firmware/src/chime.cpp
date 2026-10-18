@@ -21,7 +21,11 @@
 // The buffer lives in PSRAM where there is some. Without PSRAM (the C6) it
 // takes internal RAM only while CHIME_RAM_RESERVE stays free, and a ding that
 // doesn't fit is cut short with a fade. Live synthesis is left as a last
-// resort for chips with an FPU; without one (the C6) it can't keep up.
+// resort for chips with an FPU; without one (the C6) it can't keep up, so a
+// ding with no buffer is skipped and logged.
+//
+// A board with no amp-enable line (amp_enable null) keeps the codec's DAC
+// muted between dings instead, so its always-on amp doesn't hiss.
 
 // Share of the ding's own level (it peaks just under full scale): headroom
 // for the codec and the small amp. ChimeConfig.volume sets the loudness.
@@ -64,6 +68,7 @@ static bool es8311_setup(void) {
     es8311_sample_frequency_config(es, clk.mclk_frequency, clk.sample_frequency);
     es8311_microphone_config(es, false);
     es8311_voice_volume_set(es, cfg.volume, NULL);
+    if (!cfg.amp_enable) es8311_voice_mute(es, true);   // until a ding plays
     return true;
 }
 
@@ -114,7 +119,10 @@ static bool render(void) {
 static void start_playback(void);
 
 static void render_task(void* arg) {
-    if (!render()) Serial.println("chime: no room to pre-render the ding");
+    // Again if chime_tune changed the gain meanwhile.
+    bool ok;
+    do ok = render(); while (ok && pcm_gain != gain);
+    if (!ok) Serial.println("chime: no room to pre-render the ding");
     portENTER_CRITICAL(&state_lock);
     rendering = false;
     const bool play = pending;
@@ -150,10 +158,24 @@ static void stream_live(void) {
     }
 }
 
+// Amp on (or, without an amp line, the DAC unmuted) only while a ding plays.
+static void output_on(bool on) {
+    if (cfg.amp_enable) cfg.amp_enable(on);
+    else es8311_voice_mute(es, !on);
+}
+
 static void chime_task(void* arg) {
-    // A new gain (chime_tune) renders again here, before the amp comes on.
-    const bool buffered = pcm && (pcm_gain == gain || render());
-    if (cfg.amp_enable) cfg.amp_enable(true);
+    // Never renders here: this runs above the loop, and on a chip without an
+    // FPU a render would hold the CPU for seconds. render_task does it.
+    const bool buffered = pcm != nullptr;
+#if !SOC_CPU_HAS_FPU
+    if (!buffered) {
+        Serial.println("chime: no ding buffer (not enough internal RAM), skipped");
+        playing = false;
+        vTaskDelete(nullptr);
+    }
+#endif
+    output_on(true);
     delay(8);                                  // let the amp settle (avoids turn-on pop)
     if (buffered) stream_buffer();
 #if SOC_CPU_HAS_FPU
@@ -162,7 +184,7 @@ static void chime_task(void* arg) {
     memset(chunk, 0, sizeof(chunk));           // a little silence so the DMA drains
     i2s.write((uint8_t*)chunk, sizeof(chunk));
     delay(20);
-    if (cfg.amp_enable) cfg.amp_enable(false);
+    output_on(false);
     playing = false;
     vTaskDelete(nullptr);
 }
@@ -204,17 +226,12 @@ void chime_play(void) {
     if (!wait) start_playback();
 }
 
-void chime_tick(void) {
-    // First tick: setup() is done, so render now, in the background, at the
-    // lowest priority (the loop and the BLE host keep the CPU).
-    if (!ready || render_started) return;
-    portENTER_CRITICAL(&state_lock);
-    render_started = true;
-    rendering = true;
-    portEXIT_CRITICAL(&state_lock);
+// Run render_task in the background at the lowest priority (the loop and the
+// BLE host keep the CPU). The caller has set `rendering`.
+static void start_render(void) {
     if (xTaskCreatePinnedToCore(render_task, "chime-render", 4096, nullptr, tskIDLE_PRIORITY, nullptr, 0) != pdPASS) {
         portENTER_CRITICAL(&state_lock);
-        rendering = false;   // render on the first play instead
+        rendering = false;   // play what there is (or nothing) instead
         const bool play = pending;
         pending = false;
         portEXIT_CRITICAL(&state_lock);
@@ -222,9 +239,29 @@ void chime_tick(void) {
     }
 }
 
+void chime_tick(void) {
+    // First tick: setup() is done, so render now.
+    if (!ready || render_started) return;
+    portENTER_CRITICAL(&state_lock);
+    render_started = true;
+    rendering = true;
+    portEXIT_CRITICAL(&state_lock);
+    start_render();
+}
+
 void chime_tune(float g, int volume) {
     if (!ready || playing) return;
-    gain = g < 0.0f ? 0.0f : (g > 1.0f ? 1.0f : g);   // re-rendered on the next play
+    gain = g < 0.0f ? 0.0f : (g > 1.0f ? 1.0f : g);
     if (volume >= 0 && es) es8311_voice_volume_set(es, volume > 100 ? 100 : volume, NULL);
-    chime_play();
+    // A new gain renders again in the background and plays when it's done
+    // (a render already running picks the new gain up itself).
+    portENTER_CRITICAL(&state_lock);
+    const bool rerender = render_started && !rendering && pcm_gain != gain;
+    if (rerender) {
+        rendering = true;
+        pending = true;
+    }
+    portEXIT_CRITICAL(&state_lock);
+    if (rerender) start_render();
+    else chime_play();
 }
