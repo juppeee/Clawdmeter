@@ -11,8 +11,9 @@
 // the engine mutes the codec between dings. Wire is already up (board_init()
 // ran it).
 
-// Codec volume 75: the S3 2.16's starting point, heard at boot and on alerts
-// on this board's speaker but not yet tuned (`chime 0.7 <v>`).
+// Codec volume 75, as on the 1.8 and LCD-1.54 (the S3 2.16 ships 77, tuned by
+// ear on its own speaker). Heard at boot and on alerts on this board's speaker
+// but not yet tuned (`chime 0.7 <v>`).
 #define CHIME_VOLUME 75
 
 void sound_hal_init(void) {
