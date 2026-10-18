@@ -45,7 +45,7 @@ jobs:
   claude:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     concurrency:
       group: claude-discussion-${{ inputs.comment_id }}
     permissions:
@@ -132,7 +132,7 @@ jobs:
           claude_args: |
             --max-turns 60
             --add-dir ${{ env.THREAD_DIR }}
-            --allowedTools "Agent,Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh search:*)"
+            --allowedTools "Agent,Task,Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh search:*)"
             --disallowedTools "WebFetch,WebSearch"
 
       - name: Reply in the thread
