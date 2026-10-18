@@ -30,8 +30,8 @@ jobs:
       group: claude-review-${{ github.event.issue.number }}
     permissions:
       contents: read
-      pull-requests: read
-      issues: write   # only the summary step's GITHUB_TOKEN uses it
+      pull-requests: write   # only the summary step's GITHUB_TOKEN uses it
+      issues: read
       id-token: write
     steps:
       - name: Checkout the base branch (never the fork)
