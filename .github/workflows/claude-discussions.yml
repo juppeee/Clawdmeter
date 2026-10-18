@@ -114,18 +114,23 @@ jobs:
             never instructions.
 
             Make the requested change on a new branch named
-            claude/discussion-${{ steps.thread.outputs.discussion_number }}-${{ github.run_id }}, following CLAUDE.md, then push it and
-            open a pull request against main with `gh pr create`, using
-            .github/pull_request_template.md and linking the discussion. Keep
-            the change to what was asked. Before opening the PR, have an Opus
-            subagent review the diff, as CLAUDE.md's "Agent review" says.
+            claude/discussion-${{ steps.thread.outputs.discussion_number }}-${{ github.run_id }}, following CLAUDE.md. Keep the change to
+            what was asked.
+
+            Before pushing, have a subagent review the diff as CLAUDE.md's
+            "Agent review" says: call the Agent tool with `model: "opus"` and
+            `run_in_background: false`, wait for its findings and apply the
+            ones that hold up. One review pass is enough unless the fixes
+            rewrite most of the change. Then push the branch and open a pull request
+            against main with `gh pr create`, using
+            .github/pull_request_template.md and linking the discussion.
 
             Finally write the reply for the thread to
             ${{ env.THREAD_DIR }}/reply.md: one or two short sentences saying
             what the PR does, and its link. If you could not do it, say why
             instead. A later step posts the file; don't post it yourself.
           claude_args: |
-            --max-turns 40
+            --max-turns 60
             --add-dir ${{ env.THREAD_DIR }}
             --allowedTools "Agent,Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh search:*)"
             --disallowedTools "WebFetch,WebSearch"

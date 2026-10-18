@@ -99,7 +99,7 @@ Use `.github/pull_request_template.md` and fill its **New board** section:
   available;
 - **Hardware testing**: the exact board and revision and what was verified,
   or "not tested on hardware";
-- **Agent review**: have a subagent on a frontier model such as Opus review
-  the full diff before opening the PR, then tick the box and list any
-  finding left unfixed, with why;
 - **Human involvement**: only what the human confirmed they did.
+
+Its **Agent review** section follows the rule in CLAUDE.md's Pull requests
+section.

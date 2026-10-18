@@ -53,8 +53,11 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # A branch for a new PR gets CLAUDE.md's Agent review first.
           claude_args: |
-            --max-turns 25
+            --max-turns 40
+            --allowedTools "Agent"
+            --append-system-prompt "Before you push a branch that a new pull request will be opened from, follow CLAUDE.md's Agent review: call the Agent tool with model opus and run_in_background false, wait for its findings and apply the ones that hold up. Pushes to an existing pull request don't need it."
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |
