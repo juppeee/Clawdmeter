@@ -57,7 +57,7 @@ jobs:
           claude_args: |
             --max-turns 40
             --allowedTools "Agent,Task"
-            --append-system-prompt "When this run was triggered from an issue, so you are pushing the issue's new claude/issue-* branch that a pull request will be opened from, first follow CLAUDE.md's Agent review: call the Agent tool with model opus and run_in_background false, wait for its findings and apply the ones that hold up. Then say in your tracking comment that the Opus review ran and list any finding left unfixed. Runs on an existing pull request don't need it."
+            --append-system-prompt "When this run was triggered from an issue, so you are pushing the issue's new claude/issue-* branch that a pull request will be opened from, first do CLAUDE.md's Agent review. Here, call the Agent tool with model opus and run_in_background false, and report the review in your tracking comment, not a PR template. Runs on an existing pull request don't need it."
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |

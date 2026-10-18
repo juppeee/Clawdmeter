@@ -117,11 +117,9 @@ jobs:
             claude/discussion-${{ steps.thread.outputs.discussion_number }}-${{ github.run_id }}, following CLAUDE.md. Keep the change to
             what was asked.
 
-            Before pushing, have a subagent review the diff as CLAUDE.md's
-            "Agent review" says: call the Agent tool with `model: "opus"` and
-            `run_in_background: false`, wait for its findings and apply the
-            ones that hold up. One review pass is enough unless the fixes
-            rewrite most of the change. Then push the branch and open a pull request
+            Before pushing, do CLAUDE.md's "Agent review". Here, call the
+            Agent tool with `model: "opus"` and `run_in_background: false`.
+            Then push the branch and open a pull request
             against main with `gh pr create`, using
             .github/pull_request_template.md and linking the discussion.
 
