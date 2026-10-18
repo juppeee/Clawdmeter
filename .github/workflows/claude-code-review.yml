@@ -78,7 +78,7 @@ jobs:
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
         run: |
           result=$(jq -r '[.[] | select(.type == "result")] | last // {}' "$EXEC_FILE")
-          text=$(jq -r '.result // "The review ended without a summary."' <<<"$result" | head -c 60000 | iconv -f utf-8 -t utf-8 -c)
+          text=$(jq -r '.result // "The review ended without a summary."' <<<"$result" | head -c 60000 | { iconv -f utf-8 -t utf-8 -c 2>/dev/null || true; })
           stats=$(jq -r '"\(.num_turns // "?") turns, \(((.duration_ms // 0) / 60000 * 10 | round) / 10) min, $\(.total_cost_usd // "?"), models: \((.modelUsage // {}) | keys | join(", "))"' <<<"$result")
           printf '## Claude review\n\n%s\n\n<sub>%s · [run](%s)</sub>\n' "$text" "$stats" "$RUN_URL" > "$RUNNER_TEMP/summary.md"
           echo "b64=$(base64 -w0 "$RUNNER_TEMP/summary.md")" >> "$GITHUB_OUTPUT"
