@@ -47,7 +47,7 @@ and fails with a clear message when no board or several are attached. If
 | `attention_anim [seconds]` | Print or set how long Clawd points and waves for an alert (0 = off; kept in NVS) until the app sends its own `aa` |
 | `pace_marker [0\|1]` | Print or set the pace marker on the usage bars (kept in NVS) until the app sends its own `pm` |
 | `chime` (`buzz` is an alias) | Play the ding |
-| `chime <gain> [volume]` | Tune the speaker until reboot: gain 0..1, ES8311 volume 0..100. The 2.16 ships 0.7 / 77 (tuned by ear); the 1.8 and LCD-1.54 ship 0.7 / 75 (not tuned by ear) |
+| `chime <gain> [volume]` | Tune the speaker until reboot: gain 0..1, ES8311 volume 0..100. The 2.16 ships 0.7 / 77 (tuned by ear); the 1.8, LCD-1.54 and C6 2.16 ship 0.7 / 75 (not tuned by ear); the M5StickS3 ships 0.7 / 65 |
 | `unpair` | Clear bonds and re-advertise; replies `{"unpair":true}` |
 | `disconnect` | Drop every BLE link |
 | `screenshot` | Binary framebuffer dump; use the `capturing-device-screenshots` skill for a PNG |
