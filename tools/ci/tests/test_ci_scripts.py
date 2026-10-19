@@ -95,6 +95,16 @@ class RestorePioBuildScriptsTest(unittest.TestCase):
                              [mcu / "pioarduino-build.py"])
             self.assertEqual((mcu / "pioarduino-build.py").read_text(), "original")
 
+    def test_only_the_platforms_backup_name_counts(self):
+        with tempfile.TemporaryDirectory() as d:
+            mcu = Path(d) / "framework-arduinoespressif32-libs" / "esp32s3"
+            mcu.mkdir(parents=True)
+            (mcu / "pioarduino-build.py").write_text("original")
+            (mcu / "pioarduino-build.py.bak").write_text("someone's copy")
+            self.assertEqual(restore_pio_build_scripts.restore(Path(d)), [])
+            self.assertEqual((mcu / "pioarduino-build.py").read_text(), "original")
+            self.assertTrue((mcu / "pioarduino-build.py.bak").exists())
+
     def test_untouched_packages_are_left_alone(self):
         with tempfile.TemporaryDirectory() as d:
             mcu = Path(d) / "framework-arduinoespressif32-libs" / "esp32s3"

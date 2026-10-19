@@ -37,8 +37,6 @@ import subprocess
 import sys
 from pathlib import Path
 
-import restore_pio_build_scripts
-
 REPO = Path(__file__).resolve().parents[2]
 
 # esptool's chip ids (esp_image_header_t.chip_id) -> esptool --chip names
@@ -151,14 +149,8 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     build_dir = project_dir / ".pio" / "build" / args.env
 
-    # metadata re-runs the build scripts without `checkprogsize`, so an env with
-    # lib_ignore leaves the shared framework package edited; put it back
-    # even if metadata fails (restore_pio_build_scripts.py).
-    try:
-        meta = run_json([args.pio, "project", "metadata", "-d", str(project_dir),
-                         "-e", args.env, "--json-output"], cwd=project_dir)[args.env]
-    finally:
-        restore_pio_build_scripts.restore(restore_pio_build_scripts.packages_dir())
+    meta = run_json([args.pio, "project", "metadata", "-d", str(project_dir),
+                     "-e", args.env, "--json-output"], cwd=project_dir)[args.env]
     images = [(int(i["offset"], 16), Path(i["path"])) for i in meta["extra"]["flash_images"]]
     app = build_dir / "firmware.bin"
     partitions = next((p for _, p in images if p.name == "partitions.bin"),

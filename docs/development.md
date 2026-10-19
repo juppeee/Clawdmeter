@@ -17,9 +17,11 @@ Environments are listed in `firmware/platformio.ini`. macOS ports use
 builds the default hardware environments and simulator.
 
 If a build fails on a framework header that exists, such as
-`SD.cpp: fatal error: ff.h`, an env with `lib_ignore` (or the VS Code
-extension's metadata scan of one) may have left the shared framework package
-edited. `python tools/ci/restore_pio_build_scripts.py` puts it back.
+`SD.cpp: fatal error: ff.h`, an env with `lib_ignore` has left the shared
+framework package edited (a metadata scan, which the VS Code extension runs
+whenever it loads such an env, applies the edit without undoing it). Run
+`python3 tools/ci/restore_pio_build_scripts.py` before building the failing
+env; the next scan of a `lib_ignore` env edits it again.
 
 The desktop app uses Rust 1.90 or newer. Install the Linux packages listed
 in [the build dependency action](../.github/actions/linux-desktop-deps/action.yml), then:
