@@ -151,12 +151,14 @@ def main() -> int:
     out_dir.mkdir(parents=True, exist_ok=True)
     build_dir = project_dir / ".pio" / "build" / args.env
 
-    meta = run_json([args.pio, "project", "metadata", "-d", str(project_dir),
-                     "-e", args.env, "--json-output"], cwd=project_dir)[args.env]
     # metadata re-runs the build scripts without `checkprogsize`, so an env with
     # lib_ignore leaves the shared framework package edited; put it back
-    # before CI caches it (restore_pio_build_scripts.py).
-    restore_pio_build_scripts.restore(restore_pio_build_scripts.packages_dir())
+    # even if metadata fails (restore_pio_build_scripts.py).
+    try:
+        meta = run_json([args.pio, "project", "metadata", "-d", str(project_dir),
+                         "-e", args.env, "--json-output"], cwd=project_dir)[args.env]
+    finally:
+        restore_pio_build_scripts.restore(restore_pio_build_scripts.packages_dir())
     images = [(int(i["offset"], 16), Path(i["path"])) for i in meta["extra"]["flash_images"]]
     app = build_dir / "firmware.bin"
     partitions = next((p for _, p in images if p.name == "partitions.bin"),
