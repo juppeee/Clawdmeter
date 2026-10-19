@@ -74,7 +74,9 @@ pub struct Payload {
     /// Sessions with a hook event in the last 5 minutes.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub n: Option<u32>,
-    /// 1 = heartbeat/replay (no fresh poll): the rate math ignores it.
+    /// 1 = the usage numbers are a replay, not a fresh poll (heartbeats and
+    /// writes between polls): the rate math ignores them. Fast-clock fields in
+    /// the same write still count.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub rp: Option<u8>,
     /// How lively Clawd is, 1 (No-nonsense) to 5 (All-nonsense). The device

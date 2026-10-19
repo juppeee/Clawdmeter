@@ -83,8 +83,9 @@ The app writes one complete JSON object per write to RX
   `tp/pd/rd` the billing period. `{"ok":false}` means no data.
 - Attention: `b` (alert chime), `m` (ASCII message), `x` (clear).
 - Fast clock: `a` (activity 0–3), `e` + `es` (event `p`/`s`/`b` and its
-  sequence), `n` (active sessions). `rp:1` marks a heartbeat replay, which the
-  rate math skips.
+  sequence), `n` (active sessions). `rp:1` marks the usage numbers as a replay
+  (heartbeats and writes between polls): the rate math and reset detector skip
+  them, but a new `es` in the same write still fires.
 - Device settings, on every data payload: `lv` (liveliness 1–5), `aa`
   (attention animation seconds: 120, 30, 10, 0 = off; only his animation,
   not the alert) and `pm` (pace marker on the usage bars, `pace.h`). The

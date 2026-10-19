@@ -6,8 +6,8 @@
 // follow the last quarter hour instead of the bucket level.
 //
 // Model:
-//   * 15-minute window over REAL samples only. Heartbeat replays (`rp`) are
-//     dropped before they reach the ring.
+//   * 15-minute window over REAL samples only. Replays (`rp`: heartbeats and
+//     writes between polls) are dropped before they reach the ring.
 //   * Rate is %/h of the 5-hour session, read as a share of pace (using the
 //     window evenly = 20 %/h):
 //         < 5 %/h   Idle      (0 or 1 point in 15 min)
