@@ -136,6 +136,13 @@ change for the first time.
   Add a Mermaid diagram when it clarifies flow, state or architecture.
 - **Hardware testing**: the exact boards and revisions tested on real
   hardware and what was verified, or "not tested on hardware".
+- **Agent review**: before opening the PR, have a subagent on a frontier
+  model such as Opus review everything the PR will contain (committed and
+  uncommitted). Ask for findings with a concrete failure scenario, fix what
+  holds up, and re-run the review if the fixes change the diff substantially.
+  Then tick the template's box and list only the findings left unfixed, with
+  why. If no subagent review could run, leave the box unticked and say why.
+  It is not human review.
 - **Human involvement**: how much the human author reviewed and QA'd, e.g.
   "Agent-written; human reviewed the diff and tested pairing and touch on an
   ESP32-S3-Touch-AMOLED-2.16." If none, "not reviewed by a human". Report

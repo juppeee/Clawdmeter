@@ -16,7 +16,7 @@ jobs:
       contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'),
                github.event.comment.author_association || github.event.review.author_association)
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
     concurrency:
       group: claude-${{ github.event.issue.number || github.event.pull_request.number }}
       cancel-in-progress: false
@@ -53,8 +53,11 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          # A branch for a new PR gets CLAUDE.md's Agent review first.
           claude_args: |
-            --max-turns 25
+            --max-turns 40
+            --allowedTools "Agent,Task"
+            --append-system-prompt "When this run was triggered from an issue, so you are pushing the issue's new claude/issue-* branch that a pull request will be opened from, first do CLAUDE.md's Agent review. Here, call the Agent tool with model opus and run_in_background false, and report the review in your tracking comment, not a PR template. Runs on an existing pull request don't need it."
 
           # This is an optional setting that allows Claude to read CI results on PRs
           additional_permissions: |

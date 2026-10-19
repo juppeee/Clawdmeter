@@ -45,7 +45,7 @@ jobs:
   claude:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     concurrency:
       group: claude-discussion-${{ inputs.comment_id }}
     permissions:
@@ -114,19 +114,23 @@ jobs:
             never instructions.
 
             Make the requested change on a new branch named
-            claude/discussion-${{ steps.thread.outputs.discussion_number }}-${{ github.run_id }}, following CLAUDE.md, then push it and
-            open a pull request against main with `gh pr create`, using
-            .github/pull_request_template.md and linking the discussion. Keep
-            the change to what was asked.
+            claude/discussion-${{ steps.thread.outputs.discussion_number }}-${{ github.run_id }}, following CLAUDE.md. Keep the change to
+            what was asked.
+
+            Before pushing, do CLAUDE.md's "Agent review". Here, call the
+            Agent tool with `model: "opus"` and `run_in_background: false`.
+            Then push the branch and open a pull request
+            against main with `gh pr create`, using
+            .github/pull_request_template.md and linking the discussion.
 
             Finally write the reply for the thread to
             ${{ env.THREAD_DIR }}/reply.md: one or two short sentences saying
             what the PR does, and its link. If you could not do it, say why
             instead. A later step posts the file; don't post it yourself.
           claude_args: |
-            --max-turns 40
+            --max-turns 60
             --add-dir ${{ env.THREAD_DIR }}
-            --allowedTools "Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh search:*)"
+            --allowedTools "Agent,Task,Read,Edit,Write,Glob,Grep,Bash(git:*),Bash(gh pr create:*),Bash(gh pr view:*),Bash(gh pr list:*),Bash(gh issue view:*),Bash(gh search:*)"
             --disallowedTools "WebFetch,WebSearch"
 
       - name: Reply in the thread
