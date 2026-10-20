@@ -46,16 +46,23 @@ static void test_first_seq_is_baseline_then_fires_once(void) {
     TEST_ASSERT_FALSE(signals_ingest_at(&d, 3000).event_fired);
 }
 
-static void test_replay_never_fires(void) {
-    UsageData d = parse("{\"s\":1,\"e\":\"p\",\"es\":1}");
+// The app sends a new hook event in an `rp:1` write (the usage numbers are
+// the last poll's) before the poll lands. That write must fire, and the poll
+// carrying the same `es` must not fire it again.
+static void test_event_in_replay_fires_once(void) {
+    UsageData d = parse("{\"s\":1,\"e\":\"s\",\"es\":1,\"ok\":true}");
     signals_ingest_at(&d, 1000);
-    d = parse("{\"s\":1,\"e\":\"b\",\"es\":2,\"rp\":1}");
+    d = parse("{\"s\":1,\"e\":\"p\",\"es\":2,\"rp\":1,\"ok\":true}");
     SignalsUpdate u = signals_ingest_at(&d, 2000);
     TEST_ASSERT_TRUE(u.replay);
-    TEST_ASSERT_FALSE(u.event_fired);
-    // ...and the replayed seq is consumed, so the live copy doesn't fire late.
-    d = parse("{\"s\":1,\"e\":\"b\",\"es\":2}");
+    TEST_ASSERT_TRUE(u.event_fired);
+    TEST_ASSERT_EQUAL_CHAR('p', u.event);
+    TEST_ASSERT_EQUAL_UINT32(2, u.event_seq);
+    d = parse("{\"s\":2,\"e\":\"p\",\"es\":2,\"ok\":true}");
     TEST_ASSERT_FALSE(signals_ingest_at(&d, 3000).event_fired);
+    // A heartbeat replaying the same event doesn't fire it again either.
+    d = parse("{\"s\":2,\"e\":\"p\",\"es\":2,\"rp\":1,\"ok\":true}");
+    TEST_ASSERT_FALSE(signals_ingest_at(&d, 4000).event_fired);
 }
 
 static void test_seq_restart_still_fires(void) {
@@ -119,7 +126,7 @@ int main(void) {
     UNITY_BEGIN();
     RUN_TEST(test_old_daemon_payload_fires_nothing);
     RUN_TEST(test_first_seq_is_baseline_then_fires_once);
-    RUN_TEST(test_replay_never_fires);
+    RUN_TEST(test_event_in_replay_fires_once);
     RUN_TEST(test_seq_restart_still_fires);
     RUN_TEST(test_activity_lift_in_group);
     RUN_TEST(test_replay_skips_rate_but_keeps_activity);

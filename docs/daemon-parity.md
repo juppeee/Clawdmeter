@@ -91,7 +91,7 @@ keeping comments and unknown keys.
 |---|---|---|---|
 | Poll cadence | Every 60 s (L: `poll_interval`), 5 s loop tick | Event-driven and per account (`cadence.rs`). Shown account: at once on a prompt, then every 3 min while working; once ~10 s after a Stop; every 5 min with no hooks or before 10 quiet minutes; every 15 min after. Other accounts: every 10 min. Never twice within 2 min per account, whatever the trigger | `/usage` hits a rate-limited endpoint, so the budget is well under the old 60 s. 0.5 s loop tick, so hook events still reach the device within about a second. |
 | Device refresh request (REQ `0x01`) | L: dbus-monitor + flag file · M, W: notify callback | Notify stream opened before subscribing, subscribe bounded at 10 s (`clawdmeter-ble/src/lib.rs`) | Polls every account at once, except one polled in the last 2 min or backing off. |
-| Heartbeat replay | L: replays the last payload with `sr`/`wr` aged by whole minutes and `t` advanced | Rebuilds the payload from the absolute reset times (exact) and marks it `rp:1` (`engine.rs`) | `rp` keeps replays out of the firmware's rate math. Stops once the shown account is stale, so the device can show it. |
+| Heartbeat replay | L: replays the last payload with `sr`/`wr` aged by whole minutes and `t` advanced | Rebuilds the payload from the absolute reset times (exact) and marks it `rp:1` (`engine.rs`) | `rp` keeps replays out of the firmware's rate math; a new `es` in the same write still fires. Stops once the shown account is stale, so the device can show it. |
 | "Neither interval ≤ 80 s" warning | L | Not ported | The heartbeat can't be disabled any more. |
 
 ## Attention alerts and hooks
