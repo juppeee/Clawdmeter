@@ -211,8 +211,9 @@ impl Default for LinkOptions {
 /// btleplug spawns detached, so dropping the manager never closes it. A
 /// manager per connect attempt leaked one connection per attempt until the
 /// per-user limit (256) starved the whole session. The manager is replaced
-/// only once a throwaway connection proves a new one would fare better —
-/// meaning this one's connection is dead and its socket already closed.
+/// only once a throwaway connection proves a new one would fare better and
+/// a retry on its own connection still fails — meaning this one's
+/// connection is dead and its socket already closed.
 /// [`connection_losses`](Self::connection_losses) counts the replacements:
 /// a stream opened on a lost connection must not be dropped, so the wakeup
 /// watcher leaks it (see `spawn_watcher`).
@@ -235,14 +236,24 @@ impl Bluetooth {
         let adapters = match manager.adapters().await {
             Ok(a) => a,
             Err(e) => {
-                // Whoever drops the dead manager counts the loss, so
-                // streams opened on its connection know they must not be
-                // dropped.
-                if connection_lost().await && self.manager.lock().await.take_if(|m| Arc::ptr_eq(m, &manager)).is_some()
-                {
-                    self.lost_connections.send_modify(|n| *n += 1);
+                if !connection_lost().await {
+                    return Err(LinkError::NoAdapter(e.to_string()));
                 }
-                return Err(LinkError::NoAdapter(e.to_string()));
+                // The probe can find bluetoothd answering again just after
+                // this call hit it restarting, so ask this connection once
+                // more: a dead one fails again at once, a live one answers.
+                match manager.adapters().await {
+                    Ok(a) => a,
+                    Err(_) => {
+                        // Whoever drops the dead manager counts the loss, so
+                        // streams opened on its connection know they must
+                        // not be dropped.
+                        if self.manager.lock().await.take_if(|m| Arc::ptr_eq(m, &manager)).is_some() {
+                            self.lost_connections.send_modify(|n| *n += 1);
+                        }
+                        return Err(LinkError::NoAdapter(e.to_string()));
+                    }
+                }
             }
         };
         let adapter = adapters.into_iter().next().ok_or_else(|| LinkError::NoAdapter("none present".into()))?;
