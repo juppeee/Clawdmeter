@@ -34,11 +34,12 @@ is faked behind `FlashHardware`.
   `launch`, `platform`.
 - `clawdmeter-ble`: btleplug link. Adapters come from one `Bluetooth` handle
   per runtime: on Linux every btleplug `Manager` is a D-Bus connection that
-  is never closed, so never make one per attempt. When a connection dies
-  (system-bus restart) the manager is replaced and the loss counted; the
-  wakeup watcher reopens on a bump and leaks the dead stream instead of
-  dropping it (`MessageStream::drop` unwraps a `RemoveMatch`, which panics
-  on a dead connection and aborts release builds). Connects only to OS-known
+  is never closed, so never make one per attempt. On a failed `adapters()`
+  a throwaway connection checks whether a new one would fare better; only
+  then is the manager replaced and the loss counted, the watcher reopens
+  on a bump, and dead streams are leaked, not dropped (`MessageStream::drop`
+  unwraps a `RemoveMatch`, which panics on a dead connection and aborts
+  release builds). Connects only to OS-known
   devices (custom service, or HID + exact name); address cache, REQ
   subscription, zombie-write breaker, BlueZ trust, macOS stale-bond unpair via `blueutil`,
   Windows bonded-address fallback (PnP / `CLAWDMETER_BLE_ADDRESS`).

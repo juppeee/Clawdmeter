@@ -156,17 +156,15 @@ async fn watch_once(bt: &Bluetooth, tx: &mpsc::UnboundedSender<Wake>) {
             break;
         }
     }
-    if *losses.borrow() == opened_at {
-        // The stream ended with no loss counted; a dead connection is not
-        // always noticed at once. One lookup makes Bluetooth drop a dead
-        // manager, which counts the loss.
-        let _ = bt.adapter().await;
-    }
     // bluez-async's event-stream drop unwraps a `RemoveMatch` call on the
     // stream's connection; on a dead one that panics, and release builds
-    // abort (panic = "abort"). A dead stream yields nothing anyway, so
-    // leak it: one idle stream per lost connection.
-    if must_leak(opened_at, *losses.borrow()) {
+    // abort (panic = "abort"). A counted loss says dead at once; else one
+    // lookup proves the connection alive — or replaces a dead manager on
+    // the way, counting the loss. Anything but a clear "alive" means
+    // leak: a forgotten stream is heap only, no socket. The count is read
+    // after the lookup: one that succeeds on a manager someone else just
+    // put in place of this stream's dead one has bumped it by then.
+    if bt.adapter().await.is_err() || must_leak(opened_at, *losses.borrow()) {
         std::mem::forget(events);
     }
 }
