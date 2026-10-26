@@ -27,6 +27,9 @@
 //!   itself connected (a half-open "zombie" link) make
 //!   [`DeviceLink::is_connected`] report false, so the caller reconnects.
 //!
+//! Adapters come from one [`Bluetooth`] handle per runtime, never a fresh
+//! btleplug manager per attempt (on Linux each leaks a D-Bus connection).
+//!
 //! Reconnect timing is [`Reconnect`] (backoff capped at
 //! [`reconnect::BACKOFF_CAP`]), cut short by [`spawn_watcher`]'s wakeups when
 //! the OS sees the device come back (BlueZ auto-reconnecting the bonded
@@ -45,6 +48,7 @@ use std::io;
 use std::path::PathBuf;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 use btleplug::api::{
@@ -198,15 +202,80 @@ impl Default for LinkOptions {
     }
 }
 
-/// The first powered adapter.
-pub async fn adapter() -> Result<Adapter, LinkError> {
-    let manager = Manager::new().await.map_err(|e| LinkError::NoAdapter(e.to_string()))?;
-    let adapters = manager.adapters().await.map_err(|e| LinkError::NoAdapter(e.to_string()))?;
-    let adapter = adapters.into_iter().next().ok_or_else(|| LinkError::NoAdapter("none present".into()))?;
-    if let Ok(CentralState::PoweredOff) = adapter.adapter_state().await {
-        return Err(LinkError::NoAdapter("adapter is off".into()));
+/// The Bluetooth stack: one btleplug [`Manager`], made on first use and
+/// shared by every clone. Its I/O task runs on the runtime of the
+/// [`adapter`](Self::adapter) call that made it, so keep a handle to one
+/// runtime and pass clones around.
+///
+/// On Linux a `Manager` is a D-Bus system-bus connection whose I/O task
+/// btleplug spawns detached, so dropping the manager never closes it. A
+/// manager per connect attempt leaked one connection per attempt until the
+/// per-user limit (256) starved the whole session. The manager is only
+/// replaced once its connection is dead (the system bus restarted), which
+/// has already closed its socket. [`connection_losses`](Self::connection_losses)
+/// counts the replacements: a stream opened on a lost connection must not
+/// be dropped, so the wakeup watcher leaks it (see `spawn_watcher`).
+#[derive(Clone)]
+pub struct Bluetooth {
+    manager: Arc<tokio::sync::Mutex<Option<Arc<Manager>>>>,
+    lost_connections: Arc<tokio::sync::watch::Sender<u64>>,
+}
+
+impl Default for Bluetooth {
+    fn default() -> Self {
+        Bluetooth { manager: Arc::default(), lost_connections: Arc::new(tokio::sync::watch::channel(0).0) }
     }
-    Ok(adapter)
+}
+
+/// What dbus-rs answers every call with once its connection is gone
+/// (`dbus::nonblock`, 0.9; bluez-async and btleplug pass the text through).
+/// Matched on text because btleplug boxes the error. If a dependency bump
+/// rewords it, a system-bus restart again leaves Bluetooth dead until the
+/// app restarts.
+const CONNECTION_LOST: &str = "Failed to send message";
+
+impl Bluetooth {
+    /// The first powered adapter.
+    pub async fn adapter(&self) -> Result<Adapter, LinkError> {
+        let manager = self.manager().await?;
+        let adapters = match manager.adapters().await {
+            Ok(a) => a,
+            Err(e) => {
+                let e = e.to_string();
+                if e.contains(CONNECTION_LOST) {
+                    // Whoever drops the dead manager counts the loss, so
+                    // streams opened on its connection know they must not
+                    // be dropped.
+                    if self.manager.lock().await.take_if(|m| Arc::ptr_eq(m, &manager)).is_some() {
+                        self.lost_connections.send_modify(|n| *n += 1);
+                    }
+                }
+                return Err(LinkError::NoAdapter(e));
+            }
+        };
+        let adapter = adapters.into_iter().next().ok_or_else(|| LinkError::NoAdapter("none present".into()))?;
+        if let Ok(CentralState::PoweredOff) = adapter.adapter_state().await {
+            return Err(LinkError::NoAdapter("adapter is off".into()));
+        }
+        Ok(adapter)
+    }
+
+    /// How often the manager was replaced after its D-Bus connection died.
+    /// The wakeup watcher reopens its stream on every bump and reads the
+    /// count to tell whether a finished stream is safe to drop.
+    pub(crate) fn connection_losses(&self) -> tokio::sync::watch::Receiver<u64> {
+        self.lost_connections.subscribe()
+    }
+
+    async fn manager(&self) -> Result<Arc<Manager>, LinkError> {
+        let mut slot = self.manager.lock().await;
+        if let Some(m) = &*slot {
+            return Ok(m.clone());
+        }
+        let m = Arc::new(Manager::new().await.map_err(|e| LinkError::NoAdapter(e.to_string()))?);
+        *slot = Some(m.clone());
+        Ok(m)
+    }
 }
 
 /// A candidate device the OS knows about.
