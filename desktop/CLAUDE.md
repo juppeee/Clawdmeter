@@ -32,9 +32,17 @@ is faked behind `FlashHardware`.
   machine: `next_write` / `mark_written`), `autostart` (systemd / XDG /
   LaunchAgent / Run key, legacy-daemon detection + `disable_legacy`),
   `launch`, `platform`.
-- `clawdmeter-ble`: btleplug link. Connects only to OS-known devices (custom
-  service, or HID + exact name); address cache, REQ subscription,
-  zombie-write breaker, BlueZ trust, macOS stale-bond unpair via `blueutil`,
+- `clawdmeter-ble`: btleplug link. Adapters come from one `Bluetooth` handle
+  per runtime: on Linux every btleplug `Manager` is a D-Bus connection that
+  is never closed, so never make one per attempt. On a failed `adapters()`
+  a throwaway connection checks whether a new one would fare better; only
+  then, and if a retry on the same connection fails too (bluetoothd may
+  just have come back), is the manager replaced and the loss counted. The
+  watcher reopens on a bump, and dead streams are leaked, not dropped
+  (`MessageStream::drop` unwraps a `RemoveMatch`, which panics on a dead
+  connection and aborts release builds). Connects only to OS-known
+  devices (custom service, or HID + exact name); address cache, REQ
+  subscription, zombie-write breaker, BlueZ trust, macOS stale-bond unpair via `blueutil`,
   Windows bonded-address fallback (PnP / `CLAWDMETER_BLE_ADDRESS`).
 - `clawdmeter-flash`: downloads the release `manifest.json`, matches boards by
   chip + flash size, writes with espflash.

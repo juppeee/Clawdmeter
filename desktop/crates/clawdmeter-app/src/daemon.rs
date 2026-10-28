@@ -9,8 +9,8 @@ use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
 use clawdmeter_ble::{
-    should_wake, AddressCache, DeviceEvent, DeviceEvents, DeviceLink, LinkError, LinkOptions, Reconnect, Sighting,
-    MAX_WRITE,
+    should_wake, AddressCache, Bluetooth, DeviceEvent, DeviceEvents, DeviceLink, LinkError, LinkOptions, Reconnect,
+    Sighting, MAX_WRITE,
 };
 use clawdmeter_core::attention::AttentionInbox;
 use clawdmeter_core::backoff;
@@ -170,7 +170,8 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
     let mut polling: Option<JoinHandle<PollResults>> = None;
     let mut link_state = LinkState::Starting;
     let mut reconnect = Reconnect::default();
-    let mut wakeups = clawdmeter_ble::spawn_watcher();
+    let bt = Bluetooth::default();
+    let mut wakeups = clawdmeter_ble::spawn_watcher(bt.clone());
     let mut last_settings = unix_now();
     let mut last_link_check = unix_now();
     let mut last_write_at = None;
@@ -343,9 +344,9 @@ pub async fn run(paths: Paths, mut commands: mpsc::UnboundedReceiver<Command>, s
             if link_state == LinkState::Starting {
                 link_state = LinkState::Connecting;
             }
-            let (cache, opts) = (cache.clone(), link_opts.clone());
+            let (bt, cache, opts) = (bt.clone(), cache.clone(), link_opts.clone());
             connecting = Some(tokio::spawn(async move {
-                let adapter = clawdmeter_ble::adapter().await?;
+                let adapter = bt.adapter().await?;
                 DeviceLink::open(&adapter, &cache, &opts).await
             }));
         }
