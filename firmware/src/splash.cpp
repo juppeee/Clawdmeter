@@ -176,6 +176,11 @@ static void render_frame(const uint8_t *cells, const uint16_t *palette) {
 
 #else  // ── PSRAM: LVGL canvas render (unchanged) ──
 
+// The canvas is an ordinary LVGL object here, so there is no direct painting
+// to hold back until a refresh has finished. main.cpp calls this on every
+// board, though — without a definition the PSRAM builds don't link.
+void splash_note_refresh_done(void) {}
+
 static void render_frame(const uint8_t *cells, const uint16_t *palette) {
     if (!row_buf || !canvas_buf) return;
     for (int gy = 0; gy < GRID; gy++) {
