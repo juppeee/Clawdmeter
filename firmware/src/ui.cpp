@@ -231,6 +231,7 @@ static uint32_t  last_data_ms = 0;      // lv_tick when the last valid usage upd
 static bool      data_received = false; // any valid update since boot
 static int       view_state = -1;       // -1 unknown / 0 pair / 1 idle / 2 usage
 static const uint32_t DATA_FRESH_MS = 90000;  // usage counts as "live" within this window (daemon sends ~60s)
+static uint32_t  demo_until_ms = 0;     // `demo` serial command: show the panels even with no host until then
 
 // ---- Shared ----
 static lv_image_dsc_t logo_dsc;
@@ -307,6 +308,17 @@ static void format_reset_time(int mins, char* buf, size_t len) {
         snprintf(buf, len, "Resets in %dh %dm", mins / 60, mins % 60);
     } else {
         snprintf(buf, len, "Resets in %dd %dh", mins / 1440, (mins % 1440) / 60);
+    }
+}
+
+// Compact countdown for the single-limit pace line: "4d 3h left".
+static void format_time_left(int mins, char* buf, size_t len) {
+    if (mins < 60) {
+        snprintf(buf, len, "%dm left", mins);
+    } else if (mins < 1440) {
+        snprintf(buf, len, "%dh %dm left", mins / 60, mins % 60);
+    } else {
+        snprintf(buf, len, "%dd %dh left", mins / 1440, (mins % 1440) / 60);
     }
 }
 
@@ -592,17 +604,54 @@ void ui_update(const UsageData* data) {
         lv_label_set_text(lbl_title, "Usage");
     }
 
-    int s_pct = (int)(data->session_pct + 0.5f);
+    // Three layouts share the two panels:
+    //   dual        — 5-hour + weekly, a bar each (the classic Pro/Max view)
+    //   single      — the account has only ONE of those windows. The top panel
+    //                 shows it big, the bottom one shows how far through the
+    //                 window we are, coloured by pace (used% vs elapsed%).
+    //   enterprise  — spending % on top, billing period below. Same widget
+    //                 arrangement as "single", which is modelled on it.
+    const bool ent    = data->enterprise;
+    const bool single = !ent && (data->has_session != data->has_weekly);
+    const bool weekly_only = single && data->has_weekly;
+    const bool big    = ent || single;      // one big number in the top panel
 
-    if (data->enterprise) {
-        // Spending box: big number-only label + small "%" symbol + desc + pace
+    // The number the top panel shows, and its reset countdown.
+    const float top_pct  = weekly_only ? data->weekly_pct : data->session_pct;
+    const int   top_mins = weekly_only ? data->weekly_reset_mins
+                                       : data->session_reset_mins;
+    const int   s_pct    = (int)(top_pct + 0.5f);
+
+    // Elapsed share of the window/period — the yardstick for pace.
+    int time_pct = data->time_pct;
+    if (single) {
+        const int window_mins = weekly_only ? 7 * 24 * 60 : 5 * 60;
+        time_pct = (top_mins < 0) ? 0 : 100 - (top_mins * 100) / window_mins;
+        if (time_pct < 0)   time_pct = 0;
+        if (time_pct > 100) time_pct = 100;
+    }
+
+    const bool limited = strcmp(data->status, "rejected") == 0 || top_pct >= 100.0f;
+
+    if (big) {
+        // Big number-only label + small "%" symbol + a line saying of what
         lv_obj_set_style_text_font(lbl_session_pct, L.ent_pct_font, 0);
-        lv_label_set_text(lbl_session_label, "Spending");
+        lv_label_set_text(lbl_session_label,
+                          ent ? "Spending" : weekly_only ? "Weekly" : "Current");
         lv_obj_add_flag(lbl_session_reset, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
         lv_obj_clear_flag(lbl_spending_desc,   LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_spending_status,   LV_OBJ_FLAG_HIDDEN);
-        if (panel_weekly) lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
+        if (single && limited) {
+            lv_label_set_text(lbl_spending_desc, "Limit reached");
+            lv_obj_set_style_text_color(lbl_spending_desc, COL_RED, 0);
+        } else {
+            lv_label_set_text(lbl_spending_desc,
+                              ent         ? "of your monthly budget" :
+                              weekly_only ? "of your weekly limit"
+                                          : "of your 5-hour limit");
+            lv_obj_set_style_text_color(lbl_spending_desc, COL_DIM, 0);
+        }
     } else {
         lv_obj_set_style_text_font(lbl_session_pct, L.pct_font, 0);
         lv_label_set_text(lbl_session_label, "Current");
@@ -610,22 +659,21 @@ void ui_update(const UsageData* data) {
         lv_obj_add_flag(lbl_session_pct_sym, LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_spending_desc,   LV_OBJ_FLAG_HIDDEN);
         lv_obj_add_flag(lbl_spending_status, LV_OBJ_FLAG_HIDDEN);
-        if (panel_weekly) lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
     }
+    if (panel_weekly) lv_obj_clear_flag(panel_weekly, LV_OBJ_FLAG_HIDDEN);
 
-    char buf[48];
+    char buf[64];
 
-    // Pace vars used in both enterprise blocks below
+    // Pace: how the used share compares with the elapsed share (big layouts)
     const char* pace_text = "Under pace";
-    lv_color_t  pace_color = COL_GREEN;
-    const char* pace_hex   = "788c5d";   // matches THEME_GREEN
-    if (data->session_pct > (float)data->time_pct + 15.0f) {
-        pace_text = "Over pace";  pace_color = COL_RED;   pace_hex = "c0392b";
-    } else if (data->session_pct > (float)data->time_pct - 15.0f) {
-        pace_text = "On pace";    pace_color = COL_AMBER; pace_hex = "d97757";
+    const char* pace_hex  = "788c5d";   // matches THEME_GREEN
+    if (top_pct > (float)time_pct + 15.0f) {
+        pace_text = "Over pace";  pace_hex = "c0392b";
+    } else if (top_pct > (float)time_pct - 15.0f) {
+        pace_text = "On pace";    pace_hex = "d97757";
     }
 
-    if (data->enterprise) {
+    if (big) {
         lv_label_set_text_fmt(lbl_session_pct, "%d", s_pct);
         lv_obj_align_to(lbl_session_pct_sym, lbl_session_pct,
                         LV_ALIGN_OUT_RIGHT_TOP, 4, 12);
@@ -636,22 +684,36 @@ void ui_update(const UsageData* data) {
     }
 
     lv_bar_set_value(bar_session, s_pct, LV_ANIM_ON);
-    lv_obj_set_style_bg_color(bar_session, pct_color(data->session_pct), LV_PART_INDICATOR);
+    lv_obj_set_style_bg_color(bar_session, pct_color(top_pct), LV_PART_INDICATOR);
 
-    if (data->enterprise) {
-        // Period box: time % + dynamic pace color + "Resets <date>" label
-        lv_label_set_text(lbl_weekly_label, "Period");
-        lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", data->time_pct);
-        lv_bar_set_value(bar_weekly, data->time_pct, LV_ANIM_ON);
-        lv_color_t bar_pace = (data->session_pct <= (float)data->time_pct) ? COL_GREEN :
-                              (data->session_pct <= (float)data->time_pct + 15.0f) ? COL_AMBER :
+    if (big) {
+        // Time box: elapsed % + pace-coloured bar + "<pace> - <when it resets>"
+        lv_label_set_text(lbl_weekly_label,
+                          ent ? "Period" : "Elapsed");
+        lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", time_pct);
+        lv_bar_set_value(bar_weekly, time_pct, LV_ANIM_ON);
+        lv_color_t bar_pace = (single && limited) ? COL_RED :
+                              (top_pct <= (float)time_pct) ? COL_GREEN :
+                              (top_pct <= (float)time_pct + 15.0f) ? COL_AMBER :
                               COL_RED;
         lv_obj_set_style_bg_color(bar_weekly, bar_pace, LV_PART_INDICATOR);
-        snprintf(buf, sizeof(buf), "#%s %s# - #faf9f5 Resets %s#",
-                 pace_hex, pace_text, data->reset_date);
+        if (ent) {
+            snprintf(buf, sizeof(buf), "#%s %s# - #faf9f5 Resets %s#",
+                     pace_hex, pace_text, data->reset_date);
+        } else if (top_mins < 0) {
+            snprintf(buf, sizeof(buf), "---");           // host sent no reset time
+        } else {
+            char left[20];
+            format_time_left(top_mins, left, sizeof(left));
+            // Out of quota: pace is moot, when it comes back is the news.
+            if (limited) snprintf(buf, sizeof(buf), "#c0392b Limited# - #faf9f5 %s#", left);
+            else         snprintf(buf, sizeof(buf), "#%s %s# - #faf9f5 %s#",
+                                  pace_hex, pace_text, left);
+        }
         lv_label_set_text(lbl_weekly_reset, buf);
     } else {
         int w_pct = (int)(data->weekly_pct + 0.5f);
+        lv_label_set_text(lbl_weekly_label, "Weekly");
         lv_label_set_text_fmt(lbl_weekly_pct, "%d%%", w_pct);
         lv_bar_set_value(bar_weekly, w_pct, LV_ANIM_ON);
         lv_obj_set_style_bg_color(bar_weekly, pct_color(data->weekly_pct), LV_PART_INDICATOR);
@@ -667,7 +729,9 @@ void ui_update(const UsageData* data) {
 static void update_view_state(void) {
     if (!usage_group || !pair_group || !idle_group) return;
     int v;
-    if (!s_ble_connected) {
+    if (demo_until_ms && (int32_t)(demo_until_ms - lv_tick_get()) > 0) {
+        v = 2;  // demo payload on screen — no host needed
+    } else if (!s_ble_connected) {
         v = 0;  // pairing hint
     } else if (data_received && (lv_tick_get() - last_data_ms) < DATA_FRESH_MS) {
         v = 2;  // live usage
@@ -739,6 +803,12 @@ void ui_tick_anim(void) {
     snprintf(buf, sizeof(buf), "%s %s\xE2\x80\xA6",
              spinner_frames[anim_spinner_idx], text);
     lv_label_set_text(lbl_anim, buf);
+}
+
+void ui_demo_hold(void) {
+    demo_until_ms = lv_tick_get() + 60000;
+    if (demo_until_ms == 0) demo_until_ms = 1;
+    update_view_state();
 }
 
 static screen_t prev_non_splash_screen = SCREEN_USAGE;
