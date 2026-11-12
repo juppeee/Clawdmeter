@@ -279,7 +279,7 @@ Optional `lim` names the limit windows the account actually has: `"sw"` (5-hour 
 { "s": 0, "sr": -1, "w": 36, "wr": 5935, "st": "allowed", "lim": "w", "ok": true }
 ```
 
-To look at a layout without a host, send `demo <name>` over USB serial (`sw`, `w`, `wover`, `wlim`, `s`, `ent`, `old`). It shows a canned payload for a minute or until the next real one arrives.
+To look at a layout without a host, send `demo <name>` over USB serial (`sw`, `w`, `wover`, `wlim`, `s`, `ent`, `old`, `oldw`). It shows a canned payload for a minute or until the next real one arrives.
 
 ## Recompiling fonts
 

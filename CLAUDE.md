@@ -119,7 +119,7 @@ Device path differs by OS: `/dev/cu.usbmodem*` on macOS, `/dev/ttyACM0` on Linux
 
 The firmware ships a `screenshot` serial command that dumps the LVGL framebuffer. `./screenshot.sh out.png [port]` captures a PNG sized to the active display (480×480 or 368×448). **Use this on every UI iteration** — Read the PNG with the Read tool, verify the change visually, iterate. Script auto-picks the macOS/Linux default port and falls back to pio's bundled Python if pyserial isn't on the system Python.
 
-**Usage layouts without a host:** the `demo <name>` serial command (`sw`, `w`, `wover`, `wlim`, `s`, `ent`, `old`) runs a canned payload through the normal parse path, switches to the usage screen and holds it for a minute — send it, then `screenshot`. The three layouts are dual (5-hour + weekly), single-limit (payload field `lim` = `"w"` or `"s"`, for accounts that have only one window) and Enterprise.
+**Usage layouts without a host:** the `demo <name>` serial command (`sw`, `w`, `wover`, `wlim`, `s`, `ent`, `old`, `oldw`) runs a canned payload through the normal parse path, switches to the usage screen and holds it for a minute — send it, then `screenshot`. The three layouts are dual (5-hour + weekly), single-limit (payload field `lim` = `"w"` or `"s"`, for accounts that have only one window) and Enterprise.
 
 **Windows notes:** `screenshot.sh` needs `/tmp` and ffmpeg; on Windows, read the same serial protocol with a few lines of pyserial instead. Run `pio` for the S3 envs from PowerShell — under Git Bash the xtensa toolchain install fails with "MSys/Mingw is not supported" (the C6/RISC-V envs build from either shell).
 

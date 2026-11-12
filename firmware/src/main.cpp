@@ -155,9 +155,17 @@ static bool parse_json(const char* json, UsageData* out) {
     // for some plans (weekly only), so the host names what it actually got:
     // "sw" both, "w" weekly only, "s" 5-hour only. Absent (older daemons) or
     // unrecognised → both, which is the layout they were written against.
-    const char* lim = doc["lim"] | "sw";
-    out->has_session = strchr(lim, 's') != nullptr;
-    out->has_weekly  = strchr(lim, 'w') != nullptr;
+    if (doc["lim"].is<const char*>()) {
+        const char* lim = doc["lim"];
+        out->has_session = strchr(lim, 's') != nullptr;
+        out->has_weekly  = strchr(lim, 'w') != nullptr;
+    } else {
+        // No "lim": a host that knows a window is missing but predates the
+        // field sends its reset time as -1 (daemons with both windows always
+        // send >= 0), so a negative reset means "no such window" too.
+        out->has_session = out->session_reset_mins >= 0;
+        out->has_weekly  = out->weekly_reset_mins >= 0;
+    }
     if (!out->has_session && !out->has_weekly) {
         out->has_session = out->has_weekly = true;
     }
@@ -226,6 +234,8 @@ static void run_demo(const char* name) {
         {"ent",  "{\"s\":31,\"sr\":20000,\"w\":0,\"wr\":0,\"st\":\"allowed\",\"acct\":\"ent\",\"tp\":54,\"pd\":30,\"rd\":\"Dec 1\",\"ok\":true}"},
         // What a daemon from before "lim" sends
         {"old",  "{\"s\":42,\"sr\":187,\"w\":18,\"wr\":6200,\"st\":\"allowed\",\"ok\":true}"},
+        // Weekly-only from a host that predates "lim": only sr = -1 gives it away
+        {"oldw", "{\"s\":0,\"sr\":-1,\"w\":11,\"wr\":4300,\"st\":\"allowed\",\"acct\":\"pro\",\"ok\":true,\"sx\":\"Allowed\",\"sxd\":\"Weekly limit applies\"}"},
     };
     for (const auto& d : demos) {
         if (strcmp(name, d.name) == 0) {
@@ -236,7 +246,7 @@ static void run_demo(const char* name) {
             return;
         }
     }
-    Serial.println("DEMO_UNKNOWN (sw, w, wover, wlim, s, ent, old)");
+    Serial.println("DEMO_UNKNOWN (sw, w, wover, wlim, s, ent, old, oldw)");
 }
 
 // ---- Serial command buffer ----
