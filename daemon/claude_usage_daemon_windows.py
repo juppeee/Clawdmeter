@@ -222,7 +222,9 @@ async def poll_api(token: str) -> dict | None:
         except ValueError:
             return 0
 
-    if resp.headers.get("anthropic-ratelimit-unified-5h-utilization"):
+    has_5h = bool(resp.headers.get("anthropic-ratelimit-unified-5h-utilization"))
+    has_7d = bool(resp.headers.get("anthropic-ratelimit-unified-7d-utilization"))
+    if has_5h:
         payload = {
             "s": pct(hdr("anthropic-ratelimit-unified-5h-utilization")),
             "sr": reset_minutes(hdr("anthropic-ratelimit-unified-5h-reset")),
@@ -230,6 +232,26 @@ async def poll_api(token: str) -> dict | None:
             "wr": reset_minutes(hdr("anthropic-ratelimit-unified-7d-reset")),
             "st": hdr("anthropic-ratelimit-unified-5h-status", "unknown"),
             "acct": "pro",
+            "ok": True,
+        }
+        # "lim" names the windows this account has. Only sent when one is
+        # missing, so the usual 5h+7d payload stays byte-identical.
+        if not has_7d:
+            payload["lim"] = "s"
+            payload["wr"] = -1
+    elif has_7d:
+        # Weekly-only plan: Anthropic dropped the 5-hour window for some
+        # accounts, so there are no 5h-* headers at all. Without this branch
+        # the payload below would mislabel the account as Enterprise.
+        payload = {
+            "s": 0,
+            "sr": -1,
+            "w": pct(hdr("anthropic-ratelimit-unified-7d-utilization")),
+            "wr": reset_minutes(hdr("anthropic-ratelimit-unified-7d-reset")),
+            "st": hdr("anthropic-ratelimit-unified-status",
+                      hdr("anthropic-ratelimit-unified-7d-status", "unknown")),
+            "acct": "pro",
+            "lim": "w",
             "ok": True,
         }
     else:
