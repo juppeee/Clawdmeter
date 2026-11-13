@@ -313,8 +313,9 @@ build_payload_for_token() {
         -d '{"model":"claude-haiku-4-5-20251001","max_tokens":1,"messages":[{"role":"user","content":"hi"}]}' \
         2>/dev/null) || return 1
 
-    local s5h_util overage_util overage_reset status
+    local s5h_util s7d_util overage_util overage_reset status
     s5h_util=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-5h-utilization" | tr -d '\r' | awk '{print $2}')
+    s7d_util=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-7d-utilization" | tr -d '\r' | awk '{print $2}')
     overage_util=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-overage-utilization" | tr -d '\r' | awk '{print $2}')
     overage_reset=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-overage-reset" | tr -d '\r' | awk '{print $2}')
     status=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-status" | tr -d '\r' | awk '{print $2}')
@@ -328,22 +329,39 @@ build_payload_for_token() {
 
     local payload
     if [ -n "$s5h_util" ]; then
-        # Pro/Max account — 5h/7d windows
-        local s7d_util s5h_reset s7d_reset s5h_status
+        # Pro/Max account — 5h/7d windows. "lim" names the windows the account
+        # has; only sent when one is missing ("s" = no weekly window), so the
+        # usual payload stays byte-identical.
+        local s5h_reset s7d_reset s5h_status has_7d=1
+        [ -z "$s7d_util" ] && has_7d=0
         s5h_reset=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-5h-reset" | tr -d '\r' | awk '{print $2}')
-        s7d_util=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-7d-utilization" | tr -d '\r' | awk '{print $2}')
         s7d_reset=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-7d-reset" | tr -d '\r' | awk '{print $2}')
         s5h_status=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-5h-status" | tr -d '\r' | awk '{print $2}')
         s5h_util=${s5h_util:-0}; s5h_reset=${s5h_reset:-0}
         s7d_util=${s7d_util:-0}; s7d_reset=${s7d_reset:-0}
         s5h_status=${s5h_status:-unknown}
-        payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$s5h_status" -v now="$now" -v clk="$clock_fragment" -v chm="$chime_fragment" \
+        payload=$(awk -v u5="$s5h_util" -v r5="$s5h_reset" -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$s5h_status" -v now="$now" -v clk="$clock_fragment" -v chm="$chime_fragment" -v has7="$has_7d" \
             'BEGIN {
                 sp = sprintf("%.0f", u5 * 100);
                 sr = (r5 - now) / 60; sr = sr > 0 ? sprintf("%.0f", sr) : 0;
                 wp = sprintf("%.0f", u7 * 100);
                 wr = (r7 - now) / 60; wr = wr > 0 ? sprintf("%.0f", wr) : 0;
-                printf "{\"s\":%s,\"sr\":%s,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"acct\":\"pro\"%s%s,\"ok\":true}", sp, sr, wp, wr, st, clk, chm;
+                lim = "";
+                if (!has7) { wr = -1; lim = ",\"lim\":\"s\""; }
+                printf "{\"s\":%s,\"sr\":%s,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"acct\":\"pro\"%s%s%s,\"ok\":true}", sp, sr, wp, wr, st, lim, clk, chm;
+            }')
+    elif [ -n "$s7d_util" ]; then
+        # Weekly-only plan: Anthropic dropped the 5-hour window for some
+        # accounts, so there are no 5h-* headers at all. Without this branch
+        # the account would fall through and be mislabelled as Enterprise.
+        local s7d_reset
+        s7d_reset=$(echo "$headers" | grep -i "anthropic-ratelimit-unified-7d-reset" | tr -d '\r' | awk '{print $2}')
+        s7d_reset=${s7d_reset:-0}
+        payload=$(awk -v u7="$s7d_util" -v r7="$s7d_reset" -v st="$status" -v now="$now" -v clk="$clock_fragment" -v chm="$chime_fragment" \
+            'BEGIN {
+                wp = sprintf("%.0f", u7 * 100);
+                wr = (r7 - now) / 60; wr = wr > 0 ? sprintf("%.0f", wr) : 0;
+                printf "{\"s\":0,\"sr\":-1,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"acct\":\"week\",\"lim\":\"w\"%s%s,\"ok\":true}", wp, wr, st, clk, chm;
             }')
     else
         # Enterprise account — spending-limit model
@@ -382,9 +400,13 @@ PYEOF
     return 0
 }
 
-# Extract the integer session % ("s") from a built payload, or 0.
+# Extract the integer % that shows activity on a plan from a built payload, or
+# 0: the session % ("s"), or the weekly % ("w") on weekly-only plans, where "s"
+# is a constant 0.
 _payload_session_pct() {
-    echo "$1" | grep -o '"s":[0-9]*' | head -1 | cut -d: -f2
+    local key=s
+    case "$1" in *'"lim":"w"'*) key=w ;; esac
+    echo "$1" | grep -o "\"$key\":[0-9]*" | head -1 | cut -d: -f2
 }
 
 # Poll every configured config dir, decide which plan is "active", and send

@@ -6,7 +6,11 @@ struct UsageData {
     int session_reset_mins;  // minutes until reset
     float weekly_pct;        // 7-day utilization (Pro/Max only; 0 for Enterprise)
     int weekly_reset_mins;   // minutes until weekly reset (Pro/Max only)
-    char status[16];         // "allowed", "limited", etc.
+    bool has_session;        // account has a 5-hour window ("lim" contains 's')
+    bool has_weekly;         // account has a 7-day window  ("lim" contains 'w')
+                             // Both true when the host sends no "lim" (older
+                             // daemons). Exactly one true → single-limit layout.
+    char status[16];         // "allowed", "allowed_warning", "rejected", etc.
     bool chime;              // play the session-reset chime; false unless daemon opts in
     bool enterprise;         // true = Enterprise spending-limit account
     int time_pct;            // 0-100: fraction of billing period elapsed (Enterprise)

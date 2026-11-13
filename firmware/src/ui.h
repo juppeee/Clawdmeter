@@ -16,3 +16,6 @@ void ui_toggle_splash(void);
 screen_t ui_get_current_screen(void);
 void ui_update_ble_status(ble_state_t state, const char* name, const char* mac);
 void ui_update_battery(int percent, bool charging);
+// Keep the usage panels visible for a minute regardless of BLE state, so a
+// canned payload from the `demo` serial command can be looked at with no host.
+void ui_demo_hold(void);

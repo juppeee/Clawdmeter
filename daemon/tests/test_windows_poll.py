@@ -307,6 +307,85 @@ def test_missing_status_header_defaults_to_unknown(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Test: plans that don't have both windows
+# ---------------------------------------------------------------------------
+
+def _poll_with_headers(headers):
+    mock_resp = _make_mock_response(status_code=200, headers=headers)
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_resp)
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        return _run(poll_api("fake-token"))
+
+
+def test_weekly_only_plan_is_not_enterprise():
+    """No 5h-* headers at all (5-hour window dropped): the 7d window is the
+    whole story. Must stay a pro payload flagged lim="w", not fall through to
+    the Enterprise spending layout."""
+    now = time.time()
+    payload = _poll_with_headers({
+        # Exactly what a weekly-only account returns (captured 2026-11-12).
+        "anthropic-ratelimit-unified-7d-utilization": "0.1",
+        "anthropic-ratelimit-unified-7d-reset": str(now + 4 * 86400),
+        "anthropic-ratelimit-unified-7d-status": "allowed",
+        "anthropic-ratelimit-unified-status": "allowed",
+        "anthropic-ratelimit-unified-reset": str(now + 4 * 86400),
+        "anthropic-ratelimit-unified-representative-claim": "seven_day",
+        "anthropic-ratelimit-unified-overage-status": "rejected",
+        "anthropic-ratelimit-unified-overage-disabled-reason": "out_of_credits",
+    })
+    assert payload["acct"] == "week"
+    assert payload["lim"] == "w"
+    assert payload["w"] == 10
+    assert payload["wr"] == 4 * 1440
+    assert payload["s"] == 0
+    assert payload["sr"] == -1          # "no such window", not "resets now"
+    assert payload["st"] == "allowed"
+    assert "tp" not in payload          # no Enterprise period fields
+
+
+def test_weekly_only_status_falls_back_to_7d_status():
+    now = time.time()
+    payload = _poll_with_headers({
+        "anthropic-ratelimit-unified-7d-utilization": "1.0",
+        "anthropic-ratelimit-unified-7d-reset": str(now + 3600),
+        "anthropic-ratelimit-unified-7d-status": "rejected",
+    })
+    assert payload["lim"] == "w"
+    assert payload["st"] == "rejected"
+
+
+def test_session_only_plan_flags_missing_weekly():
+    """5h window but no 7d headers: flagged lim="s" so the device doesn't
+    draw a weekly bar stuck at 0%."""
+    now = time.time()
+    payload = _poll_with_headers({
+        "anthropic-ratelimit-unified-5h-utilization": "0.42",
+        "anthropic-ratelimit-unified-5h-reset": str(now + 3600),
+        "anthropic-ratelimit-unified-5h-status": "allowed",
+    })
+    assert payload["acct"] == "pro"
+    assert payload["lim"] == "s"
+    assert payload["s"] == 42
+    assert payload["wr"] == -1
+
+
+def test_both_windows_payload_has_no_lim_field():
+    """The classic payload is unchanged — no "lim" key at all."""
+    now = time.time()
+    payload = _poll_with_headers({
+        "anthropic-ratelimit-unified-5h-utilization": "0.42",
+        "anthropic-ratelimit-unified-5h-reset": str(now + 3600),
+        "anthropic-ratelimit-unified-7d-utilization": "0.10",
+        "anthropic-ratelimit-unified-7d-reset": str(now + 86400),
+        "anthropic-ratelimit-unified-5h-status": "allowed",
+    })
+    assert "lim" not in payload
+
+
+# ---------------------------------------------------------------------------
 # Test: poll_api returns None on HTTP >= 400
 # ---------------------------------------------------------------------------
 

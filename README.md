@@ -273,6 +273,14 @@ JSON payload format (written to RX):
 
 Fields: `s` = session %, `sr` = session reset (minutes), `w` = weekly %, `wr` = weekly reset (minutes), `st` = status, `ok` = success flag.
 
+Optional `lim` names the limit windows the account actually has: `"sw"` (5-hour + weekly, the default when the field is absent), `"w"` (weekly only) or `"s"` (5-hour only). Anthropic dropped the 5-hour window for some plans; those accounts return no `5h-*` rate-limit headers at all, and the daemons send `"lim":"w"` with `"sr":-1`. `"acct":"week"` — what the upstream Clawdmeter desktop app sends for the same accounts — is read as `"lim":"w"`, and the daemons send both so either firmware understands them. With a single window the device switches to a one-limit layout: the percentage on top, and below it how far through the window you are, coloured by pace (used % against elapsed %).
+
+```json
+{ "s": 0, "sr": -1, "w": 36, "wr": 5935, "st": "allowed", "lim": "w", "ok": true }
+```
+
+To look at a layout without a host, send `demo <name>` over USB serial (`sw`, `w`, `wover`, `wlim`, `s`, `ent`, `week`, `old`, `oldw`). It shows a canned payload for a minute or until the next real one arrives.
+
 ## Recompiling fonts
 
 The `firmware/src/font_*.c` files are pre-compiled LVGL bitmap fonts.

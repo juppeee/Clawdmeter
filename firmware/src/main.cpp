@@ -44,9 +44,42 @@ static uint16_t* buf2 = nullptr;
 
 static uint32_t my_tick(void) { return millis(); }
 
+#ifndef BOARD_HAS_PSRAM
+// Screenshot on PSRAM-free boards: a whole frame doesn't fit in RAM, so the
+// `screenshot` command forces a full redraw and the flush callback streams
+// each strip to serial as LVGL renders it. A full-screen invalidation renders
+// as full-width strips, top to bottom, so the bytes arrive already in raster
+// order — same wire format as the snapshot path on PSRAM boards.
+static bool    shot_active = false;
+static bool    shot_bad    = false;   // a strip arrived that wasn't the next rows
+static int32_t shot_next_y = 0;
+#endif
+
 static void my_flush_cb(lv_display_t* disp, const lv_area_t* area, uint8_t* px_map) {
     int32_t w = area->x2 - area->x1 + 1;
     int32_t h = area->y2 - area->y1 + 1;
+#ifndef BOARD_HAS_PSRAM
+    if (shot_active && !shot_bad) {
+        // Before the panel write: the board may rotate/byte-swap in place.
+        if (area->x1 != 0 || w != board_caps().width || area->y1 != shot_next_y) {
+            shot_bad = true;
+        } else {
+            // The USB serial drops what doesn't fit its buffer in time, and one
+            // lost byte shears the rest of the image. Push in small pieces
+            // and keep at it until each is accepted.
+            const uint8_t* p = px_map;
+            size_t left = (size_t)w * h * 2;
+            uint32_t last_progress = millis();
+            while (left && !shot_bad) {
+                size_t k = Serial.write(p, left > 512 ? 512 : left);
+                if (k) { p += k; left -= k; last_progress = millis(); }
+                else if (millis() - last_progress > 2000) shot_bad = true;  // nobody reading
+                else delay(1);
+            }
+            shot_next_y += h;
+        }
+    }
+#endif
     display_hal_draw_bitmap(area->x1, area->y1, w, h, (uint16_t*)px_map);
     // Letzter Streifen eines Durchlaufs: der Splash wartet darauf, bevor er
     // nach einem Screenwechsel wieder direkt auf den Panel malt.
@@ -118,10 +151,39 @@ static bool parse_json(const char* json, UsageData* out) {
     out->session_reset_mins = doc["sr"] | -1;
     out->weekly_pct = doc["w"] | 0.0f;
     out->weekly_reset_mins = doc["wr"] | -1;
+    // Which limit windows the account has. Anthropic dropped the 5-hour window
+    // for some plans (weekly only), so the host names what it actually got:
+    // "sw" both, "w" weekly only, "s" 5-hour only. Absent (older daemons) or
+    // unrecognised → both, which is the layout they were written against.
+    if (doc["lim"].is<const char*>()) {
+        const char* lim = doc["lim"];
+        out->has_session = strchr(lim, 's') != nullptr;
+        out->has_weekly  = strchr(lim, 'w') != nullptr;
+    } else {
+        // No "lim": a host that knows a window is missing but predates the
+        // field sends its reset time as -1 (daemons with both windows always
+        // send >= 0), so a negative reset means "no such window" too.
+        out->has_session = out->session_reset_mins >= 0;
+        out->has_weekly  = out->weekly_reset_mins >= 0;
+    }
+    if (!out->has_session && !out->has_weekly) {
+        out->has_session = out->has_weekly = true;
+    }
     strlcpy(out->status, doc["st"] | "unknown", sizeof(out->status));
     out->chime = doc["c"] | false;   // absent (old daemon / chime off) → stay silent
     const char* acct = doc["acct"] | "pro";
     out->enterprise = (strcmp(acct, "ent") == 0);
+    // acct "week" is the upstream Clawdmeter app's way of saying "no 5-hour
+    // limit" (same meaning as lim "w"). It sends the week in w/wr; an early
+    // version put it in s/sr only, so take it from there if w/wr is empty.
+    if (strcmp(acct, "week") == 0) {
+        if (out->weekly_reset_mins < 0 && out->session_reset_mins >= 0) {
+            out->weekly_pct = out->session_pct;
+            out->weekly_reset_mins = out->session_reset_mins;
+        }
+        out->has_session = false;
+        out->has_weekly  = true;
+    }
     out->time_pct = doc["tp"] | 0;
     out->period_days = doc["pd"] | 30;
     strlcpy(out->reset_date, doc["rd"] | "", sizeof(out->reset_date));
@@ -133,6 +195,74 @@ static bool parse_json(const char* json, UsageData* out) {
     return true;
 }
 
+// Take one usage payload (from BLE, or a canned one from the `demo` serial
+// command) through the whole pipeline: parse, usage-rate tracking, chime,
+// host-driven animation, UI. Returns false if the JSON didn't parse.
+static bool handle_payload(const char* json) {
+    if (!parse_json(json, &usage)) return false;
+
+    // Track the window that actually limits this account: the 5-hour
+    // one when it exists (and for Enterprise, whose spending % rides
+    // in session_pct), otherwise the weekly one.
+    const bool weekly_only = !usage.enterprise && !usage.has_session;
+    const float rate_pct   = weekly_only ? usage.weekly_pct : usage.session_pct;
+    int g_before = usage_rate_group();
+    bool limit_reset = usage_rate_sample(
+        rate_pct, weekly_only ? USAGE_WINDOW_WEEKLY_MIN : USAGE_WINDOW_SESSION_MIN);
+    int g_after = usage_rate_group();
+    // Limit refilled → chime so the user knows they can use Claude
+    // again (no-op on boards without a buzzer). Gated on the daemon's
+    // opt-in `chime` config; the `buzz` serial cmd ignores it.
+    if (limit_reset && usage.chime) {
+        Serial.println("limit reset detected — chime");
+        sound_hal_play_reset();
+    }
+    // Host-driven animation. Sent only when the host is configured to
+    // mirror its desktop buddy; absent → "" → device keeps deciding.
+    splash_set_anim(usage.anim);
+    if (g_after != g_before) {
+        Serial.printf("usage rate: group %d -> %d (%s=%.2f%%)\n",
+            g_before, g_after, weekly_only ? "w" : "s", rate_pct);
+        if (splash_is_active()) splash_pick_for_current_rate();
+    }
+    ui_update(&usage);
+    return true;
+}
+
+// `demo <name>` — feed a canned payload so every usage layout can be looked at
+// (and screenshotted) without a host. The next real BLE payload replaces it.
+static void run_demo(const char* name) {
+    static const struct { const char* name; const char* json; } demos[] = {
+        // 5-hour + weekly (classic Pro/Max)
+        {"sw",   "{\"s\":42,\"sr\":187,\"w\":18,\"wr\":6200,\"st\":\"allowed\",\"lim\":\"sw\",\"ok\":true}"},
+        // weekly only (plans without the 5-hour window)
+        {"w",    "{\"s\":0,\"sr\":-1,\"w\":36,\"wr\":5935,\"st\":\"allowed\",\"lim\":\"w\",\"ok\":true}"},
+        {"wover","{\"s\":0,\"sr\":-1,\"w\":83,\"wr\":5935,\"st\":\"allowed_warning\",\"lim\":\"w\",\"ok\":true}"},
+        {"wlim", "{\"s\":0,\"sr\":-1,\"w\":100,\"wr\":1439,\"st\":\"rejected\",\"lim\":\"w\",\"ok\":true}"},
+        // weekly only, as the upstream Clawdmeter app says it (acct "week")
+        {"week", "{\"s\":27,\"sr\":3100,\"w\":27,\"wr\":3100,\"st\":\"allowed\",\"acct\":\"week\",\"ok\":true}"},
+        {"weeks","{\"s\":58,\"sr\":2000,\"st\":\"allowed\",\"acct\":\"week\",\"ok\":true}"},
+        // 5-hour only
+        {"s",    "{\"s\":64,\"sr\":95,\"w\":0,\"wr\":-1,\"st\":\"allowed\",\"lim\":\"s\",\"ok\":true}"},
+        // Enterprise spending limit
+        {"ent",  "{\"s\":31,\"sr\":20000,\"w\":0,\"wr\":0,\"st\":\"allowed\",\"acct\":\"ent\",\"tp\":54,\"pd\":30,\"rd\":\"Dec 1\",\"ok\":true}"},
+        // What a daemon from before "lim" sends
+        {"old",  "{\"s\":42,\"sr\":187,\"w\":18,\"wr\":6200,\"st\":\"allowed\",\"ok\":true}"},
+        // Weekly-only from a host that predates "lim": only sr = -1 gives it away
+        {"oldw", "{\"s\":0,\"sr\":-1,\"w\":11,\"wr\":4300,\"st\":\"allowed\",\"acct\":\"pro\",\"ok\":true,\"sx\":\"Allowed\",\"sxd\":\"Weekly limit applies\"}"},
+    };
+    for (const auto& d : demos) {
+        if (strcmp(name, d.name) == 0) {
+            handle_payload(d.json);
+            ui_show_screen(SCREEN_USAGE);
+            ui_demo_hold();
+            Serial.printf("DEMO %s\n", d.name);
+            return;
+        }
+    }
+    Serial.println("DEMO_UNKNOWN (sw, w, wover, wlim, s, ent, old, oldw)");
+}
+
 // ---- Serial command buffer ----
 #define CMD_BUF_SIZE 64
 static char cmd_buf[CMD_BUF_SIZE];
@@ -141,8 +271,26 @@ static int cmd_pos = 0;
 static void send_screenshot() {
 #ifndef BOARD_HAS_PSRAM
     // A full RGB565 framebuffer doesn't fit in internal SRAM on PSRAM-free
-    // boards (e.g. 480×480×2 = 460 KB). Capture is unsupported there.
-    Serial.println("SCREENSHOT_UNSUPPORTED");
+    // boards (e.g. 480×480×2 = 460 KB), so stream it strip by strip out of
+    // the flush callback instead (see shot_active above). Captures what LVGL
+    // draws; the splash paints the panel directly and is not included.
+    const uint32_t w = board_caps().width;
+    const uint32_t h = board_caps().height;
+    Serial.printf("SCREENSHOT_START %lu %lu %lu\n",
+        (unsigned long)w, (unsigned long)h, (unsigned long)(w * h * 2));
+    Serial.flush();
+    shot_next_y = 0;
+    shot_bad    = false;
+    shot_active = true;
+    lv_obj_invalidate(lv_screen_active());
+    lv_refr_now(NULL);
+    shot_active = false;
+    Serial.flush();
+    Serial.println();
+    // A short or out-of-order capture leaves the host waiting for bytes; it
+    // times out, and this line tells whoever reads the log why.
+    Serial.println((shot_bad || shot_next_y != (int32_t)h) ? "SCREENSHOT_ERR"
+                                                           : "SCREENSHOT_END");
     return;
 #else
     const uint32_t w = board_caps().width;
@@ -188,6 +336,7 @@ static void check_serial_cmd() {
             // device that is being flashed over that same cable.
             else if (strcmp(cmd_buf, "charge") == 0)   charge_anim_play(true);
             else if (strcmp(cmd_buf, "uncharge") == 0) charge_anim_play(false);
+            else if (strncmp(cmd_buf, "demo ", 5) == 0) run_demo(cmd_buf + 5);
             cmd_pos = 0;
         } else if (cmd_pos < CMD_BUF_SIZE - 1) {
             cmd_buf[cmd_pos++] = c;
@@ -440,30 +589,8 @@ void loop() {
     check_serial_cmd();
 
     if (ble_has_data()) {
-        if (parse_json(ble_get_data(), &usage)) {
-            int g_before = usage_rate_group();
-            bool session_reset = usage_rate_sample(usage.session_pct);
-            int g_after = usage_rate_group();
-            // 5-hour session limit refilled → chime so the user knows they can
-            // use Claude again (no-op on boards without a buzzer). Gated on the
-            // daemon's opt-in `chime` config; the `buzz` serial cmd ignores it.
-            if (session_reset && usage.chime) {
-                Serial.println("session reset detected — chime");
-                sound_hal_play_reset();
-            }
-            // Host-driven animation. Sent only when the host is configured to
-            // mirror its desktop buddy; absent → "" → device keeps deciding.
-            splash_set_anim(usage.anim);
-            if (g_after != g_before) {
-                Serial.printf("usage rate: group %d -> %d (s=%.2f%%)\n",
-                    g_before, g_after, usage.session_pct);
-                if (splash_is_active()) splash_pick_for_current_rate();
-            }
-            ui_update(&usage);
-            ble_send_ack();
-        } else {
-            ble_send_nack();
-        }
+        if (handle_payload(ble_get_data())) ble_send_ack();
+        else                                ble_send_nack();
     }
 
     delay(5);
