@@ -361,7 +361,7 @@ build_payload_for_token() {
             'BEGIN {
                 wp = sprintf("%.0f", u7 * 100);
                 wr = (r7 - now) / 60; wr = wr > 0 ? sprintf("%.0f", wr) : 0;
-                printf "{\"s\":0,\"sr\":-1,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"acct\":\"pro\",\"lim\":\"w\"%s%s,\"ok\":true}", wp, wr, st, clk, chm;
+                printf "{\"s\":0,\"sr\":-1,\"w\":%s,\"wr\":%s,\"st\":\"%s\",\"acct\":\"week\",\"lim\":\"w\"%s%s,\"ok\":true}", wp, wr, st, clk, chm;
             }')
     else
         # Enterprise account — spending-limit model

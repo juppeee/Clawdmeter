@@ -336,7 +336,7 @@ def test_weekly_only_plan_is_not_enterprise():
         "anthropic-ratelimit-unified-overage-status": "rejected",
         "anthropic-ratelimit-unified-overage-disabled-reason": "out_of_credits",
     })
-    assert payload["acct"] == "pro"
+    assert payload["acct"] == "week"
     assert payload["lim"] == "w"
     assert payload["w"] == 10
     assert payload["wr"] == 4 * 1440

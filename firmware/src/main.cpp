@@ -173,6 +173,17 @@ static bool parse_json(const char* json, UsageData* out) {
     out->chime = doc["c"] | false;   // absent (old daemon / chime off) → stay silent
     const char* acct = doc["acct"] | "pro";
     out->enterprise = (strcmp(acct, "ent") == 0);
+    // acct "week" is the upstream Clawdmeter app's way of saying "no 5-hour
+    // limit" (same meaning as lim "w"). It sends the week in w/wr; an early
+    // version put it in s/sr only, so take it from there if w/wr is empty.
+    if (strcmp(acct, "week") == 0) {
+        if (out->weekly_reset_mins < 0 && out->session_reset_mins >= 0) {
+            out->weekly_pct = out->session_pct;
+            out->weekly_reset_mins = out->session_reset_mins;
+        }
+        out->has_session = false;
+        out->has_weekly  = true;
+    }
     out->time_pct = doc["tp"] | 0;
     out->period_days = doc["pd"] | 30;
     strlcpy(out->reset_date, doc["rd"] | "", sizeof(out->reset_date));
@@ -228,6 +239,9 @@ static void run_demo(const char* name) {
         {"w",    "{\"s\":0,\"sr\":-1,\"w\":36,\"wr\":5935,\"st\":\"allowed\",\"lim\":\"w\",\"ok\":true}"},
         {"wover","{\"s\":0,\"sr\":-1,\"w\":83,\"wr\":5935,\"st\":\"allowed_warning\",\"lim\":\"w\",\"ok\":true}"},
         {"wlim", "{\"s\":0,\"sr\":-1,\"w\":100,\"wr\":1439,\"st\":\"rejected\",\"lim\":\"w\",\"ok\":true}"},
+        // weekly only, as the upstream Clawdmeter app says it (acct "week")
+        {"week", "{\"s\":27,\"sr\":3100,\"w\":27,\"wr\":3100,\"st\":\"allowed\",\"acct\":\"week\",\"ok\":true}"},
+        {"weeks","{\"s\":58,\"sr\":2000,\"st\":\"allowed\",\"acct\":\"week\",\"ok\":true}"},
         // 5-hour only
         {"s",    "{\"s\":64,\"sr\":95,\"w\":0,\"wr\":-1,\"st\":\"allowed\",\"lim\":\"s\",\"ok\":true}"},
         // Enterprise spending limit

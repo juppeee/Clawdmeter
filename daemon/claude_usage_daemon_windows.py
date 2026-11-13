@@ -250,7 +250,9 @@ async def poll_api(token: str) -> dict | None:
             "wr": reset_minutes(hdr("anthropic-ratelimit-unified-7d-reset")),
             "st": hdr("anthropic-ratelimit-unified-status",
                       hdr("anthropic-ratelimit-unified-7d-status", "unknown")),
-            "acct": "pro",
+            # "week" is what upstream Clawdmeter firmware looks for; "lim"
+            # is what this fork's firmware looks for. Same meaning.
+            "acct": "week",
             "lim": "w",
             "ok": True,
         }
