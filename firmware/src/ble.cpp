@@ -3,6 +3,7 @@
 #include <NimBLEDevice.h>
 #include <NimBLEHIDDevice.h>
 #include <Preferences.h>
+#include "nimble/nimble/host/services/gatt/include/services/gatt/ble_svc_gatt.h"
 
 #define DEVICE_NAME "Clawdmeter"
 
@@ -71,6 +72,20 @@ static const uint16_t CONN_HANDLE_NONE  = 0xFFFF;
 static const uint16_t DESIRED_TIMEOUT   = 600;   // ×10ms = 6s, matches PPCP
 static volatile uint16_t param_fix_handle = CONN_HANDLE_NONE;  // pending retry
 static volatile uint32_t param_fix_at_ms  = 0;                 // when to send it
+
+// One Service Changed indication per boot, to the first bonded host that
+// reconnects. Hosts keep a copy of a bonded device's GATT table and nothing
+// tells them to re-read it. Windows in particular can be left with a
+// truncated copy when the device restarts while it is mid-discovery (a
+// firmware flash is enough): it then reports the standard services but not
+// our data service, for every program, cached or not, until something forces
+// a re-read. Seen on hardware as the host app looping on "no Clawdmeter
+// service" while the link itself was up and encrypted. The indication makes
+// the host discover from scratch, and also covers a flash that really did
+// change the table.
+static volatile bool     svc_changed_pending = false;
+static volatile bool     svc_changed_sent    = false;
+static volatile uint32_t svc_changed_at_ms   = 0;
 static volatile uint16_t param_fix_spent  = CONN_HANDLE_NONE;  // one per connection
 static char rx_buf[BLE_BUF_SIZE];
 static volatile bool data_ready = false;
@@ -254,6 +269,13 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             Serial.printf("BLE: rejecting non-owner %s (owner=%s)\n", id.c_str(), owner_addr);
             NimBLEDevice::deleteBond(info.getIdAddress());
             server->disconnect(info);
+            return;
+        }
+        // Wait a moment so the bond's subscriptions are restored first; the
+        // indication only reaches hosts that are subscribed to it.
+        if (!svc_changed_sent && info.isBonded() && info.isEncrypted()) {
+            svc_changed_at_ms   = millis() + 1500;
+            svc_changed_pending = true;
         }
     }
 
@@ -369,6 +391,14 @@ void ble_tick(void) {
     if (need_advertise) {
         need_advertise = false;
         start_advertising();
+    }
+    if (svc_changed_pending && (int32_t)(millis() - svc_changed_at_ms) >= 0) {
+        svc_changed_pending = false;
+        if (server && server->getConnectedCount() > 0) {
+            svc_changed_sent = true;
+            ble_svc_gatt_changed(0x0001, 0xffff);
+            Serial.println("BLE: sent Service Changed (host re-reads the GATT table)");
+        }
     }
     // Deferred one-shot supervision-timeout pushback (see onConnParamsUpdate).
     if (param_fix_handle != CONN_HANDLE_NONE &&
