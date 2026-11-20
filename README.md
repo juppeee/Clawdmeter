@@ -5,20 +5,30 @@
 > **[Hermann Björgvin's](https://github.com/HermannBjorgvin/Clawdmeter)**
 > project. Everything below this box is his README, unchanged.
 >
-> This branch (`csb-buddy`) adds what the
+> This branch (`csb-buddy-eigen`) adds what the
 > **[Claude Session Browser](https://github.com/juppeee/claude-session-browser)**
 > needs on Windows, so the device shows *what Claude Code is doing* rather than
 > only how fast the quota is burning:
 >
 > - **A field in the BLE payload** (`a`) so a host can name the animation to
 >   play. Without a host naming one, nothing changes.
-> - **Five more animations** — done, think, write, allow, limit — for states the
->   stock set doesn't cover. Reworked and partly redrawn from
->   [claudepix](https://claudepix.vercel.app).
+> - **The Session Browser's whole animation set** — 22 animations, held in step
+>   with the desktop buddy by `tools/add_csb_anims.py`, which regenerates the
+>   table from the same sprite file the Session Browser draws from. Same name,
+>   same frames, same frame rate on both screens. Seven of them show states the
+>   stock set has no picture for: `compact`, `error`, `subagent`, and one per
+>   tool phase (`tool read`, `tool search`, `tool bash`, `tool web`). Those
+>   seven are deliberately left out of the usage rotation — with no host there
+>   is no subagent, no compaction and no error to show, so they appear only
+>   when the Session Browser names one. The art is
+>   [claudepix](https://claudepix.vercel.app) work, reworked and partly
+>   redrawn for this set.
 > - **A fixed 90° rotation** on the C6-2.16, because I mount mine with the
->   buttons on top. Upstream has rotation disabled on this board; enabling it
->   revealed that bitmaps larger than the strip buffer were drawn unrotated, so
->   that path is rewritten to work in slices.
+>   buttons on top. Upstream had rotation disabled on this board at the time;
+>   enabling it revealed that bitmaps larger than the strip buffer were drawn
+>   unrotated, so that path is rewritten to work in slices. Upstream has since
+>   added rotation on this board through the panel's MADCTL and the IMU — this
+>   branch keeps its own fixed orientation.
 > - **A full splash rebuild after a screen switch**, needed because this build
 >   flips to the usage screen on its own every few minutes. LVGL repaints in
 >   strips, and the deferred rebuild left half a buddy behind.
@@ -26,6 +36,16 @@
 > None of that is a fix to Hermann's project — every one of these exists
 > because of a choice made here. That's why this is a fork and not a pull
 > request.
+>
+> **Where this stands against upstream.** Hermann has since built his own
+> hook-driven Clawd, with a director that picks the animation on the device:
+> there, `a` is an activity level 0–3, alongside `e`/`es` (the latest hook
+> event) and `n` (active sessions). His way is the more capable one, and it
+> comes with a desktop app of its own. This branch keeps naming the animation
+> instead, because the Session Browser has already worked out which one to
+> show and draws the same creature on the desktop at the same moment. That is
+> a different aim, not a backlog — the two protocols can't both own `a`, so
+> this fork stays where it is and does not track his line.
 >
 > **You only need this build if you want the device to react to Clawd.** For
 > the usage meter and battery, Hermann's firmware works with the Session
