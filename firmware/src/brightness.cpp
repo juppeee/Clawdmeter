@@ -22,16 +22,28 @@ void brightness_init(void) {
     Serial.printf("Brightness init: level=%u (idx=%u)\n", LEVELS[cur_idx], cur_idx);
 }
 
-void brightness_cycle(void) {
-    cur_idx = (cur_idx + 1) % LEVELS_COUNT;
-
+static void save_and_apply(void) {
     Preferences prefs;
     prefs.begin("clawdmeter", false);
     prefs.putUChar("brt_idx", cur_idx);
     prefs.end();
 
     idle_set_awake_brightness(LEVELS[cur_idx]);
-    Serial.printf("Brightness cycled: level=%u (idx=%u)\n", LEVELS[cur_idx], cur_idx);
+    Serial.printf("Brightness: level=%u (idx=%u)\n", LEVELS[cur_idx], cur_idx);
+}
+
+void brightness_cycle(void) {
+    cur_idx = (cur_idx + 1) % LEVELS_COUNT;
+    save_and_apply();
+}
+
+void brightness_step(int dir) {
+    // Clamped rather than wrapping: turning a knob past the brightest level
+    // shouldn't drop it to the dimmest.
+    if (dir > 0 && cur_idx + 1 < LEVELS_COUNT) cur_idx++;
+    else if (dir < 0 && cur_idx > 0)           cur_idx--;
+    else return;
+    save_and_apply();
 }
 
 uint8_t brightness_get(void) {

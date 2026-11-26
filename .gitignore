@@ -18,3 +18,19 @@ daemon/.venv/
 # Python bytecode cache
 __pycache__/
 *.pyc
+
+# Windows daemon venv (install-windows.ps1 creates it at the repo root)
+.venv/
+
+# Local flash backups and dumps
+Original/
+
+# Blog and social-media drafts. Not part of the project, and they carry
+# placeholder affiliate links that have no business in a public repository.
+socialmedia/
+
+# Packaged releases (daemon installer, prebuilt firmware + bundled esptool).
+# Build artifacts, and the firmware bundle is ~16 MB — keeping revisions of it
+# in history would cost every clone, forever. Attach them to a GitHub Release
+# instead. Rebuild: see the ZIP contents listed in each package's README.
+dist/

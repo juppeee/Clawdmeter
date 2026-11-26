@@ -4,7 +4,15 @@
 #include <NimBLEHIDDevice.h>
 #include <Preferences.h>
 
+// Advertised name. Every board used to announce itself as plain "Clawdmeter",
+// so a daemon bonded to one would find another and connect to it — seen on
+// hardware, where the daemon repeatedly grabbed a second board and dropped it
+// again. The last two bytes of the BLE MAC are appended at init to tell them
+// apart: "Clawdmeter 35F9". Keep the suffix short — the primary advertising
+// packet holds flags (3) + appearance (4) + HID UUID (4) + name (2 + length),
+// and 31 bytes is the ceiling; this lands at 28.
 #define DEVICE_NAME "Clawdmeter"
+#define DEVICE_NAME_MAX 24
 
 // Custom GATT UUIDs for data channel
 #define SERVICE_UUID        "4c41555a-4465-7669-6365-000000000001"
@@ -63,6 +71,10 @@ static NimBLECharacteristic* rx_char = nullptr;
 static NimBLECharacteristic* req_char = nullptr;
 
 static ble_state_t state = BLE_STATE_INIT;
+static uint32_t    auth_fail_ms = 0;   // millis() of the last un-bonded handshake, 0 = none
+
+// How often ble_tick() checks that the controller is really advertising.
+#define ADV_CHECK_MS 2000
 static bool need_advertise = false;
 
 // One-shot supervision-timeout pushback (see onConnParamsUpdate). Written by
@@ -76,6 +88,7 @@ static char rx_buf[BLE_BUF_SIZE];
 static volatile bool data_ready = false;
 static volatile bool has_received_data = false;
 static char mac_str[18];
+static char dev_name[DEVICE_NAME_MAX] = DEVICE_NAME;   // MAC suffix added in ble_init
 
 // --- Single-owner lock -----------------------------------------------------
 //
@@ -146,24 +159,33 @@ static void claim_owner(const std::string& id) {
     prune_foreign_bonds();
 }
 
-static void start_advertising() {
+// Build the advertising payload. Split out so a restart only has to call
+// start() — the payload never changes, and rebuilding it on every restart put
+// a reset() in a path that runs every couple of seconds. (Rebuilding was NOT
+// what stopped the radio; that turned out to be the missing watchdog in
+// ble_tick. Kept split because it is the cheaper shape, not as a fix.)
+static void configure_advertising() {
     NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     adv->reset();
     // Primary advertising packet (≤31 bytes):
-    //   flags (3) + appearance (4) + HID service 0x1812 (4) + name "Clawdmeter" (12)
-    //   = 23 bytes. macOS Bluetooth Settings only surfaces BLE-only devices
+    //   flags (3) + appearance (4) + HID service 0x1812 (4) + name (2 + 15)
+    //   = 28 bytes. macOS Bluetooth Settings only surfaces BLE-only devices
     //   that explicitly advertise the standard HID service UUID (0x1812) —
     //   without it the device is recognized internally but hidden from the
     //   GUI nearby-devices list.
     adv->setAppearance(HID_KEYBOARD);
     adv->addServiceUUID(NimBLEUUID((uint16_t)0x1812));  // BLE HID Service
-    adv->setName(DEVICE_NAME);
+    adv->setName(dev_name);
     // Scan response carries the 128-bit custom data-service UUID for active
     // scanners (the host daemon scans actively).
     NimBLEAdvertisementData scanResp;
     scanResp.setCompleteServices(NimBLEUUID(SERVICE_UUID));
     adv->setScanResponseData(scanResp);
     adv->enableScanResponse(true);
+}
+
+static void start_advertising() {
+    NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
     bool ok = adv->start();
     // Only reflect ADVERTISING in the UI state when no client is connected.
     // With MAX_CONNECTIONS=2, onConnect re-advertises to fill the second slot;
@@ -239,6 +261,12 @@ class ServerCallbacks : public NimBLEServerCallbacks {
         std::string id = info.getIdAddress().toString();
         Serial.printf("BLE: auth complete peer=%s bonded=%d enc=%d\n",
             id.c_str(), info.isBonded() ? 1 : 0, info.isEncrypted() ? 1 : 0);
+        // A handshake that ends un-bonded is a host reconnecting with a key we
+        // no longer have. It will keep trying and keep failing, so remember it
+        // for the pairing hint — otherwise the board just says "To pair" while
+        // the host insists the two are paired.
+        if (info.isBonded() && info.isEncrypted()) auth_fail_ms = 0;
+        else auth_fail_ms = millis() | 1;   // never 0; 0 means "never happened"
         // Bonded reconnects START at the central's clamped parameters (no
         // later update event fires), so the supervision-timeout pushback must
         // also arm here, not just in onConnParamsUpdate.
@@ -248,6 +276,15 @@ class ServerCallbacks : public NimBLEServerCallbacks {
             param_fix_at_ms  = millis() + 2000;
         }
         if (id == ZERO_ADDR) return;
+        // Ownership follows a completed bond, never a failed handshake. A host
+        // reconnecting with a key this board no longer has ends up here with
+        // bonded=0 enc=0, and the board used to write that peer into NVS as its
+        // owner anyway — seen on hardware, where a failed handshake left
+        // owner=00:1a:7d:… behind. An un-bonded peer has no identity to
+        // resolve, so getIdAddress() reports whatever it connected with, which
+        // need not be the address the eventual real bond arrives under; the
+        // board would then reject its own owner as a stranger.
+        if (!(info.isBonded() && info.isEncrypted())) return;
         if (!owner_set) {
             claim_owner(id);
         } else if (strcmp(id.c_str(), owner_addr) != 0) {
@@ -314,6 +351,13 @@ void ble_init(void) {
         if (mac_str[i] >= 'a' && mac_str[i] <= 'f') mac_str[i] -= 32;
     }
 
+    // "AA:BB:CC:DD:EE:FF" -> "Clawdmeter EEFF". Has to happen after init(),
+    // which is what makes the address readable, so the GAP name is corrected
+    // here rather than passed in.
+    snprintf(dev_name, sizeof(dev_name), DEVICE_NAME " %c%c%c%c",
+             mac_str[12], mac_str[13], mac_str[15], mac_str[16]);
+    NimBLEDevice::setDeviceName(dev_name);
+
     server = NimBLEDevice::createServer();
     static ServerCallbacks serverCb;
     server->setCallbacks(&serverCb);
@@ -360,6 +404,7 @@ void ble_init(void) {
 
     svc->start();
     server->start();
+    configure_advertising();   // once — see the comment on that function
     start_advertising();
 
     Serial.printf("BLE: init complete, MAC=%s\n", mac_str);
@@ -369,6 +414,27 @@ void ble_tick(void) {
     if (need_advertise) {
         need_advertise = false;
         start_advertising();
+    }
+
+    // Advertising can stop without anything telling us to restart it. A central
+    // that connects and drops takes it down, and a connection that dies during
+    // establishment does the same while firing no onConnect at all — so the one
+    // need_advertise restart on disconnect can itself be swallowed by the next
+    // attempt. The board then sits invisible indefinitely: state says
+    // ADVERTISING, the controller says nothing, and no host can find it.
+    // Measured on hardware, hence a periodic check rather than trust in events.
+    static uint32_t adv_check_ms = 0;
+    if (millis() - adv_check_ms >= ADV_CHECK_MS) {
+        adv_check_ms = millis();
+        // Free slot, not zero connections: the OS holds the HID link while the
+        // daemon needs a second one, so going quiet after the first connect
+        // would leave the daemon unable to find the board at all.
+        NimBLEAdvertising* adv = NimBLEDevice::getAdvertising();
+        if (adv && !adv->isAdvertising() && server &&
+            server->getConnectedCount() < CONFIG_BT_NIMBLE_MAX_CONNECTIONS) {
+            Serial.println("BLE: advertising had stopped — restarting");
+            start_advertising();
+        }
     }
     // Deferred one-shot supervision-timeout pushback (see onConnParamsUpdate).
     if (param_fix_handle != CONN_HANDLE_NONE &&
@@ -388,7 +454,7 @@ ble_state_t ble_get_state(void) {
 }
 
 const char* ble_get_device_name(void) {
-    return DEVICE_NAME;
+    return dev_name;
 }
 
 const char* ble_get_mac_address(void) {
@@ -398,6 +464,7 @@ const char* ble_get_mac_address(void) {
 void ble_clear_bonds(void) {
     NimBLEDevice::deleteAllBonds();
     clear_owner();  // release ownership so the board can be handed to another machine
+    auth_fail_ms = 0;   // the user is acting on it; stop reporting the old failure
     Serial.println("BLE: bonds cleared");
     if (state == BLE_STATE_CONNECTED) {
         server->disconnect(server->getPeerInfo(0).getConnHandle());
@@ -407,6 +474,16 @@ void ble_clear_bonds(void) {
 
 bool ble_has_bonds(void) {
     return NimBLEDevice::getNumBonds() > 0;
+}
+
+// Long enough to outlast a host's retry gap, so the hint doesn't flicker
+// between attempts, and short enough to disappear once the host is fixed.
+#define AUTH_FAIL_HINT_MS 180000
+
+bool ble_pairing_rejected(void) {
+    if (auth_fail_ms == 0) return false;
+    if (state == BLE_STATE_CONNECTED) return false;   // whatever it was, it's moot now
+    return (millis() - auth_fail_ms) < AUTH_FAIL_HINT_MS;
 }
 
 bool ble_has_data(void) {

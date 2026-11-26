@@ -374,6 +374,76 @@ def test_poll_api_returns_none_not_autherror_on_429(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# Test: a 429 at the limit is reported, not dropped
+# ---------------------------------------------------------------------------
+# An exhausted limit rejects the daemon's own probe with 429, but the response
+# still carries the rate-limit headers. Dropping it froze the device on its last
+# value and then showed the idle screen — exactly when usage reached 100 %.
+
+def _poll_with(status_code, headers):
+    mock_resp = _make_mock_response(status_code=status_code, headers=headers)
+    mock_client = AsyncMock()
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=False)
+    mock_client.post = AsyncMock(return_value=mock_resp)
+    with patch("httpx.AsyncClient", return_value=mock_client):
+        return _run(poll_api("fake-token"))
+
+
+def test_poll_api_reports_session_limit_on_429():
+    """Session window used up: the 429 still yields a payload, at 100 %."""
+    now = time.time()
+    payload = _poll_with(429, {
+        "anthropic-ratelimit-unified-5h-utilization": "1.0",
+        "anthropic-ratelimit-unified-5h-reset": str(now + 5400),
+        "anthropic-ratelimit-unified-7d-utilization": "0.62",
+        "anthropic-ratelimit-unified-7d-reset": str(now + 86400),
+        "anthropic-ratelimit-unified-5h-status": "rejected",
+    })
+    assert payload is not None
+    assert payload["s"] == 100
+    assert payload["w"] == 62
+    assert 89 <= payload["sr"] <= 91          # reset time survives the 429
+    assert payload["st"] == "rejected"
+    assert payload["ok"] is True
+
+
+def test_poll_api_reports_weekly_limit_on_429():
+    """Weekly window used up while the session still has room."""
+    now = time.time()
+    payload = _poll_with(429, {
+        "anthropic-ratelimit-unified-5h-utilization": "0.30",
+        "anthropic-ratelimit-unified-5h-reset": str(now + 3600),
+        "anthropic-ratelimit-unified-7d-utilization": "1.0",
+        "anthropic-ratelimit-unified-7d-reset": str(now + 172800),
+    })
+    assert payload is not None
+    assert payload["s"] == 30
+    assert payload["w"] == 100
+
+
+def test_poll_api_clamps_utilization_past_limit():
+    """Utilization can edge past 1.0 at the limit; the device must see 100, not 103."""
+    now = time.time()
+    payload = _poll_with(429, {
+        "anthropic-ratelimit-unified-5h-utilization": "1.03",
+        "anthropic-ratelimit-unified-5h-reset": str(now + 600),
+        "anthropic-ratelimit-unified-7d-utilization": "1.2",
+        "anthropic-ratelimit-unified-7d-reset": str(now + 6000),
+    })
+    assert payload["s"] == 100
+    assert payload["w"] == 100
+
+
+def test_poll_api_still_drops_5xx_even_with_headers():
+    """Only a 429 is a reading; a server error with stray headers is still transient."""
+    payload = _poll_with(503, {
+        "anthropic-ratelimit-unified-5h-utilization": "0.5",
+    })
+    assert payload is None
+
+
+# ---------------------------------------------------------------------------
 # Test: poll_api returns None on httpx.HTTPError
 # ---------------------------------------------------------------------------
 

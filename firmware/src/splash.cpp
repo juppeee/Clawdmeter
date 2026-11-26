@@ -2,6 +2,7 @@
 #include "splash_animations.h"
 #include "splash_geometry.h"
 #include "charge_anim.h"
+#include "ui.h"
 #include "theme.h"
 #include "usage_rate.h"
 #include "hal/board_caps.h"
@@ -176,6 +177,10 @@ static void render_frame(const uint8_t *cells, const uint16_t *palette) {
 
 #else  // ── PSRAM: LVGL canvas render (unchanged) ──
 
+// LVGL draws the canvas itself here, so there is no direct paint to hold back.
+// main.cpp calls this on every board, so it still has to exist.
+void splash_note_refresh_done(void) {}
+
 static void render_frame(const uint8_t *cells, const uint16_t *palette) {
     if (!row_buf || !canvas_buf) return;
     for (int gy = 0; gy < GRID; gy++) {
@@ -266,6 +271,13 @@ static void show_placeholder() {
     if (label_status) lv_obj_clear_flag(label_status, LV_OBJ_FLAG_HIDDEN);
 }
 
+// Panel extent the creature is sized to. On a round panel the full square
+// crowds the rim and its corners fall outside the visible circle, so the art
+// gets 5/6 of it instead (360 -> 300 px on the Knob-1.8), centred as usual.
+static int splash_art_dim(int dim) {
+    return board_caps().is_round ? dim * 5 / 6 : dim;
+}
+
 void splash_init(lv_obj_t *parent) {
     const BoardCaps& c = board_caps();
 
@@ -284,7 +296,7 @@ void splash_init(lv_obj_t *parent) {
     // size + centering, and a scratch band buffer sized for one grid-row strip
     // across the square art (GRID*scr_cell × scr_cell). On the C6 that's
     // 480×24×2 ≈ 23 KB of internal SRAM.
-    int mind = (c.width < c.height) ? c.width : c.height;
+    int mind = splash_art_dim((c.width < c.height) ? c.width : c.height);
     scr_cell = mind / GRID;
     int side = GRID * scr_cell;
     scr_offx = (c.width  - side) / 2;
@@ -297,7 +309,8 @@ void splash_init(lv_obj_t *parent) {
     }
 #else
     // PSRAM path: render into an LVGL canvas at native size (no transform).
-    SplashGeometry geo = splash_compute_geometry(c.width, c.height, true);
+    SplashGeometry geo = splash_compute_geometry(splash_art_dim(c.width),
+                                                 splash_art_dim(c.height), true);
     cell                = geo.cell;
     canvas_w            = geo.canvas_dim;
     canvas_h            = geo.canvas_dim;
@@ -358,6 +371,10 @@ void splash_tick(void) {
     // over it. Standing still for the two seconds it runs is enough.
     if (charge_anim_is_active()) return;
 
+    // Same deal for the hold-to-pair overlay — it sits on screen only while a
+    // finger is on the button, so freezing the creature that long is fine.
+    if (ui_pair_overlay_active()) return;
+
 #if SPLASH_DIRECT_DRAW
     // Voller Neuaufbau nach dem Wiederanzeigen — erst wenn LVGL einen
     // kompletten Durchlauf abgeschlossen hat, sonst uebermalen die restlichen
@@ -410,6 +427,12 @@ static void show_anim(int idx) {
     last_pick_ms = frame_started_ms;
     const splash_anim_def_t *a = &splash_anims[cur_anim];
     render_frame(a->frames[0], a->palette);
+}
+
+void splash_prev(void) {
+    if (SPLASH_ANIM_COUNT == 0) return;
+    show_anim((cur_anim + SPLASH_ANIM_COUNT - 1) % SPLASH_ANIM_COUNT);
+    Serial.printf("splash: <- %s\n", splash_anims[cur_anim].name);
 }
 
 void splash_set_anim(const char *name) {
